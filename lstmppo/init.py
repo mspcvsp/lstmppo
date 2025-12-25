@@ -13,7 +13,7 @@ import numpy as np
 class PPOConfig:
     cuda: bool = True
     """GPU/CPU toggle"""
-    env_id: str = "PositionOnlyCartPoleEasy"
+    env_id: str = "popgym-PositionOnlyCartPoleEasy"
     """Environment identifier"""
     exp_name: str = "RLWarmup"
     """Experiment name"""
@@ -58,21 +58,21 @@ class PPOConfig:
 
 def initialize(seconds_since_epoch=None):
     
-    params = tyro.cli(PPOConfig)
+    cfg = tyro.cli(PPOConfig)
 
     if seconds_since_epoch is None:
         seconds_since_epoch = int(time.time())
 
-    params.run_name =\
-        f"{params.env_id}__{params.exp_name}__{params.seed}__" +\
+    cfg.run_name =\
+        f"{cfg.env_id}__{cfg.exp_name}__{cfg.seed}__" +\
         f"{seconds_since_epoch}"
 
-    random.seed(params.seed)
-    np.random.seed(params.seed)
-    torch.manual_seed(params.seed)
-    torch.backends.cudnn.deterministic = params.torch_deterministic
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
+    torch.backends.cudnn.deterministic = cfg.torch_deterministic
 
-    params.device = torch.device("cuda" if torch.cuda.is_available()
-                                 and params.cuda else "cpu")
+    cfg.device = torch.device("cuda" if torch.cuda.is_available()
+                               and cfg.cuda else "cpu")
 
-    return params
+    return cfg
