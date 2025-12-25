@@ -1,12 +1,10 @@
 from dataclasses import dataclass
-from typing import Optional
-import numpy
 import tyro
 import time
 import torch
-import wandb
 import random
 import numpy as np
+import gymnasium as gym
 
 
 @dataclass
@@ -56,6 +54,7 @@ class PPOConfig:
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
 
+
 def initialize(seconds_since_epoch=None):
     
     cfg = tyro.cli(PPOConfig)
@@ -74,5 +73,10 @@ def initialize(seconds_since_epoch=None):
 
     cfg.device = torch.device("cuda" if torch.cuda.is_available()
                                and cfg.cuda else "cpu")
+    
+    dummy_env = gym.make(cfg.env_id)
+    cfg.obs_shape = dummy_env.observation_space.shape
+    cfg.action_dim = dummy_env.action_space.n
+    dummy_env.close()
 
     return cfg
