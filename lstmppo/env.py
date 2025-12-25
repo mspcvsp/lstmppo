@@ -13,7 +13,7 @@ def make_vector_env(cfg):
 
     venv = SyncVectorEnv([make_env(cfg.env_id) for _ in range(cfg.num_envs)])
 
-    return obs_shape, action_dim, venv
+    return venv
 
 class RecurrentRolloutBuffer:
     def __init__(self, T, N, obs_shape, action_dim, hidden_size, device):
