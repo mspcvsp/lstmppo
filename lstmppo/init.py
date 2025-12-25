@@ -37,7 +37,7 @@ class Args:
     """the learning rate of the optimizer"""
     num_envs: int = 4
     """the number of parallel game environments"""
-    num_steps: int = 128
+    horizon: int = 128
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -82,7 +82,7 @@ class Args:
 def initialize(seconds_since_epoch=None):
     
     params = tyro.cli(Args)
-    params.batch_size = int(params.num_envs * params.num_steps)
+    params.batch_size = int(params.num_envs * params.horizon)
     params.minibatch_size = int(params.batch_size // params.num_minibatches)
     params.num_iterations = params.total_timesteps // params.batch_size
 
