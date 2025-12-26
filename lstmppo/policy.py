@@ -2,13 +2,8 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
-from dataclasses import dataclass
+from .types import VecPolicyInput, VecPolicyOutput
 
-@dataclass
-class VecPolicyInput:
-    obs: torch.Tensor          # (B, obs_dim) or (T,B,obs_dim)
-    hxs: torch.Tensor          # (B, hidden)
-    cxs: torch.Tensor          # (B, hidden)
 
 class WeightDrop(nn.Module):
     """
@@ -38,6 +33,106 @@ class WeightDrop(nn.Module):
     def forward(self, *args, **kwargs):
         self._setweights()
         return self.module(*args, **kwargs)
+    
+
+class LSTMPPOPolicy(nn.Module):
+    def __init__(
+        self,
+        obs_dim: int,
+        action_dim: int,
+        hidden_size: int = 128,
+        lstm_hidden_size: int = 128,
+        dropconnect_p: float = 0.5,
+        ar_coef: float = 2.0,
+        tar_coef: float = 1.0,
+    ):
+        super().__init__()
+
+        self.ar_coef = ar_coef
+        self.tar_coef = tar_coef
+
+        # --- SiLU encoder ---
+        self.encoder = nn.Sequential(
+            nn.Linear(obs_dim, hidden_size),
+            nn.SiLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.SiLU(),
+        )
+
+        # --- LN-LSTM with DropConnect ---
+        base_lstm = nn.LSTM(
+            input_size=hidden_size,
+            hidden_size=lstm_hidden_size,
+            num_layers=1,
+            batch_first=True,
+        )
+        self.lstm = WeightDrop(
+            base_lstm,
+            weights=["weight_hh_l0"],
+            dropout=dropconnect_p,
+        )
+        self.ln = nn.LayerNorm(lstm_hidden_size)
+
+        # --- Heads ---
+        self.actor = nn.Linear(lstm_hidden_size, action_dim)
+        self.critic = nn.Linear(lstm_hidden_size, 1)
+
+    def init_hidden(self, batch_size, device):
+        h = torch.zeros(batch_size, self.lstm.module.hidden_size, device=device)
+        c = torch.zeros(batch_size, self.lstm.module.hidden_size, device=device)
+        return h, c
+
+    # ---------------------------------------------------------
+    # Core forward pass (returns activations + AR/TAR)
+    # ---------------------------------------------------------
+    def _forward_core(self, x, hxs, cxs):
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+
+        enc = self.encoder(x)
+        out, (h_n, c_n) = self.lstm(enc, (hxs.unsqueeze(0), cxs.unsqueeze(0)))
+        out = self.ln(out)
+
+        # --- AR ---
+        ar_loss = (out.pow(2).mean()) * self.ar_coef
+
+        # --- TAR ---
+        if out.size(1) > 1:
+            tar_loss = ((out[:, 1:, :] - out[:, :-1, :]).pow(2).mean()) * self.tar_coef
+        else:
+            tar_loss = torch.tensor(0.0, device=out.device)
+
+        # Squeeze if single-step
+        if out.size(1) == 1:
+            out = out[:, 0, :]
+
+        return out, h_n.squeeze(0), c_n.squeeze(0), ar_loss, tar_loss
+
+    # ---------------------------------------------------------
+    # Dataclass-based forward
+    # ---------------------------------------------------------
+    def forward(self, inp: VecPolicyInput) -> VecPolicyOutput:
+        core_out, new_hxs, new_cxs, ar_loss, tar_loss = self._forward_core(
+            inp.obs, inp.hxs, inp.cxs
+        )
+
+        if core_out.dim() == 3:
+            B, T, H = core_out.shape
+            flat = core_out.reshape(B * T, H)
+            logits = self.actor(flat).view(B, T, -1)
+            values = self.critic(flat).view(B, T)
+        else:
+            logits = self.actor(core_out)
+            values = self.critic(core_out).squeeze(-1)
+
+        return VecPolicyOutput(
+            logits=logits,
+            values=values,
+            new_hxs=new_hxs,
+            new_cxs=new_cxs,
+            ar_loss=ar_loss,
+            tar_loss=tar_loss,
+        )
 
 
 class SiLU_LN_LSTM(nn.Module):

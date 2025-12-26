@@ -9,6 +9,7 @@ def make_env(env_id):
         return env
     return thunk
 
+
 class RecurrentVecEnvWrapper:
     """
     Wrap vectorized env and manage per-env LSTM hidden states.
