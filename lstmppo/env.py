@@ -1,18 +1,6 @@
 import gymnasium as gym
-from dataclasses import dataclass
-from typing import Any, List
 import torch
-
-
-@dataclass
-class VecEnvState:
-    obs: torch.Tensor
-    rewards: torch.Tensor
-    terminated: torch.Tensor
-    truncated: torch.Tensor
-    info: List[Any]
-    hxs: torch.Tensor
-    cxs: torch.Tensor
+from .types import VecEnvState
 
 
 def make_env(env_id):

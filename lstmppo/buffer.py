@@ -1,29 +1,5 @@
 import torch
-from dataclasses import dataclass
-
-@dataclass
-class RolloutStep:
-    obs: torch.Tensor
-    actions: torch.Tensor
-    rewards: torch.Tensor
-    values: torch.Tensor
-    logprobs: torch.Tensor
-    terminated: torch.Tensor
-    truncated: torch.Tensor
-    hxs: torch.Tensor
-    cxs: torch.Tensor
-
-
-@dataclass
-class RecurrentBatch:
-    obs: torch.Tensor
-    actions: torch.Tensor
-    values: torch.Tensor
-    logprobs: torch.Tensor
-    returns: torch.Tensor
-    advantages: torch.Tensor
-    hxs: torch.Tensor
-    cxs: torch.Tensor
+from .types import RolloutStep, RecurrentBatch
 
 
 class RecurrentRolloutBuffer:

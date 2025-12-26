@@ -1,11 +1,14 @@
 import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
-
-
-import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from dataclasses import dataclass
+
+@dataclass
+class VecPolicyInput:
+    obs: torch.Tensor          # (B, obs_dim) or (T,B,obs_dim)
+    hxs: torch.Tensor          # (B, hidden)
+    cxs: torch.Tensor          # (B, hidden)
 
 class WeightDrop(nn.Module):
     """
@@ -129,15 +132,18 @@ class SiLU_LN_LSTM(nn.Module):
 
 class LSTMPPOPolicy(nn.Module):
     
-    def __init__(self, cfg):
+    def __init__(self,
+                 cfg):
+
         super().__init__()
         self.hidden_size = cfg.hidden_size
 
-        # Replace old MLP+LSTM with your SiLU+LN-LSTM core
         self.core = SiLU_LN_LSTM(cfg)
 
         # Actor and critic heads
-        self.actor = nn.Linear(self.hidden_size, cfg.action_dim)
+        self.actor = nn.Linear(self.hidden_size,
+                               cfg.action_dim)
+
         self.critic = nn.Linear(self.hidden_size, 1)
 
         nn.init.xavier_uniform_(self.actor.weight)
@@ -146,7 +152,10 @@ class LSTMPPOPolicy(nn.Module):
         nn.init.xavier_uniform_(self.critic.weight)
         nn.init.zeros_(self.critic.bias)
 
-    def forward(self, obs, hxs, cxs):
+    def forward(self,
+                obs,
+                hxs,
+                cxs):
         """
         obs: (N,obs) or (T,B,obs)
         hxs,cxs: (N,H) or (B,H)
@@ -158,14 +167,24 @@ class LSTMPPOPolicy(nn.Module):
 
         return logits, values, new_hxs, new_cxs
 
-    def act(self, obs, hxs, cxs):
+    def act(self,
+            obs,
+            hxs,
+            cxs):
+
         logits, values, new_hxs, new_cxs = self.forward(obs, hxs, cxs)
         dist = Categorical(logits=logits)
         actions = dist.sample()
         logprobs = dist.log_prob(actions)
+
         return actions, logprobs, values, new_hxs, new_cxs
 
-    def evaluate_actions(self, obs, hxs, cxs, actions):
+    def evaluate_actions(self,
+                         obs,
+                         hxs,
+                         cxs,
+                         actions):
+
         if actions.dim() == 3:
             actions = actions.squeeze(-1)
 
@@ -174,4 +193,5 @@ class LSTMPPOPolicy(nn.Module):
 
         logprobs = dist.log_prob(actions)
         entropy = dist.entropy()
+
         return logprobs, entropy, values
