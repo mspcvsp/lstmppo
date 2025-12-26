@@ -3,6 +3,40 @@ import torch.nn as nn
 from torch.distributions.categorical import Categorical
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class WeightDrop(nn.Module):
+    """
+    Applies DropConnect to the recurrent weights of an RNN module.
+    """
+    def __init__(self, module, weights, dropout):
+        super().__init__()
+        self.module = module
+        self.weights = weights
+        self.dropout = dropout
+
+        # Save original parameters
+        for w in weights:
+            param = getattr(module, w)
+            self.register_parameter(f"{w}_raw",
+                                    nn.Parameter(param.data))
+
+            # Remove original parameter from module
+            del module._parameters[w]
+
+    def _setweights(self):
+        for w in self.weights:
+            raw = getattr(self, f"{w}_raw")
+            dropped = F.dropout(raw, p=self.dropout, training=self.training)
+            setattr(self.module, w, dropped)
+
+    def forward(self, *args, **kwargs):
+        self._setweights()
+        return self.module(*args, **kwargs)
+
+
 class SiLU_LN_LSTM(nn.Module):
 
     def __init__(self, cfg):

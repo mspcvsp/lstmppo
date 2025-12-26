@@ -1,5 +1,4 @@
 import gymnasium as gym
-from gymnasium.vector import SyncVectorEnv
 from dataclasses import dataclass
 from typing import Any, List
 import torch
@@ -21,14 +20,6 @@ def make_env(env_id):
         env = gym.make(env_id)
         return env
     return thunk
-
-
-def make_vector_env(cfg):
-
-    venv = SyncVectorEnv([make_env(cfg.env_id) for _ in range(cfg.num_envs)])
-
-    return venv
-
 
 class RecurrentVecEnvWrapper:
     """
