@@ -27,8 +27,8 @@ class RecurrentVecEnvWrapper:
     """
 
     def __init__(self,
-                 venv,
-                 cfg):
+                 cfg,
+                 venv):
 
         self.venv = venv
         self.num_envs = venv.num_envs

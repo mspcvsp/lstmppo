@@ -12,7 +12,7 @@ import popgym
 class PPOConfig:
     cuda: bool = True
     """GPU/CPU toggle"""
-    env_id: str = "popgym-PositionOnlyCartPoleEasy"
+    env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
     """Environment identifier"""
     exp_name: str = "RLWarmup"
     """Experiment name"""
