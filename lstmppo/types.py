@@ -29,15 +29,15 @@ class PPOConfig:
     """ Number of update eophics"""
     batch_envs: int = 4 
     """number of envs per recurrent minibatch"""
-    ent_coef: float = 0.01
+    entropy_coef: float = 0.01
     """Fixed coefficient of the entropy if annealing is disabled"""
     anneal_entropy_flag: bool = True
     """Toggle entropy coefficient annealing"""
-    start_ent_coef: float = 0.01
+    start_entropy_coef: float = 0.01
     """Starting value of entropy coefficient for annealing"""
-    end_ent_coef: float = 0.0
+    end_entropy_coef: float = 0.0
     """Ending value of entropy coefficient for annealing"""
-    vf_coef: float = 0.5
+    value_coef: float = 0.5
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""

@@ -205,16 +205,16 @@ class LSTMPPOPolicy(nn.Module):
         return actions, logprobs, policy_output
 
     def evaluate_actions(self,
-                         inp: VecPolicyInput,
+                         policy_input: VecPolicyInput,
                          actions):
 
         if actions.dim() == 3:
             actions = actions.squeeze(-1)
 
-        policy_output = self.forward(inp.obs, inp.hxs, inp.cxs)
+        policy_output = self.forward(policy_input)
         dist = Categorical(logits=policy_output.logits)
 
-        logprobs = dist.log_prob(actions)
+        new_logprobs = dist.log_prob(actions)
         entropy = dist.entropy()
 
-        return logprobs, entropy, policy_output.values
+        return new_logprobs, entropy, policy_output
