@@ -47,12 +47,12 @@ class RecurrentRolloutBuffer:
         # Hidden states at start of each timestep
         self.hxs = torch.zeros(self.rollout_steps,
                                self.num_envs,
-                               cfg.hidden_size,
+                               cfg.lstm_hidden_size,
                                device=cfg.device)
 
         self.cxs = torch.zeros(self.rollout_steps,
                                self.num_envs,
-                               cfg.hidden_size,
+                               cfg.lstm_hidden_size,
                                device=cfg.device)
 
         self.step = 0
@@ -74,10 +74,10 @@ class RecurrentRolloutBuffer:
         self.cxs[t].copy_(step.cxs)
         self.step += 1
 
-    def compute_gae(self,
-                    last_value):
+    def compute_returns_and_advantages(self,
+                                       last_value):
 
-        advantages = torch.zeros(self.rollout_step,
+        advantages = torch.zeros(self.rollout_steps,
                                  self.num_envs,
                                  device=self.device)
 

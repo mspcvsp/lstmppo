@@ -9,15 +9,22 @@ class WeightDrop(nn.Module):
     """
     Applies DropConnect to the recurrent weights of an RNN module.
     """
-    def __init__(self, module, weights, dropout):
+    def __init__(self,
+                 module,
+                 weights,
+                 dropout):
+
         super().__init__()
+
         self.module = module
         self.weights = weights
         self.dropout = dropout
 
         # Save original parameters
         for w in weights:
+
             param = getattr(module, w)
+
             self.register_parameter(f"{w}_raw",
                                     nn.Parameter(param.data))
 
@@ -25,10 +32,18 @@ class WeightDrop(nn.Module):
             del module._parameters[w]
 
     def _setweights(self):
+
         for w in self.weights:
+
             raw = getattr(self, f"{w}_raw")
-            dropped = F.dropout(raw, p=self.dropout, training=self.training)
-            setattr(self.module, w, dropped)
+
+            dropped = F.dropout(raw,
+                                p=self.dropout,
+                                training=self.training)
+
+            setattr(self.module,
+                    w,
+                    dropped)
 
     def forward(self, *args, **kwargs):
         self._setweights()
@@ -48,9 +63,11 @@ class LSTMPPOPolicy(nn.Module):
 
         # --- SiLU encoder ---
         self.encoder = nn.Sequential(
-            nn.Linear(cfg.obs_dim, cfg.enc_hidden_size),
+            nn.Linear(cfg.obs_shape[0],
+                      cfg.enc_hidden_size),
             nn.SiLU(),
-            nn.Linear(cfg.enc_hidden_size, cfg.enc_hidden_size),
+            nn.Linear(cfg.enc_hidden_size,
+                      cfg.enc_hidden_size),
             nn.SiLU(),
         )
 
@@ -69,7 +86,9 @@ class LSTMPPOPolicy(nn.Module):
         self.ln = nn.LayerNorm(cfg.lstm_hidden_size)
 
         # --- Heads ---
-        self.actor = nn.Linear(cfg.lstm_hidden_size, cfg.action_dim)
+        self.actor = nn.Linear(cfg.lstm_hidden_size,
+                               cfg.action_dim)
+
         self.critic = nn.Linear(cfg.lstm_hidden_size, 1)
 
     def init_hidden(self, batch_size, device):
@@ -142,9 +161,10 @@ class LSTMPPOPolicy(nn.Module):
         )
 
     def act(self,
-            inp: VecPolicyInput):
+            policy_input: VecPolicyInput):
 
-        policy_output = self.forward(inp.obs, inp.hxs, inp.cxs)
+        policy_output = self.forward(policy_input)
+
         dist = Categorical(logits=policy_output.logits)
         actions = dist.sample()
         logprobs = dist.log_prob(actions)
@@ -220,7 +240,7 @@ class SiLU_LN_LSTM(nn.Module):
 
     def forward(self, obs, hxs, cxs):
         """
-        obs: (N, obs_dim) or (T,B,obs_dim)
+        obs: (N, obs_shape) or (T,B,obs_shape)
         hxs, cxs: (N,H) or (B,H)
         """
         if obs.dim() == 2:

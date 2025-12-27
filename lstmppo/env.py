@@ -21,15 +21,15 @@ class RecurrentVecEnvWrapper:
 
         self.venv = venv
         self.num_envs = venv.num_envs
-        self.hidden_size = cfg.hidden_size
+        self.hidden_size = cfg.lstm_hidden_size
         self.device = cfg.device
 
         self.hxs = torch.zeros(self.num_envs,
-                               cfg.hidden_size,
+                               self.hidden_size,
                                device=cfg.device)
 
         self.cxs = torch.zeros(self.num_envs,
-                               cfg.hidden_size,
+                               self.hidden_size,
                                device=cfg.device)
 
     def reset(self):
