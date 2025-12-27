@@ -112,7 +112,9 @@ class LSTMPPOPolicy(nn.Module):
         self.ln = nn.LayerNorm(cfg.lstm_hidden_size)
 
         # --- Heads ---
-        self.actor = nn.Linear(cfg.lstm_hidden_size, cfg.action_dim)
+        self.actor = nn.Linear(cfg.lstm_hidden_size,
+                               cfg.action_dim)
+        
         self.critic = nn.Linear(cfg.lstm_hidden_size, 1)
 
         nn.init.xavier_uniform_(self.actor.weight)
