@@ -71,6 +71,14 @@ class LSTMPPOPolicy(nn.Module):
             nn.SiLU(),
         )
 
+        for name, param in self.encoder.named_parameters():
+
+            if "fc" in name:
+                if "weight" in name:
+                    nn.init.xavier_uniform_(param)
+                elif "bias" in name:
+                    nn.init.zeros_(param)
+
         # --- LN-LSTM with DropConnect ---
         base_lstm = nn.LSTM(
             input_size=cfg.enc_hidden_size,
@@ -78,19 +86,41 @@ class LSTMPPOPolicy(nn.Module):
             num_layers=1,
             batch_first=True,
         )
+
+        for name, param in base_lstm.named_parameters():
+
+            # Xavier for input weights
+            if "weight_ih" in name:
+                nn.init.xavier_uniform_(param)
+
+            # Orthogonal for recurrent weights
+            elif "weight_hh" in name:
+                nn.init.orthogonal_(param)
+
+            # Bias: zero + forget gate bias trick
+            elif "bias" in name:
+                param.data.fill_(0.0)
+                H = cfg.lstm_hidden_size
+                param.data[H:2*H] = 1.0  # forget gate bias
+
         self.lstm = WeightDrop(
             base_lstm,
             weights=["weight_hh_l0"],
             dropout=cfg.dropconnect_p,
         )
+
         self.ln = nn.LayerNorm(cfg.lstm_hidden_size)
 
         # --- Heads ---
-        self.actor = nn.Linear(cfg.lstm_hidden_size,
-                               cfg.action_dim)
-
+        self.actor = nn.Linear(cfg.lstm_hidden_size, cfg.action_dim)
         self.critic = nn.Linear(cfg.lstm_hidden_size, 1)
 
+        nn.init.xavier_uniform_(self.actor.weight)
+        nn.init.xavier_uniform_(self.critic.weight)
+    
+        nn.init.zeros_(self.actor.bias)
+        nn.init.zeros_(self.critic.bias)
+    
     def init_hidden(self, batch_size, device):
 
         h = torch.zeros(batch_size,
@@ -106,6 +136,7 @@ class LSTMPPOPolicy(nn.Module):
     # Core forward pass (returns activations + AR/TAR)
     # ---------------------------------------------------------
     def _forward_core(self, x, hxs, cxs):
+
         if x.dim() == 2:
             x = x.unsqueeze(1)
 
@@ -185,93 +216,3 @@ class LSTMPPOPolicy(nn.Module):
         entropy = dist.entropy()
 
         return logprobs, entropy, policy_output.values
-
-
-class SiLU_LN_LSTM(nn.Module):
-
-    def __init__(self, cfg):
-        super().__init__()
-        self.hidden_size = cfg.hidden_size
-
-        """Front-end MLP with SiLU
-        Note: Gymnasium observation spaces return a shape tuple,
-        not a scalar dimension.
-        """
-        self.fc1 = nn.Linear(cfg.obs_shape[0], 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.actfcn = nn.SiLU()
-
-        # LSTM core
-        self.lstm = nn.LSTM(
-            input_size=128,
-            hidden_size=cfg.hidden_size,
-            num_layers=1,
-            batch_first=True
-        )
-
-        # LayerNorm on LSTM output
-        self.ln = nn.LayerNorm(cfg.hidden_size)
-
-        self._init_weights()
-
-    def _init_weights(self):
-
-        for name, param in self.named_parameters():
-            if "fc" in name:
-                if "weight" in name:
-                    nn.init.xavier_uniform_(param)
-                elif "bias" in name:
-                    nn.init.zeros_(param)
-
-        for name, param in self.lstm.named_parameters():
-            # Xavier for input weights
-            if "weight_ih" in name:
-                nn.init.xavier_uniform_(param)
-
-            # Orthogonal for recurrent weights
-            elif "weight_hh" in name:
-                nn.init.orthogonal_(param)
-
-            # Bias: zero + forget gate bias trick
-            elif "bias" in name:
-                param.data.fill_(0.0)
-                H = self.hidden_size
-                param.data[H:2*H] = 1.0  # forget gate bias
-
-    def forward(self, obs, hxs, cxs):
-        """
-        obs: (N, obs_shape) or (T,B,obs_shape)
-        hxs, cxs: (N,H) or (B,H)
-        """
-        if obs.dim() == 2:
-            # (N,obs)
-            x = self.actfcn(self.fc1(obs))
-            x = self.actfcn(self.fc2(x))
-            x = x.unsqueeze(1)  # (N,1,128)
-
-            hxs = hxs.unsqueeze(0)
-            cxs = cxs.unsqueeze(0)
-
-            out, (new_hxs, new_cxs) = self.lstm(x, (hxs, cxs))
-            out = out.squeeze(1)          # (N,H)
-            out = self.ln(out)
-            new_hxs = new_hxs.squeeze(0)
-            new_cxs = new_cxs.squeeze(0)
-
-        else:
-            # (T,B,obs)
-            T, B, _ = obs.shape
-            x = obs.reshape(T * B, -1)
-            x = self.act(self.fc1(x))
-            x = self.act(self.fc2(x))
-            x = x.reshape(T, B, -1)
-
-            hxs = hxs.unsqueeze(0)
-            cxs = cxs.unsqueeze(0)
-
-            out, (new_hxs, new_cxs) = self.lstm(x, (hxs, cxs))
-            out = self.ln(out)            # (T,B,H)
-            new_hxs = new_hxs.squeeze(0)
-            new_cxs = new_cxs.squeeze(0)
-
-        return out, new_hxs, new_cxs
