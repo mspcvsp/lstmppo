@@ -6,51 +6,52 @@ class RecurrentRolloutBuffer:
 
     def __init__(self, cfg):
 
-        self.T = cfg.rollout_steps
-        self.N = cfg.num_envs
+        self.rollout_steps = cfg.rollout_steps
+        self.num_envs = cfg.num_envs
         self.device = cfg.device
         self.gamma = cfg.gamma
         self.lam = cfg.gae_lambda
 
-        self.obs = torch.zeros(self.T,
-                               self.N,
+        self.obs = torch.zeros(self.rollout_steps,
+                               self.num_envs,
                                *cfg.obs_shape,
                                device=cfg.device)
         
-        self.actions = torch.zeros(self.T,
-                                   self.N,
+        self.actions = torch.zeros(self.rollout_steps,
+                                   self.num_envs,
                                    1,
                                    device=cfg.device)
 
-        self.rewards = torch.zeros(self.T,
-                                   self.N,
+        self.rewards = torch.zeros(self.rollout_steps,
+                                   self.num_envs,
                                    device=cfg.device)
 
-        self.values = torch.zeros(self.T,
-                                  self.N,
+        self.values = torch.zeros(self.rollout_steps,
+                                  self.num_envs,
                                   device=cfg.device)
         
-        self.logprobs = torch.zeros(self.T,
-                                    self.N, device=cfg.device)
+        self.logprobs = torch.zeros(self.rollout_steps,
+                                    self.num_envs,
+                                    device=cfg.device)
 
-        self.terminated = torch.zeros(self.T,
-                                      self.N,
+        self.terminated = torch.zeros(self.rollout_steps,
+                                      self.num_envs,
                                       device=cfg.device,
                                       dtype=torch.bool)
 
-        self.truncated = torch.zeros(self.T,
-                                     self.N,
+        self.truncated = torch.zeros(self.rollout_steps,
+                                     self.num_envs,
                                      device=cfg.device,
                                      dtype=torch.bool)
 
         # Hidden states at start of each timestep
-        self.hxs = torch.zeros(self.T,
-                               self.N,
+        self.hxs = torch.zeros(self.rollout_steps,
+                               self.num_envs,
                                cfg.hidden_size,
                                device=cfg.device)
 
-        self.cxs = torch.zeros(self.T,
-                               self.N,
+        self.cxs = torch.zeros(self.rollout_steps,
+                               self.num_envs,
                                cfg.hidden_size,
                                device=cfg.device)
 
@@ -61,7 +62,8 @@ class RecurrentRolloutBuffer:
 
         t = self.step
         self.obs[t].copy_(step.obs)
-        # (N,) -> (N,1)
+
+        # (self.num_envs,) -> (self.num_envs,1)
         self.actions[t].copy_(step.actions.unsqueeze(-1))
         self.rewards[t].copy_(step.rewards)
         self.values[t].copy_(step.values)
@@ -75,17 +77,22 @@ class RecurrentRolloutBuffer:
     def compute_gae(self,
                     last_value):
 
-        T, N = self.T, self.N
-        advantages = torch.zeros(T, N, device=self.device)
-        last_gae = torch.zeros(N, device=self.device)
+        advantages = torch.zeros(self.rollout_step,
+                                 self.num_envs,
+                                 device=self.device)
 
-        for t in reversed(range(T)):
+        last_gae = torch.zeros(self.num_envs,
+                               device=self.device)
+
+        for t in reversed(range(self.rollout_step)):
             true_terminal = self.terminated[t]
             
             # truncated episodes still bootstrap
             bootstrap = ~true_terminal
 
-            next_value = last_value if t == T - 1 else self.values[t + 1]
+            next_value =\
+                last_value if t == self.rollout_step - 1\
+                else self.values[t + 1]
 
             delta = (
                 self.rewards[t]
@@ -101,15 +108,19 @@ class RecurrentRolloutBuffer:
         self.advantages = advantages
         self.returns = self.values + advantages
 
-    def get_recurrent_minibatches(self, batch_envs):
+    def get_recurrent_minibatches(self,
+                                  batch_envs):
         """
         Entire sequences per environment:
-        yields dict with tensors shaped (T, B, ...)
+        yields dict with tensors shaped (rollout_step, B, ...)
         """
-        N = self.N
-        env_indices = torch.randperm(N, device=self.device)
+        self.num_envs = self.num_envs
 
-        for start in range(0, N, batch_envs):
+        env_indices = torch.randperm(self.num_envs,
+                                     device=self.device)
+
+        for start in range(0, self.num_envs, batch_envs):
+
             idx = env_indices[start:start + batch_envs]
 
             yield RecurrentBatch(

@@ -47,16 +47,16 @@ class PPOConfig:
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    hidden_size: int = 128
-    """MLP hidden size"""
+    enc_hidden_size: int = 128
+    """Encoder hidden size"""
     lstm_hidden_size: int = 128
     """LSTM hidden size"""
     dropconnect_p: float = 0.5
     """LSTM drop connect probability"""
     lstm_ar_coef: float = 2.0
-    """LSTM acitivation regularization (AR)"""
+    """LSTM activation regularization (AR)"""
     lstm_tar_coef: float = 1.0
-    """LSTM temporal acitivation regularization (TAR)"""
+    """LSTM temporal activation regularization (TAR)"""
 
 
 @dataclass

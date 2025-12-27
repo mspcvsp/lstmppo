@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
-from .types import VecPolicyInput, VecPolicyOutput
+from .types import PPOConfig, VecPolicyInput, VecPolicyOutput
 
 
 class WeightDrop(nn.Module):
@@ -36,50 +36,51 @@ class WeightDrop(nn.Module):
     
 
 class LSTMPPOPolicy(nn.Module):
-    def __init__(
-        self,
-        obs_dim: int,
-        action_dim: int,
-        hidden_size: int = 128,
-        lstm_hidden_size: int = 128,
-        dropconnect_p: float = 0.5,
-        ar_coef: float = 2.0,
-        tar_coef: float = 1.0,
-    ):
+
+    def __init__(self,
+                 cfg: PPOConfig):
+
         super().__init__()
 
-        self.ar_coef = ar_coef
-        self.tar_coef = tar_coef
+        self.ar_coef = cfg.lstm_ar_coef
+        self.tar_coef = cfg.lstm_tar_coef
+        self.device = cfg.device
 
         # --- SiLU encoder ---
         self.encoder = nn.Sequential(
-            nn.Linear(obs_dim, hidden_size),
+            nn.Linear(cfg.obs_dim, cfg.enc_hidden_size),
             nn.SiLU(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(cfg.enc_hidden_size, cfg.enc_hidden_size),
             nn.SiLU(),
         )
 
         # --- LN-LSTM with DropConnect ---
         base_lstm = nn.LSTM(
-            input_size=hidden_size,
-            hidden_size=lstm_hidden_size,
+            input_size=cfg.enc_hidden_size,
+            hidden_size=cfg.lstm_hidden_size,
             num_layers=1,
             batch_first=True,
         )
         self.lstm = WeightDrop(
             base_lstm,
             weights=["weight_hh_l0"],
-            dropout=dropconnect_p,
+            dropout=cfg.dropconnect_p,
         )
-        self.ln = nn.LayerNorm(lstm_hidden_size)
+        self.ln = nn.LayerNorm(cfg.lstm_hidden_size)
 
         # --- Heads ---
-        self.actor = nn.Linear(lstm_hidden_size, action_dim)
-        self.critic = nn.Linear(lstm_hidden_size, 1)
+        self.actor = nn.Linear(cfg.lstm_hidden_size, cfg.action_dim)
+        self.critic = nn.Linear(cfg.lstm_hidden_size, 1)
 
     def init_hidden(self, batch_size, device):
-        h = torch.zeros(batch_size, self.lstm.module.hidden_size, device=device)
-        c = torch.zeros(batch_size, self.lstm.module.hidden_size, device=device)
+
+        h = torch.zeros(batch_size,
+                        self.lstm.module.hidden_size,
+                        device=device)
+
+        c = torch.zeros(batch_size,
+                        self.lstm.module.hidden_size,
+                        device=device)
         return h, c
 
     # ---------------------------------------------------------
@@ -90,15 +91,19 @@ class LSTMPPOPolicy(nn.Module):
             x = x.unsqueeze(1)
 
         enc = self.encoder(x)
-        out, (h_n, c_n) = self.lstm(enc, (hxs.unsqueeze(0), cxs.unsqueeze(0)))
+        out, (h_n, c_n) = self.lstm(enc,
+                                    (hxs.unsqueeze(0),
+                                     cxs.unsqueeze(0)))
         out = self.ln(out)
 
-        # --- AR ---
+        # --- Activation Regularization (AR) ---
         ar_loss = (out.pow(2).mean()) * self.ar_coef
 
-        # --- TAR ---
+        # --- Temporal Activation Regularization (TAR) ---
         if out.size(1) > 1:
-            tar_loss = ((out[:, 1:, :] - out[:, :-1, :]).pow(2).mean()) * self.tar_coef
+            tar_loss =\
+                ((out[:, 1:, :] - out[:, :-1, :]).pow(2).mean()) *\
+                self.tar_coef
         else:
             tar_loss = torch.tensor(0.0, device=out.device)
 
@@ -112,9 +117,11 @@ class LSTMPPOPolicy(nn.Module):
     # Dataclass-based forward
     # ---------------------------------------------------------
     def forward(self, inp: VecPolicyInput) -> VecPolicyOutput:
-        core_out, new_hxs, new_cxs, ar_loss, tar_loss = self._forward_core(
-            inp.obs, inp.hxs, inp.cxs
-        )
+
+        core_out, new_hxs, new_cxs, ar_loss, tar_loss =\
+            self._forward_core(inp.obs,
+                               inp.hxs,
+                               inp.cxs)
 
         if core_out.dim() == 3:
             B, T, H = core_out.shape
@@ -133,6 +140,31 @@ class LSTMPPOPolicy(nn.Module):
             ar_loss=ar_loss,
             tar_loss=tar_loss,
         )
+
+    def act(self,
+            inp: VecPolicyInput):
+
+        policy_output = self.forward(inp.obs, inp.hxs, inp.cxs)
+        dist = Categorical(logits=policy_output.logits)
+        actions = dist.sample()
+        logprobs = dist.log_prob(actions)
+
+        return actions, logprobs, policy_output
+
+    def evaluate_actions(self,
+                         inp: VecPolicyInput,
+                         actions):
+
+        if actions.dim() == 3:
+            actions = actions.squeeze(-1)
+
+        policy_output = self.forward(inp.obs, inp.hxs, inp.cxs)
+        dist = Categorical(logits=policy_output.logits)
+
+        logprobs = dist.log_prob(actions)
+        entropy = dist.entropy()
+
+        return logprobs, entropy, policy_output.values
 
 
 class SiLU_LN_LSTM(nn.Module):
@@ -223,70 +255,3 @@ class SiLU_LN_LSTM(nn.Module):
             new_cxs = new_cxs.squeeze(0)
 
         return out, new_hxs, new_cxs
-
-
-class LSTMPPOPolicy(nn.Module):
-    
-    def __init__(self,
-                 cfg):
-
-        super().__init__()
-        self.hidden_size = cfg.hidden_size
-
-        self.core = SiLU_LN_LSTM(cfg)
-
-        # Actor and critic heads
-        self.actor = nn.Linear(self.hidden_size,
-                               cfg.action_dim)
-
-        self.critic = nn.Linear(self.hidden_size, 1)
-
-        nn.init.xavier_uniform_(self.actor.weight)
-        nn.init.zeros_(self.actor.bias)
-
-        nn.init.xavier_uniform_(self.critic.weight)
-        nn.init.zeros_(self.critic.bias)
-
-    def forward(self,
-                obs,
-                hxs,
-                cxs):
-        """
-        obs: (N,obs) or (T,B,obs)
-        hxs,cxs: (N,H) or (B,H)
-        """
-        core_out, new_hxs, new_cxs = self.core(obs, hxs, cxs)
-
-        logits = self.actor(core_out)
-        values = self.critic(core_out).squeeze(-1)
-
-        return logits, values, new_hxs, new_cxs
-
-    def act(self,
-            obs,
-            hxs,
-            cxs):
-
-        logits, values, new_hxs, new_cxs = self.forward(obs, hxs, cxs)
-        dist = Categorical(logits=logits)
-        actions = dist.sample()
-        logprobs = dist.log_prob(actions)
-
-        return actions, logprobs, values, new_hxs, new_cxs
-
-    def evaluate_actions(self,
-                         obs,
-                         hxs,
-                         cxs,
-                         actions):
-
-        if actions.dim() == 3:
-            actions = actions.squeeze(-1)
-
-        logits, values, _, _ = self.forward(obs, hxs, cxs)
-        dist = Categorical(logits=logits)
-
-        logprobs = dist.log_prob(actions)
-        entropy = dist.entropy()
-
-        return logprobs, entropy, values
