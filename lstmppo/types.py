@@ -124,3 +124,9 @@ class PolicyOutput:
     new_cxs: torch.Tensor      # (B,H)
     ar_loss: torch.Tensor      # scalar
     tar_loss: torch.Tensor     # scalar
+
+
+@dataclass
+class LSTMStates:
+    hxs: torch.Tensor
+    cxs: torch.Tensor

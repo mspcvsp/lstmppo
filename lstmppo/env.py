@@ -1,7 +1,7 @@
 import gymnasium as gym
 from gymnasium.vector import SyncVectorEnv
 import torch
-from .types import PPOConfig, VecEnvState, PolicyInput
+from .types import PPOConfig, VecEnvState, PolicyInput, LSTMStates
 
 
 def make_env(env_id):
@@ -32,14 +32,18 @@ class RecurrentVecEnvWrapper:
         self.cxs = torch.zeros(self.num_envs,
                                self.hidden_size,
                                device=cfg.device)
+        
+        self.last_terminated = torch.zeros(self.num_envs,
+                                           dtype=torch.bool,
+                                           device=self.device)
 
     def reset(self) -> VecEnvState:
 
         obs, info = self.venv.reset()
 
-        # Reset hidden states for all environments
         self.hxs.zero_()
         self.cxs.zero_()
+        self.last_terminated.zero_()
 
         obs = torch.as_tensor(obs,
                               device=self.device,
@@ -60,6 +64,32 @@ class RecurrentVecEnvWrapper:
             cxs=self.cxs.clone(),
         )
 
+    def set_initial_lstm_states(self,
+                                last_lstm_states: LSTMStates) -> None:
+        """
+        Called at the start of a new rollout.`
+        hxs, cxs: (num_envs, hidden_size)
+        Only applied to environments that did NOT terminate.
+        """
+
+        if last_lstm_states.hxs is None:
+            # first rollout ever
+            initial_hxs = torch.zeros(self.num_envs,
+                                      self.hidden_size,
+                                      device=self.device)
+
+            initial_cxs = torch.zeros(self.num_envs,
+                                      self.hidden_size,
+                                      device=self.device)
+        else:
+            initial_hxs = last_lstm_states.hxs
+            initial_cxs = last_lstm_states.cxs
+
+        # Only carry over states for non-terminal envs
+        carry_mask = ~self.last_terminated  # stored from previous rollout
+
+        self.hxs[carry_mask] = initial_hxs[carry_mask]
+        self.cxs[carry_mask] = initial_cxs[carry_mask]
 
     def step(self, actions: torch.Tensor) -> VecEnvState:
 
@@ -88,6 +118,8 @@ class RecurrentVecEnvWrapper:
         truncated = torch.as_tensor(truncated,
                                     device=self.device,
                                     dtype=torch.bool)
+        
+        self.last_terminated = terminated.clone()
 
         # Reset hidden states only for true terminals
         done_mask = terminated

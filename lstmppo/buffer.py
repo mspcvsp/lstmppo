@@ -1,5 +1,5 @@
 import torch
-from .types import RolloutStep, RecurrentBatch
+from .types import RolloutStep, RecurrentBatch, LSTMStates
 
 
 class RecurrentRolloutBuffer:
@@ -12,6 +12,7 @@ class RecurrentRolloutBuffer:
         self.device = cfg.device
         self.gamma = cfg.gamma
         self.lam = cfg.gae_lambda
+        self.lstm_hidden_size = cfg.lstm_hidden_size
 
         self.last_hxs = None
         self.last_cxs = None
@@ -51,12 +52,12 @@ class RecurrentRolloutBuffer:
         # Hidden states at start of each timestep
         self.hxs = torch.zeros(self.rollout_steps,
                                self.num_envs,
-                               cfg.lstm_hidden_size,
+                               self.lstm_hidden_size,
                                device=cfg.device)
 
         self.cxs = torch.zeros(self.rollout_steps,
                                self.num_envs,
-                               cfg.lstm_hidden_size,
+                               self.lstm_hidden_size,
                                device=cfg.device)
 
         self.returns = torch.zeros(self.rollout_steps,
@@ -152,6 +153,13 @@ class RecurrentRolloutBuffer:
                 hxs=self.hxs[0, idx],
                 cxs=self.cxs[0, idx],
             )
+
+    def get_last_lstm_states(self):
+
+        return LSTMStates(
+            hxs=self.last_hxs,
+            cxs=self.last_cxs
+        )                
 
     def reset(self):
         self.step = 0
