@@ -15,6 +15,8 @@ class PPOConfig:
     """total timesteps of the experiments"""
     num_envs: int = 16
     """ Number of environments """
+    mini_batch_envs: int = 4 
+    """number of envs per recurrent minibatch"""
     rollout_steps: int = 128
     """ Horizon"""
     gamma: float = 0.99
@@ -27,8 +29,6 @@ class PPOConfig:
     """ Clip coefficient"""
     update_epochs: int = 4
     """ Number of update eophics"""
-    batch_envs: int = 4 
-    """number of envs per recurrent minibatch"""
     entropy_coef: float = 0.01
     """Fixed coefficient of the entropy if annealing is disabled"""
     anneal_entropy_flag: bool = True
@@ -85,39 +85,39 @@ class RecurrentBatch:
 
 
 @dataclass
-class VecPolicyInput:
-    obs: torch.Tensor
-    hxs: torch.Tensor
-    cxs: torch.Tensor
+class PolicyInput:
+    obs: torch.Tensor # (N, *obs_shape)
+    hxs: torch.Tensor # (N,H)
+    cxs: torch.Tensor # (N,H)
 
 
 @dataclass
 class VecEnvState:
-    obs: torch.Tensor
-    rewards: torch.Tensor
-    terminated: torch.Tensor
-    truncated: torch.Tensor
+    obs: torch.Tensor        # (N, *obs_shape))
+    rewards: torch.Tensor    # (N,)
+    terminated: torch.Tensor # (N,)
+    truncated: torch.Tensor  # (N,)
     info: List[Any]
-    hxs: torch.Tensor
-    cxs: torch.Tensor
+    hxs: torch.Tensor       # (N,H)
+    cxs: torch.Tensor       # (N,H)
 
     def to_policy_input(self,
-                        detach: bool = False) -> VecPolicyInput:
+                        detach: bool = False) -> PolicyInput:
 
         if detach:
-            return VecPolicyInput(
+            return PolicyInput(
                 obs=self.obs,
                 hxs=self.hxs.detach(),
                 cxs=self.cxs.detach(),
             )
         
-        return VecPolicyInput(self.obs,
+        return PolicyInput(self.obs,
                               self.hxs,
                               self.cxs)
     
 
 @dataclass
-class VecPolicyOutput:
+class PolicyOutput:
     logits: torch.Tensor       # (B,A) or (B,T,A)
     values: torch.Tensor       # (B,) or (B,T)
     new_hxs: torch.Tensor      # (B,H)

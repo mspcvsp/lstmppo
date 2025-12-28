@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
-from .types import PPOConfig, VecPolicyInput, VecPolicyOutput
+from .types import PPOConfig, PolicyInput, PolicyOutput
 
 
 class WeightDrop(nn.Module):
@@ -168,7 +168,7 @@ class LSTMPPOPolicy(nn.Module):
     # ---------------------------------------------------------
     # Dataclass-based forward
     # ---------------------------------------------------------
-    def forward(self, inp: VecPolicyInput) -> VecPolicyOutput:
+    def forward(self, inp: PolicyInput) -> PolicyOutput:
 
         core_out, new_hxs, new_cxs, ar_loss, tar_loss =\
             self._forward_core(inp.obs,
@@ -184,7 +184,7 @@ class LSTMPPOPolicy(nn.Module):
             logits = self.actor(core_out)
             values = self.critic(core_out).squeeze(-1)
 
-        return VecPolicyOutput(
+        return PolicyOutput(
             logits=logits,
             values=values,
             new_hxs=new_hxs,
@@ -194,7 +194,7 @@ class LSTMPPOPolicy(nn.Module):
         )
 
     def act(self,
-            policy_input: VecPolicyInput):
+            policy_input: PolicyInput):
 
         policy_output = self.forward(policy_input)
 
@@ -205,7 +205,7 @@ class LSTMPPOPolicy(nn.Module):
         return actions, logprobs, policy_output
 
     def evaluate_actions(self,
-                         policy_input: VecPolicyInput,
+                         policy_input: PolicyInput,
                          actions):
 
         if actions.dim() == 3:

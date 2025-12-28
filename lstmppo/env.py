@@ -1,6 +1,7 @@
 import gymnasium as gym
+from gymnasium.vector import SyncVectorEnv
 import torch
-from .types import VecEnvState
+from .types import PPOConfig, VecEnvState, PolicyInput
 
 
 def make_env(env_id):
@@ -16,8 +17,8 @@ class RecurrentVecEnvWrapper:
     """
 
     def __init__(self,
-                 cfg,
-                 venv):
+                 cfg: PPOConfig,
+                 venv: SyncVectorEnv):
 
         self.venv = venv
         self.num_envs = venv.num_envs
@@ -32,9 +33,11 @@ class RecurrentVecEnvWrapper:
                                self.hidden_size,
                                device=cfg.device)
 
-    def reset(self):
+    def reset(self) -> VecEnvState:
 
         obs, info = self.venv.reset()
+
+        # Reset hidden states for all environments
         self.hxs.zero_()
         self.cxs.zero_()
 
@@ -58,13 +61,17 @@ class RecurrentVecEnvWrapper:
         )
 
 
-    def step(self, actions):
+    def step(self, actions: torch.Tensor) -> VecEnvState:
+
         """
-        actions: (N,) int64 tensor
+        actions: (N,) or (N,1) tensor, discrete.
         """
-        obs, rewards, terminated, truncated, info = self.venv.step(
-            actions.cpu().numpy()
-        )
+        if actions.dim() == 2 and actions.size(-1) == 1:
+            actions_np = actions.squeeze(-1).cpu().numpy()
+        else:
+            actions_np = actions.cpu().numpy()
+
+        obs, rewards, terminated, truncated, info = self.venv.step(actions_np)
 
         obs = torch.as_tensor(obs,
                               device=self.device,
@@ -84,9 +91,11 @@ class RecurrentVecEnvWrapper:
 
         # Reset hidden states only for true terminals
         done_mask = terminated
+
         if done_mask.any():
-            self.hxs[done_mask] = 0.0
-            self.cxs[done_mask] = 0.0
+
+            self.hxs[done_mask].zero_()
+            self.cxs[done_mask].zero_()
 
         return VecEnvState(
             obs=obs,
@@ -98,6 +107,18 @@ class RecurrentVecEnvWrapper:
             cxs=self.cxs.clone(),
         )
 
-    def update_hidden_states(self, new_hxs, new_cxs):
+    def update_hidden_states(self,
+                             new_hxs: torch.Tensor,
+                             new_cxs: torch.Tensor) -> None:
+
         self.hxs.copy_(new_hxs)
         self.cxs.copy_(new_cxs)
+
+
+# Helper on VecEnvState side
+def to_policy_input(env_state: VecEnvState) -> PolicyInput:
+    return PolicyInput(
+        obs=env_state.obs,
+        hxs=env_state.hxs,
+        cxs=env_state.cxs,
+    )
