@@ -87,6 +87,8 @@ class RecurrentRolloutBuffer:
         self.logprobs[t].copy_(step.logprobs)
         self.terminated[t].copy_(step.terminated)
         self.truncated[t].copy_(step.truncated)
+
+        # hidden state at *start* of timestep t
         self.hxs[t].copy_(step.hxs)
         self.cxs[t].copy_(step.cxs)
         self.step += 1
@@ -155,7 +157,12 @@ class RecurrentRolloutBuffer:
             )
 
     def get_last_lstm_states(self):
-
+        """
+        environment wrapper handles the “None means first rollout” case
+    
+        :param self: RecurrentRolloutBuffer instance
+        :return: LSTMStates dataclass with last_hxs and last_cxs tensors
+        """
         return LSTMStates(
             hxs=self.last_hxs,
             cxs=self.last_cxs
