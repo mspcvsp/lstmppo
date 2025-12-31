@@ -122,46 +122,43 @@ class LSTMPPOPolicy(nn.Module):
     
         nn.init.zeros_(self.actor.bias)
         nn.init.zeros_(self.critic.bias)
-    
-    def init_hidden(self, batch_size, device):
-
-        h = torch.zeros(batch_size,
-                        self.lstm.module.hidden_size,
-                        device=device)
-
-        c = torch.zeros(batch_size,
-                        self.lstm.module.hidden_size,
-                        device=device)
-        return h, c
 
     # ---------------------------------------------------------
     # Core forward pass (returns activations + AR/TAR)
     # ---------------------------------------------------------
     def _forward_core(self, x, hxs, cxs):
+        """
+        x: (B, obs_dim)       for single-step
+        or (B, T, obs_dim)    for sequence
+        hxs, cxs: (B, H) initial hidden state per sequence
+        """
 
+        # Normalize input shape to (B, T, F)
         if x.dim() == 2:
+            # (B, F) -> (B, 1, F)
             x = x.unsqueeze(1)
 
-        enc = self.encoder(x)
-        out, (h_n, c_n) = self.lstm(enc,
-                                    (hxs.unsqueeze(0),
-                                     cxs.unsqueeze(0)))
-        out = self.ln(out)
+        enc = self.encoder(x)  # encoder must handle (B, T, F)
+
+        # LSTM expects (B, T, F) with batch_first=True
+        out, (h_n, c_n) = self.lstm(
+            enc,
+            (hxs.unsqueeze(0), cxs.unsqueeze(0)),  # (1, B, H)
+        )
+
+        out = self.ln(out)  # (B, T, H)
 
         # --- Activation Regularization (AR) ---
         ar_loss = (out.pow(2).mean()) * self.ar_coef
 
         # --- Temporal Activation Regularization (TAR) ---
         if out.size(1) > 1:
-            tar_loss =\
-                ((out[:, 1:, :] - out[:, :-1, :]).pow(2).mean()) *\
-                self.tar_coef
+            tar_loss = (
+                (out[:, 1:, :] - out[:, :-1, :]).pow(2).mean()
+                * self.tar_coef
+            )
         else:
             tar_loss = torch.tensor(0.0, device=out.device)
-
-        # Squeeze if single-step
-        if out.size(1) == 1:
-            out = out[:, 0, :]
 
         return out, h_n.squeeze(0), c_n.squeeze(0), ar_loss, tar_loss
 
@@ -169,21 +166,28 @@ class LSTMPPOPolicy(nn.Module):
     # Dataclass-based forward
     # ---------------------------------------------------------
     def forward(self, inp: PolicyInput) -> PolicyOutput:
+        """
+        inp.obs: (B, obs_dim) OR (B, T, obs_dim)
+        inp.hxs, inp.cxs: (B, H)
+        """
 
-        core_out, new_hxs, new_cxs, ar_loss, tar_loss =\
-            self._forward_core(inp.obs,
-                               inp.hxs,
-                               inp.cxs)
+        core_out, new_hxs, new_cxs, ar_loss, tar_loss = \
+            self._forward_core(inp.obs, inp.hxs, inp.cxs)
+        # core_out is ALWAYS (B, T, H)
 
-        if core_out.dim() == 3:
-            B, T, H = core_out.shape
-            flat = core_out.reshape(B * T, H)
-            logits = self.actor(flat).view(B, T, -1)
-            values = self.critic(flat).view(B, T)
-        else:
-            logits = self.actor(core_out)
-            values = self.critic(core_out).squeeze(-1)
+        B, T, H = core_out.shape
+        flat = core_out.reshape(B * T, H)
 
+        logits = self.actor(flat).view(B, T, -1)   # (B, T, A)
+        values = self.critic(flat).view(B, T)      # (B, T)
+
+        # If single-step, squeeze back to (B, A) and (B,)
+        if T == 1:
+            logits = logits[:, 0, :]
+            values = values[:, 0]
+
+        # logits: (B, T, A) for sequences, (B, A) for single-step
+        # values: (B, T) or (B,)
         return PolicyOutput(
             logits=logits,
             values=values,
@@ -204,17 +208,57 @@ class LSTMPPOPolicy(nn.Module):
 
         return actions, logprobs, policy_output
 
-    def evaluate_actions(self,
-                         policy_input: PolicyInput,
-                         actions):
+    def evaluate_actions_sequence(self,
+                                   obs: torch.Tensor,
+                                   hxs: torch.Tensor,
+                                   cxs: torch.Tensor,
+                                   actions: torch.Tensor):
+        """
+        Fully sequence-aware PPO evaluation.
+        Uses the same sequence-aware forward() used by act().
 
-        if actions.dim() == 3:
+        obs: (T, B, obs_dim)
+        hxs, cxs: (B, H)
+        actions: (T, B) or (T, B, 1)
+        """
+        T, B = obs.shape[0], obs.shape[1]
+
+        # Reorder to (B, T, obs_dim) for batch_first LSTM
+        obs_bt = obs.transpose(0, 1)
+
+        # Build PolicyInput for sequence mode
+        policy_input = PolicyInput(
+            obs=obs_bt,   # (B, T, obs_dim)
+            hxs=hxs,      # (B, H)
+            cxs=cxs,      # (B, H)
+        )
+
+        # Forward pass (sequence-aware)
+        policy_output = self.forward(policy_input)
+        # logits: (B, T, A)
+        # values: (B, T)
+
+        # Convert back to (T, B, ...)
+        logits = policy_output.logits.transpose(0, 1)   # (T, B, A)
+        values = policy_output.values.transpose(0, 1)   # (T, B)
+
+        # Actions: (T, B, 1) → (T, B)
+        if actions.dim() == 3 and actions.size(-1) == 1:
             actions = actions.squeeze(-1)
 
-        policy_output = self.forward(policy_input)
-        dist = Categorical(logits=policy_output.logits)
+        dist = Categorical(logits=logits)
 
-        new_logprobs = dist.log_prob(actions)
-        entropy = dist.entropy()
+        logprobs = dist.log_prob(actions)   # (T, B)
+        entropy = dist.entropy().mean()     # scalar
 
-        return new_logprobs, entropy, policy_output
+        return (
+            values,                # (T, B)
+            logprobs,              # (T, B)
+            entropy,               # scalar
+            policy_output.new_hxs, # (B, H)
+            policy_output.new_cxs, # (B, H)
+            policy_output.ar_loss, # scalar
+            policy_output.tar_loss # scalar
+        )
+
+
