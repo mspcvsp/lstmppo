@@ -17,11 +17,12 @@ class RecurrentVecEnvWrapper:
     """
 
     def __init__(self,
-                 cfg: PPOConfig,
-                 venv: SyncVectorEnv):
+                 cfg: PPOConfig):
 
-        self.venv = venv
-        self.num_envs = venv.num_envs
+        self.venv = SyncVectorEnv([make_env(cfg.env_id)
+                                   for _ in range(cfg.num_envs)])
+
+        self.num_envs = cfg.num_envs
         self.hidden_size = cfg.lstm_hidden_size
         self.device = cfg.device
 

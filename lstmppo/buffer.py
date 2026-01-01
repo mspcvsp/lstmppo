@@ -13,6 +13,7 @@ class RecurrentRolloutBuffer:
         self.gamma = cfg.gamma
         self.lam = cfg.gae_lambda
         self.lstm_hidden_size = cfg.lstm_hidden_size
+        self.mini_batch_envs = cfg.mini_batch_envs
 
         self.last_hxs = None
         self.last_cxs = None

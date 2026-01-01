@@ -4,16 +4,20 @@ from torch import nn
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
+from .types import PPOConfig
 
 
 class LSTMPPOTrainer:
 
-    def __init__(self, cfg, venv):
+    def __init__(self,
+                 cfg:PPOConfig):
 
         self.cfg = cfg
         self.device = cfg.device
+        self.update_idx = 0
+        self.total_updates = cfg.total_updates
 
-        self.env = RecurrentVecEnvWrapper(cfg, venv)
+        self.env = RecurrentVecEnvWrapper(cfg)
         self.policy = LSTMPPOPolicy(cfg).to(self.device)
         self.buffer = RecurrentRolloutBuffer(cfg)
 
@@ -27,8 +31,16 @@ class LSTMPPOTrainer:
         self.epochs = cfg.ppo_epochs
         self.clip_range = cfg.clip_range
         self.vf_coef = cfg.vf_coef
-        self.ent_coef = cfg.ent_coef
+        self.target_kl = cfg.target_kl
         self.max_grad_norm = cfg.max_grad_norm
+    
+        self.fixed_entropy_coef = cfg.fixed_entropy_coef
+        self.anneal_entropy_flag = cfg.anneal_entropy_flag
+        self.start_entropy_coef = cfg.start_entropy_coef
+
+        self.entropy_coef_slope =\
+            (cfg.end_entropy_coef - cfg.start_entropy_coef) /\
+            max(self.total_updates - 1, 1)
 
         # persistent env state across rollouts
         self.env_state = self.env.reset()
@@ -90,6 +102,19 @@ class LSTMPPOTrainer:
     # ---------------------------------------------------------
     def update_phase(self):
 
+        if self.anneal_entropy_flag:
+
+            entropy_coef =\
+                self.entropy_coef_slope * self.update_idx +\
+                self.start_entropy_coef
+        else:
+            entropy_coef = self.fixed_entropy_coef  
+
+        mb_idx = 0
+
+        approx_kl = torch.zeros(self.epochs * self.mini_batch_envs,
+                                device=self.device)
+
         for _ in range(self.epochs):
 
             for batch in self.buffer.get_recurrent_minibatches():
@@ -110,18 +135,38 @@ class LSTMPPOTrainer:
 
                 # Flatten for PPO loss
                 T, B = values.shape
-                values = values.view(T * B)
                 new_logprobs = new_logprobs.view(T * B)
                 old_logprobs = batch.logprobs.view(T * B)
                 returns = batch.returns.view(T * B)
                 advantages = batch.advantages.view(T * B)
 
-                # Normalize advantages
+                """ Save approximate KL for KL-adaptive clipping """
+                approx_kl[mb_idx] = (old_logprobs - new_logprobs).mean()
+
+                """ Value function clipping """
+                values = values.view(T * B)  # current value predictions
+                old_values = batch.values.view(T * B)  # from buffer
+
+                value_pred_clipped =\
+                    old_values + torch.clamp(values - old_values,
+                                             -self.clip_range,
+                                             self.clip_range)
+
+                value_losses = (values - returns).pow(2)
+
+                value_losses_clipped =\
+                    (value_pred_clipped - returns).pow(2)
+                
+                value_loss =\
+                    0.5 * torch.max(value_losses,
+                                    value_losses_clipped).mean()
+
+                """ Normalize advantages """
                 advantages = (advantages - advantages.mean()) / (
                     advantages.std(unbiased=False) + 1e-8
                 )
 
-                # PPO objective
+                """ PPO objective """
                 ratio = torch.exp(new_logprobs - old_logprobs)
                 surr1 = ratio * advantages
                 surr2 = torch.clamp(
@@ -131,25 +176,46 @@ class LSTMPPOTrainer:
                 ) * advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_loss = 0.5 * (returns - values).pow(2).mean()
-
                 loss = (
                     policy_loss
                     + self.vf_coef * value_loss
-                    - self.ent_coef * entropy
+                    - entropy_coef * entropy
                     + ar_loss
                     + tar_loss
                 )
 
                 self.optimizer.zero_grad()
+                
                 loss.backward()
+
                 nn.utils.clip_grad_norm_(
                     self.policy.parameters(),
                     self.max_grad_norm
                 )
+                
                 self.optimizer.step()
+                mb_idx += 1
+
+        """ KL-adaptive clipping adjustment """
+        approx_kl = approx_kl.mean().item()
+
+        if approx_kl > 2.0 * self.target_kl:
+            # too aggressive, shrink clip range
+            self.clip_range *= 0.9
+        elif approx_kl < 0.5 * self.target_kl:
+            # too conservative, expand a bit
+            self.clip_range *= 1.05
+
+        # clamp to reasonable bounds
+        self.clip_range =\
+            float(torch.clamp(torch.tensor(self.clip_range),
+                              0.05,
+                              0.3))
 
     def train(self, total_updates: int):
-        for update in range(total_updates):
+
+        for self.update_idx in range(total_updates):
+
             self.rollout_phase()
+
             self.update_phase()
