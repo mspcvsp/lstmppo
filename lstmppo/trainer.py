@@ -324,3 +324,21 @@ class LSTMPPOTrainer:
             env_state = self.env.step(actions)
 
         return obs_list, val_list, logp_list
+
+    def trace_hidden_states(self, steps=20):
+        self.policy.eval()
+        self.env.reset()
+
+        env_state = self.env_state
+        hxs_trace = []
+        cxs_trace = []
+
+        for _ in range(steps):
+            policy_in = to_policy_input(env_state)
+            hxs_trace.append(policy_in.hxs.clone())
+            cxs_trace.append(policy_in.cxs.clone())
+
+            actions, _, _ = self.policy.act(policy_in)
+            env_state = self.env.step(actions)
+
+        return hxs_trace, cxs_trace
