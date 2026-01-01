@@ -59,6 +59,8 @@ class PPOConfig:
     """LSTM activation regularization (AR)"""
     lstm_tar_coef: float = 1.0
     """LSTM temporal activation regularization (TAR)"""
+    tbptt_steps: int = 16
+    """ Truncated BPTT steps """
 
 
 @dataclass
@@ -132,3 +134,22 @@ class PolicyOutput:
 class LSTMStates:
     hxs: torch.Tensor
     cxs: torch.Tensor
+
+
+@dataclass
+class PolicyEvalInput:
+    obs: torch.Tensor      # (N, *obs_shape)
+    hxs: torch.Tensor      # (N,H)
+    cxs: torch.Tensor      # (N,H)
+    actions: torch.Tensor  # (N,) or (N,1)
+
+
+@dataclass
+class PolicyEvalOutput:
+    values: torch.Tensor       # (N,)
+    logprobs: torch.Tensor     # (N,)
+    entropy: torch.Tensor      # scalar
+    new_hxs: torch.Tensor      # (N,H)
+    new_cxs: torch.Tensor      # (N,H)
+    ar_loss: torch.Tensor      # scalar
+    tar_loss: torch.Tensor     # scalar

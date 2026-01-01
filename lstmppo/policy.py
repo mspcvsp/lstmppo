@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
 from .types import PPOConfig, PolicyInput, PolicyOutput
+from .types import PolicyEvalInput, PolicyEvalOutput
 
 
 class WeightDrop(nn.Module):
@@ -209,10 +210,7 @@ class LSTMPPOPolicy(nn.Module):
         return actions, logprobs, policy_output
 
     def evaluate_actions_sequence(self,
-                                   obs: torch.Tensor,
-                                   hxs: torch.Tensor,
-                                   cxs: torch.Tensor,
-                                   actions: torch.Tensor):
+                                  inp: PolicyEvalInput):
         """
         Fully sequence-aware PPO evaluation.
         Uses the same sequence-aware forward() used by act().
@@ -221,16 +219,16 @@ class LSTMPPOPolicy(nn.Module):
         hxs, cxs: (B, H)
         actions: (T, B) or (T, B, 1)
         """
-        T, B = obs.shape[0], obs.shape[1]
+        T, B = inp.obs.shape[0], inp.obs.shape[1]
 
         # Reorder to (B, T, obs_dim) for batch_first LSTM
-        obs_bt = obs.transpose(0, 1)
+        obs_bt = inp.obs.transpose(0, 1)
 
         # Build PolicyInput for sequence mode
         policy_input = PolicyInput(
             obs=obs_bt,   # (B, T, obs_dim)
-            hxs=hxs,      # (B, H)
-            cxs=cxs,      # (B, H)
+            hxs=inp.hxs,  # (B, H)
+            cxs=inp.cxs,  # (B, H)
         )
 
         # Forward pass (sequence-aware)
@@ -251,14 +249,12 @@ class LSTMPPOPolicy(nn.Module):
         logprobs = dist.log_prob(actions)   # (T, B)
         entropy = dist.entropy().mean()     # scalar
 
-        return (
-            values,                # (T, B)
-            logprobs,              # (T, B)
-            entropy,               # scalar
-            policy_output.new_hxs, # (B, H)
-            policy_output.new_cxs, # (B, H)
-            policy_output.ar_loss, # scalar
-            policy_output.tar_loss # scalar
+        return PolicyEvalOutput(
+            values=values,                  # (T, B)
+            logprobs=logprobs,              # (T, B)
+            entropy=entropy,                # scalar
+            new_hxs=policy_output.new_hxs,  # (B, H)
+            new_cxs=policy_output.new_cxs,  # (B, H)
+            ar_loss=policy_output.ar_loss,  # scalar
+            tar_loss=policy_output.tar_loss # scalar
         )
-
-
