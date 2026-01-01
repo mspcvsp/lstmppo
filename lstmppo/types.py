@@ -25,7 +25,7 @@ class PPOConfig:
     """ Generalized Advantage Estimate (GAE) lambda"""
     learning_rate: float = 3e-4
     """Learning rate"""
-    clip_coef: float = 0.2
+    clip_range: float = 0.2
     """ Clip coefficient"""
     update_epochs: int = 4
     """ Number of update eophics"""
@@ -39,7 +39,7 @@ class PPOConfig:
     """Starting value of entropy coefficient for annealing"""
     end_entropy_coef: float = 0.0
     """Ending value of entropy coefficient for annealing"""
-    value_coef: float = 0.5
+    vf_coef: float = 0.5
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""

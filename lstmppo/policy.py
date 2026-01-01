@@ -241,8 +241,10 @@ class LSTMPPOPolicy(nn.Module):
         values = policy_output.values.transpose(0, 1)   # (T, B)
 
         # Actions: (T, B, 1) → (T, B)
-        if actions.dim() == 3 and actions.size(-1) == 1:
+        if inp.actions.dim() == 3 and inp.actions.size(-1) == 1:
             actions = actions.squeeze(-1)
+        else:
+            actions = inp.actions  # (T, B)
 
         dist = Categorical(logits=logits)
 

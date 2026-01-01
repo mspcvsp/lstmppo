@@ -4,7 +4,7 @@ from torch import nn
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
-from .types import PPOConfig, PolicyEvalInput, PolicyEvalOutput
+from .types import PPOConfig, PolicyEvalInput, PolicyEvalOutput, PolicyInput
 
 
 class LSTMPPOTrainer:
@@ -15,7 +15,6 @@ class LSTMPPOTrainer:
         self.cfg = cfg
         self.device = cfg.device
         self.update_idx = 0
-        self.total_updates = cfg.total_updates
 
         self.env = RecurrentVecEnvWrapper(cfg)
         self.policy = LSTMPPOPolicy(cfg).to(self.device)
@@ -23,12 +22,12 @@ class LSTMPPOTrainer:
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
-            lr=cfg.lr,
+            lr=cfg.learning_rate,
             eps=1e-5
         )
 
         self.rollout_steps = cfg.rollout_steps
-        self.epochs = cfg.ppo_epochs
+        self.epochs = cfg.update_epochs
         self.clip_range = cfg.clip_range
         self.vf_coef = cfg.vf_coef
         self.target_kl = cfg.target_kl
@@ -37,10 +36,8 @@ class LSTMPPOTrainer:
         self.fixed_entropy_coef = cfg.fixed_entropy_coef
         self.anneal_entropy_flag = cfg.anneal_entropy_flag
         self.start_entropy_coef = cfg.start_entropy_coef
-
-        self.entropy_coef_slope =\
-            (cfg.end_entropy_coef - cfg.start_entropy_coef) /\
-            max(self.total_updates - 1, 1)
+        self.end_entropy_coef = cfg.end_entropy_coef
+        self.entropy_coef_slope = None
 
         # persistent env state across rollouts
         self.env_state = self.env.reset()
@@ -234,8 +231,96 @@ class LSTMPPOTrainer:
 
     def train(self, total_updates: int):
 
+        if self.anneal_entropy_flag:
+
+            self.entropy_coef_slope =\
+                (self.end_entropy_coef - self.start_entropy_coef) /\
+                max(total_updates - 1, 1)
+
         for self.update_idx in range(total_updates):
 
             self.rollout_phase()
 
             self.update_phase()
+
+    def validate_lstm_state_flow(self):
+
+        print("=== LSTM State-Flow Validation ===")
+
+        # 1. Run a single rollout (assumes num_envs == 1 for cleanest check)
+        self.rollout_phase()
+
+        # 2. Get a single recurrent minibatch
+        #    For num_envs == 1, this should be the whole sequence.
+        batches = list(self.buffer.get_recurrent_minibatches())
+        
+        assert len(batches) == 1,\
+            "For validation, use a single minibatch / single env."
+        
+        batch = batches[0]
+
+        # Shapes:
+        # batch.obs:       (T, B, obs_dim)
+        # batch.actions:   (T, B, 1)
+        # batch.values:    (T, B)
+        # batch.logprobs:  (T, B)
+        # batch.hxs/cxs:   (B, H)
+
+        T, B, _ = batch.obs.shape
+        print(f"T = {T}, B = {B}")
+
+        # 3. Re-run the policy over the stored sequence
+        with torch.no_grad():
+
+            eval_output = \
+                self.policy.evaluate_actions_sequence(
+                    PolicyEvalInput(obs=batch.obs,          # (T, B, obs_dim)
+                                    hxs=batch.hxs,          # (B, H) initial state at t=0
+                                    cxs=batch.cxs,          # (B, H)
+                                    actions=batch.actions),  # (T, B, 1)
+                )
+
+        stored_values = batch.values       # (T, B)
+        stored_logprobs = batch.logprobs   # (T, B)
+
+        # 4. Compare
+        val_diff = (eval_output.values - stored_values).abs()
+        logp_diff = (eval_output.logprobs - stored_logprobs).abs()
+
+        print("max |values_rec - stored_values|   :", val_diff.max().item())
+        print("max |logprobs_rec - stored_logprobs|:", logp_diff.max().item())
+
+        # Optional: print a few timesteps for inspection
+        for t in range(min(T, 5)):
+            print(f"\n[t = {t}]")
+            print(" stored value   :", stored_values[t, 0].item())
+            print(" recomputed val :", eval_output.values[t, 0].item())
+            print(" |diff|         :", val_diff[t, 0].item())
+            print(" stored logprob :", stored_logprobs[t, 0].item())
+            print(" recomputed logp:", eval_output.logprobs[t, 0].item())
+            print(" |diff|         :", logp_diff[t, 0].item())
+
+        print("=== Validation complete ===")
+
+    def run_deterministic_rollout(self, steps=50):
+        self.policy.eval()
+        self.env.reset()
+        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
+
+        obs_list = []
+        val_list = []
+        logp_list = []
+
+        env_state = self.env_state
+
+        for _ in range(steps):
+            policy_in = to_policy_input(env_state)
+            actions, logprobs, policy_out = self.policy.act(policy_in)
+
+            obs_list.append(env_state.obs.clone())
+            val_list.append(policy_out.values.clone())
+            logp_list.append(logprobs.clone())
+
+            env_state = self.env.step(actions)
+
+        return obs_list, val_list, logp_list
