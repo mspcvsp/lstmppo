@@ -40,7 +40,7 @@ class LSTMPPOTrainer:
         self.entropy_coef_slope = None
 
         # persistent env state across rollouts
-        self.env_state = self.env.reset()
+        self.env_state = self.env.reset(seed=cfg.seed)
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)
@@ -60,7 +60,8 @@ class LSTMPPOTrainer:
             policy_in = to_policy_input(env_state)
 
             # NEW: act() now takes a PolicyInput dataclass
-            actions, logprobs, policy_out = self.policy.act(policy_in)
+            with torch.no_grad():
+                actions, logprobs, policy_out = self.policy.act(policy_in)
 
             next_state = self.env.step(actions)
 
@@ -132,12 +133,12 @@ class LSTMPPOTrainer:
 
                     t1 = min(t0 + tbptt_steps, T)
 
-                    obs_chunk      = batch.obs[t0:t1]          # (K, B, obs_dim)
-                    actions_chunk  = batch.actions[t0:t1]      # (K, B, 1)
-                    returns_chunk  = batch.returns[t0:t1]      # (K, B)
-                    adv_chunk      = batch.advantages[t0:t1]   # (K, B)
-                    old_logp_chunk = batch.logprobs[t0:t1]     # (K, B)
-                    old_values_chunk = batch.values[t0:t1]     # (K, B)
+                    obs_chunk = batch.obs[t0:t1]            # (K, B, obs_dim)
+                    actions_chunk = batch.actions[t0:t1]    # (K, B, 1)
+                    returns_chunk = batch.returns[t0:t1]    # (K, B)
+                    adv_chunk = batch.advantages[t0:t1]     # (K, B)
+                    old_logp_chunk = batch.logprobs[t0:t1]  # (K, B)
+                    old_values_chunk = batch.values[t0:t1]  # (K, B)
 
                     # ----- Sequence-aware evaluation -----
                     eval_output =\
@@ -342,3 +343,46 @@ class LSTMPPOTrainer:
             env_state = self.env.step(actions)
 
         return hxs_trace, cxs_trace
+
+    def validate_tbptt(self, K=16):
+        self.policy.eval()
+        self.rollout_phase()
+
+        batch = next(self.buffer.get_recurrent_minibatches())
+        T, B, _ = batch.obs.shape
+
+        # Full sequence
+        with torch.no_grad():
+            full_vals, full_logp, _, _, _, _, _ = \
+                self.policy.evaluate_actions_sequence(
+                    obs=batch.obs,
+                    hxs=batch.hxs,
+                    cxs=batch.cxs,
+                    actions=batch.actions,
+                )
+
+        # Chunked sequence
+        hxs = batch.hxs
+        cxs = batch.cxs
+        vals_chunks = []
+        logp_chunks = []
+
+        with torch.no_grad():
+            for t0 in range(0, T, K):
+                t1 = min(t0 + K, T)
+                v, lp, _, hxs, cxs, _, _ = \
+                    self.policy.evaluate_actions_sequence(
+                        obs=batch.obs[t0:t1],
+                        hxs=hxs,
+                        cxs=cxs,
+                        actions=batch.actions[t0:t1],
+                    )
+                vals_chunks.append(v)
+                logp_chunks.append(lp)
+
+        vals_rec = torch.cat(vals_chunks, dim=0)
+        logp_rec = torch.cat(logp_chunks, dim=0)
+
+        print("TBPTT value diff:", (vals_rec - full_vals).abs().max().item())
+        print("TBPTT logprob diff:", (logp_rec - full_logp).abs().max().item())
+

@@ -1,3 +1,4 @@
+from numpy.random import Generator, MT19937, SeedSequence
 import gymnasium as gym
 from gymnasium.vector import SyncVectorEnv
 import torch
@@ -38,9 +39,12 @@ class RecurrentVecEnvWrapper:
                                            dtype=torch.bool,
                                            device=self.device)
 
-    def reset(self) -> VecEnvState:
+    def reset(self, seed=None) -> VecEnvState:
 
-        obs, info = self.venv.reset()
+        rng = Generator(MT19937(SeedSequence(seed)))
+        seeds = [int(elem * 1E9) for elem in rng.random(self.num_envs)]
+
+        obs, info = self.venv.reset(seed=seeds)
 
         self.hxs.zero_()
         self.cxs.zero_()
