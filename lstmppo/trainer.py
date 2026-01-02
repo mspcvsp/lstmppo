@@ -395,7 +395,10 @@ class LSTMPPOTrainer:
     def validate_lstm_state_flow(self):
         print("=== LSTM State-Flow Validation ===")
 
+        # Deterministic policy
         self.policy.eval()
+
+        # Single-env rollout recommended
         self.rollout_phase()
 
         batches = list(self.buffer.get_recurrent_minibatches())
@@ -414,14 +417,11 @@ class LSTMPPOTrainer:
         with torch.no_grad():
             for t in range(T):
                 obs_t = batch.obs[t]          # (B, obs_dim)
-                hxs_t = batch.hxs             # (B, H) at t=0 only in your current design
-                cxs_t = batch.cxs             # (B, H)
+                hxs_t = batch.hxs[t]          # (B, H)
+                cxs_t = batch.cxs[t]          # (B, H)
+                act_t = batch.actions[t]      # (B, 1) or (B,)
 
-                # If you want per-timestep hidden states, you can store hxs[t], cxs[t]
-                # in the buffer instead of only hxs[0], cxs[0]. For now, we just
-                # validate using the stored start state and full-sequence eval.
-
-                # Build a single-step PolicyInput using the *stored* hidden state
+                # Build single-step PolicyInput
                 policy_in = PolicyInput(
                     obs=obs_t,                # (B, obs_dim)
                     hxs=hxs_t,                # (B, H)
@@ -431,11 +431,10 @@ class LSTMPPOTrainer:
                 policy_out = self.policy.forward(policy_in)
                 dist = Categorical(logits=policy_out.logits)
 
-                act_t = batch.actions[t]
                 actions = act_t.squeeze(-1) if act_t.dim() == 2 else act_t
 
-                val_t = policy_out.values     # (B,)
-                logp_t = dist.log_prob(actions)  # (B,)
+                val_t = policy_out.values          # (B,)
+                logp_t = dist.log_prob(actions)    # (B,)
 
                 rec_values.append(val_t.unsqueeze(0))    # (1, B)
                 rec_logprobs.append(logp_t.unsqueeze(0)) # (1, B)
@@ -459,4 +458,3 @@ class LSTMPPOTrainer:
             print(" |diff|         :", logp_diff[t, 0].item())
 
         print("=== Validation complete ===")
-

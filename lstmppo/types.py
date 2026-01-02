@@ -84,8 +84,8 @@ class RecurrentBatch:
     logprobs: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
-    hxs: torch.Tensor
-    cxs: torch.Tensor
+    hxs: torch.Tensor  # (T, B, H)
+    cxs: torch.Tensor  # (T, B, H)
     terminated: torch.Tensor
     truncated: torch.Tensor
 

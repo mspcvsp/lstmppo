@@ -167,8 +167,8 @@ class RecurrentRolloutBuffer:
                 logprobs=self.logprobs[:, idx],
                 returns=self.returns[:, idx],
                 advantages=self.advantages[:, idx],
-                hxs=self.hxs[0, idx],
-                cxs=self.cxs[0, idx],
+                hxs=self.hxs[:, idx],
+                cxs=self.cxs[:, idx],
                 terminated=self.terminated[:, idx],
                 truncated=self.truncated[:, idx],
             )
