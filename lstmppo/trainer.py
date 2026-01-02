@@ -253,51 +253,42 @@ class LSTMPPOTrainer:
 
         print("=== LSTM State-Flow Validation ===")
 
-        # 1. Run a single rollout (assumes num_envs == 1 for cleanest check)
+        # Ensure deterministic DropConnect behavior
+        self.policy.eval()
+
+        # Run a rollout (num_envs = 1 recommended)
         self.rollout_phase()
 
-        # 2. Get a single recurrent minibatch
-        #    For num_envs == 1, this should be the whole sequence.
+        # Get the single batch
         batches = list(self.buffer.get_recurrent_minibatches())
-
-        assert len(batches) == 1,\
-            "For validation, use a single minibatch / single env."
-
+        assert len(batches) == 1, "Use num_envs=1 for validation."
         batch = batches[0]
-
-        # Shapes:
-        # batch.obs:       (T, B, obs_dim)
-        # batch.actions:   (T, B, 1)
-        # batch.values:    (T, B)
-        # batch.logprobs:  (T, B)
-        # batch.hxs/cxs:   (B, H)
 
         T, B, _ = batch.obs.shape
         print(f"T = {T}, B = {B}")
 
-        # 3. Re-run the policy over the stored sequence
         with torch.no_grad():
 
             eval_output = \
                 self.policy.evaluate_actions_sequence(
-                    PolicyEvalInput(obs=batch.obs,          # (T, B, obs_dim)
-                                    hxs=batch.hxs,          # (B, H) initial state at t=0
-                                    cxs=batch.cxs,          # (B, H)
-                                    actions=batch.actions),  # (T, B, 1)
+                    PolicyEvalInput(obs=batch.obs,
+                                    hxs=batch.hxs,
+                                    cxs=batch.cxs,
+                                    actions=batch.actions)
                 )
 
-        stored_values = batch.values       # (T, B)
-        stored_logprobs = batch.logprobs   # (T, B)
+        stored_values = batch.values
+        stored_logprobs = batch.logprobs
 
-        # 4. Compare
         val_diff = (eval_output.values - stored_values).abs()
         logp_diff = (eval_output.logprobs - stored_logprobs).abs()
 
         print("max |values_rec - stored_values|   :", val_diff.max().item())
         print("max |logprobs_rec - stored_logprobs|:", logp_diff.max().item())
 
-        # Optional: print a few timesteps for inspection
         for t in range(min(T, 5)):
+            print(eval_output.logprobs[t,:0])
+
             print(f"\n[t = {t}]")
             print(" stored value   :", stored_values[t, 0].item())
             print(" recomputed val :", eval_output.values[t, 0].item())
