@@ -304,51 +304,6 @@ class LSTMPPOTrainer:
 
         print("=== Validation complete ===")
 
-    def trace_hidden_states(self, steps=20):
-
-        self.reset()
-
-        self.policy.eval()
-        self.env.reset()
-
-        env_state = self.env_state
-        hxs_trace = []
-        cxs_trace = []
-
-        for _ in range(steps):
-            policy_in = to_policy_input(env_state)
-            hxs_trace.append(policy_in.hxs.clone())
-            cxs_trace.append(policy_in.cxs.clone())
-
-            actions, _, _ = self.policy.act(policy_in)
-            env_state = self.env.step(actions)
-
-        return hxs_trace, cxs_trace
-
-    def run_deterministic_rollout(self, steps=50):
-
-        self.policy.eval()
-        self.env.reset()
-        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
-
-        obs_list = []
-        val_list = []
-        logp_list = []
-
-        env_state = self.env_state
-
-        for _ in range(steps):
-            policy_in = to_policy_input(env_state)
-            actions, logprobs, policy_out = self.policy.act(policy_in)
-
-            obs_list.append(env_state.obs.clone())
-            val_list.append(policy_out.values.clone())
-            logp_list.append(logprobs.clone())
-
-            env_state = self.env.step(actions)
-
-        return obs_list, val_list, logp_list
-
     def validate_tbptt(self, K=16):
 
         self.policy.eval()
@@ -429,5 +384,60 @@ class LSTMPPOTrainer:
 
         assert torch.allclose(p1[0], p2[0], atol=1e-6), \
             "Rollout logprobs are not deterministic"
+        
+    def run_deterministic_rollout(self, steps=50):
 
+        self.policy.eval()
+        self.env.reset()
+        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
+
+        obs_list = []
+        val_list = []
+        logp_list = []
+
+        env_state = self.env_state
+
+        for _ in range(steps):
+            policy_in = to_policy_input(env_state)
+            actions, logprobs, policy_out = self.policy.act(policy_in)
+
+            obs_list.append(env_state.obs.clone())
+            val_list.append(policy_out.values.clone())
+            logp_list.append(logprobs.clone())
+
+            env_state = self.env.step(actions)
+
+        return obs_list, val_list, logp_list
+        
+    def assert_hidden_state_flow(self):
+
+        h1, c1 = self.trace_hidden_states()
+        h2, c2 = self.trace_hidden_states()
+
+        for t in range(len(h1)):
+            assert torch.allclose(h1[t], h2[t], atol=1e-6), \
+                f"hxs mismatch at t={t}"
+            assert torch.allclose(c1[t], c2[t], atol=1e-6), \
+                f"cxs mismatch at t={t}"
+
+    def trace_hidden_states(self, steps=20):
+
+        self.reset()
+
+        self.policy.eval()
+        self.env.reset()
+
+        env_state = self.env_state
+        hxs_trace = []
+        cxs_trace = []
+
+        for _ in range(steps):
+            policy_in = to_policy_input(env_state)
+            hxs_trace.append(policy_in.hxs.clone())
+            cxs_trace.append(policy_in.cxs.clone())
+
+            actions, _, _ = self.policy.act(policy_in)
+            env_state = self.env.step(actions)
+
+        return hxs_trace, cxs_trace
 
