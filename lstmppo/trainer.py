@@ -256,36 +256,32 @@ class LSTMPPOTrainer:
             self.update_phase()
 
     def validate_tbptt(self, K=16):
-
         self.policy.eval()
         self.rollout_phase()
 
         batch = next(self.buffer.get_recurrent_minibatches())
         T, B, _ = batch.obs.shape
-        print(f"T={T}, B={B}, K={K}")
+
+        # Use the hidden state at the start of the sequence
+        hxs0 = batch.hxs[0]   # (B, H)
+        cxs0 = batch.cxs[0]   # (B, H)
 
         # ----- Full sequence -----
         with torch.no_grad():
             full = self.policy.evaluate_actions_sequence(
                 PolicyEvalInput(
                     obs=batch.obs,        # (T, B, obs_dim)
-                    hxs=batch.hxs,        # (B, H)
-                    cxs=batch.cxs,        # (B, H)
+                    hxs=hxs0,             # (B, H)
+                    cxs=cxs0,             # (B, H)
                     actions=batch.actions # (T, B, 1) or (T, B)
                 )
             )
             full_vals = full.values      # (T, B)
             full_logp = full.logprobs    # (T, B)
 
-        assert full_logp.shape == (T, B), \
-            f"full_logp must be (T,B), got {full_logp.shape}"
-
-        print("full_vals shape:", full_vals.shape)
-        print("full_logp shape:", full_logp.shape)
-
         # ----- Chunked sequence -----
-        hxs = batch.hxs
-        cxs = batch.cxs
+        hxs = hxs0.clone()
+        cxs = cxs0.clone()
         vals_chunks = []
         logp_chunks = []
 
@@ -298,25 +294,18 @@ class LSTMPPOTrainer:
                         obs=batch.obs[t0:t1],        # (K, B, obs_dim)
                         hxs=hxs,                     # (B, H)
                         cxs=cxs,                     # (B, H)
-                        actions=batch.actions[t0:t1] # (K, B, 1) or (K, B)
+                        actions=batch.actions[t0:t1] # (K, B)
                     )
                 )
 
-                vals_chunks.append(out.values)    # (K, B)
-                logp_chunks.append(out.logprobs)  # (K, B)
+                vals_chunks.append(out.values)
+                logp_chunks.append(out.logprobs)
 
-                # carry hidden state forward across chunks
-                hxs = out.new_hxs.detach()        # (B, H)
-                cxs = out.new_cxs.detach()        # (B, H)
+                hxs = out.new_hxs.detach()
+                cxs = out.new_cxs.detach()
 
-        vals_rec = torch.cat(vals_chunks, dim=0)   # (T, B)
-        logp_rec = torch.cat(logp_chunks, dim=0)   # (T, B)
-
-        assert logp_rec.shape == (T, B), \
-            f"logp_rec must be (T,B), got {logp_rec.shape}"
-
-        print("vals_rec shape:", vals_rec.shape)
-        print("logp_rec shape:", logp_rec.shape)
+        vals_rec = torch.cat(vals_chunks, dim=0)
+        logp_rec = torch.cat(logp_chunks, dim=0)
 
         print("TBPTT value diff:",
               (vals_rec - full_vals).abs().max().item())
