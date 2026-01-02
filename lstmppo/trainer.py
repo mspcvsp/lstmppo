@@ -1,4 +1,6 @@
 # trainer.py
+import json
+from pathlib import Path
 import numpy as np
 import torch
 import random
@@ -7,7 +9,9 @@ from torch.distributions.categorical import Categorical
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
-from .types import PPOConfig, PolicyEvalInput, PolicyEvalOutput, PolicyInput
+from .types import PPOConfig, PolicyEvalInput, PolicyInput
+from .types import RecurrentMiniBatch
+from torch.utils.tensorboard import SummaryWriter
 
 
 class LSTMPPOTrainer:
@@ -29,6 +33,9 @@ class LSTMPPOTrainer:
             eps=1e-5
         )
 
+        self.entropy_coef_slope = None
+        self.jsonl_fp = None
+
         self.rollout_steps = cfg.rollout_steps
         self.epochs = cfg.update_epochs
         self.clip_range = cfg.clip_range
@@ -40,8 +47,19 @@ class LSTMPPOTrainer:
         self.anneal_entropy_flag = cfg.anneal_entropy_flag
         self.start_entropy_coef = cfg.start_entropy_coef
         self.end_entropy_coef = cfg.end_entropy_coef
-        self.entropy_coef_slope = None
         self.seed = cfg.seed
+        self.tbptt_steps = cfg.tbptt_steps
+        self.target_kl = cfg.target_kl
+        self.stats = None
+        self.stat_steps = None
+
+        tb_logdir = Path(*[cfg.tb_logdir,
+                           cfg.run_name])
+
+        self.writer = SummaryWriter(log_dir=tb_logdir)
+
+        self.jsonl_file = Path(*[cfg.jsonl_path,
+                               cfg.run_name + ".json"])
 
         self.reset()
 
@@ -53,6 +71,23 @@ class LSTMPPOTrainer:
 
         # persistent env state across rollouts
         self.env_state = self.env.reset(seed=self.seed)
+
+    def train(self,
+              total_updates: int):
+
+        if self.anneal_entropy_flag:
+
+            self.entropy_coef_slope =\
+                (self.end_entropy_coef - self.start_entropy_coef) /\
+                max(total_updates - 1, 1)
+
+        with open(self.jsonl_file, "w") as self.jsonl_fp:
+
+            for self.update_idx in range(total_updates):
+
+                self.rollout_phase()
+
+                self.update_phase_tbptt()
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)
@@ -108,152 +143,232 @@ class LSTMPPOTrainer:
         
     def update_phase_tbptt(self):
 
-        # ----- Entropy annealing -----
+        entropy_coef = self.compute_entropy_coef()
+
+        self.init_stats()
+
+        for _ in range(self.epochs):
+
+            for batch in self.buffer.get_recurrent_minibatches():
+
+                for mb in batch.iter_chunks(self.cfg.tbptt_steps):
+
+                    self.update_chunk(mb, entropy_coef)
+
+        #  ----- Compute EV over the entire rollout  -----
+        all_values = self.buffer.values.view(-1)
+        all_returns = self.buffer.returns.view(-1)
+
+        ev = explained_variance(all_values, all_returns)
+        self.stats["explained_var"] = ev.item()
+
+        self.compute_average_stats()
+
+        self.adapt_clip_range()
+
+    def update_chunk(self, mb: RecurrentMiniBatch, entropy_coef):
+
+        # ------- Forward pass -------
+        eval_output = self.policy.evaluate_actions_sequence(
+            PolicyEvalInput(
+                obs=mb.obs,
+                hxs=mb.hxs0,
+                cxs=mb.cxs0,
+                actions=mb.actions,
+            )
+        )
+
+        # ------- Flatten -------
+        K, B = eval_output.values.shape
+        values = eval_output.values.view(K * B)
+        new_logp = eval_output.logprobs.view(K * B)
+        old_logp = mb.old_logp.view(K * B)
+        returns = mb.returns.view(K * B)
+        adv = mb.advantages.view(K * B)
+        old_values = mb.old_values.view(K * B)
+
+        adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
+
+        policy_loss, value_loss, approx_kl, clip_frac = \
+            self.compute_losses(values,
+                                new_logp,
+                                old_logp,
+                                old_values,
+                                returns,
+                                adv)
+
+        dist = Categorical(logits=eval_output.logits.view(K * B, -1))
+        entropy = dist.entropy().mean()
+
+        loss = (
+            policy_loss
+            + self.vf_coef * value_loss
+            - entropy_coef * entropy
+            + eval_output.ar_loss
+            + eval_output.tar_loss
+        )
+
+        grad_norm = self.backward_and_clip(loss)
+
+        self.update_stats(policy_loss,
+                          value_loss,
+                          entropy,
+                          approx_kl,
+                          clip_frac,
+                          grad_norm)
+
+    def compute_losses(self,
+                       values,
+                       new_logp,
+                       old_logp,
+                       old_values,
+                       returns,
+                       adv):
+
+        ratio = torch.exp(new_logp - old_logp)
+
+        approx_kl = 0.5 * (old_logp - new_logp).pow(2).mean()
+
+        clip_frac = (
+            (ratio > 1 + self.clip_range) |
+            (ratio < 1 - self.clip_range)
+        ).float().mean()
+
+        surr1 = ratio * adv
+
+        surr2 = torch.clamp(ratio,
+                            1 - self.clip_range,
+                            1 + self.clip_range) * adv
+
+        policy_loss = -torch.min(surr1, surr2).mean()
+
+        value_pred_clipped = old_values + torch.clamp(
+            values - old_values,
+            -self.clip_range,
+            self.clip_range,
+        )
+
+        value_loss = 0.5 * torch.max(
+            (values - returns).pow(2),
+            (value_pred_clipped - returns).pow(2)
+        ).mean()
+
+        return policy_loss, value_loss, approx_kl, clip_frac
+    
+    def backward_and_clip(self,
+                          loss):
+
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        grad_norm = 0.0
+        for p in self.policy.parameters():
+            if p.grad is not None:
+                grad_norm += p.grad.data.norm(2).item() ** 2
+
+        grad_norm = grad_norm ** 0.5
+
+        nn.utils.clip_grad_norm_(self.policy.parameters(),
+                                 self.max_grad_norm)
+        
+        self.optimizer.step()
+
+        return grad_norm
+
+    def update_stats(self,
+                     policy_loss,
+                     value_loss,
+                     entropy,
+                     approx_kl,
+                     clip_frac,
+                     grad_norm):
+
+        self.stats["policy_loss"] += policy_loss.item()
+        self.stats["value_loss"] += value_loss.item()
+        self.stats["entropy"] += entropy.item()
+        self.stats["approx_kl"] += approx_kl.item()
+        self.stats["clip_frac"] += clip_frac.item()
+        self.stats["grad_norm"] += grad_norm
+        self.stats["steps"] += 1
+
+    def compute_average_stats(self):
+
+        if self.steps["steps"] > 0:
+
+            norm_factor = 1.0 / self.steps["steps"]
+
+            for key in ["policy_loss",
+                        "value_loss",
+                        "entropy",
+                        "approx_kl",
+                        "clip_frac",
+                        "grad_norm"]:
+
+                self.stats[key] *= norm_factor
+
+    def adapt_clip_range(self):
+
+        avg_kl = self.steps["approx_kl"]
+
+        if avg_kl > 2.0 * self.target_kl:
+            self.clip_range *= 0.9
+        elif avg_kl < 0.5 * self.target_kl:
+            self.clip_range *= 1.05
+
+        self.clip_range = float(torch.clamp(
+            torch.tensor(self.clip_range),
+            0.001,
+            0.02
+        ))
+
+    def log_metrics(self):
+
+        for key, value in self.stats.items():
+
+            self.writer.add_scalar(key,
+                                   value,
+                                   self.update_idx)
+
+        record = {"update": self.update_idx, **self.stats}
+        self.jsonl_fp.write(json.dumps(record) + "\n")
+        self.jsonl_fp.flush()
+
+        print(
+            f"upd {self.update_idx:04d} | "
+            f"pol {self.stats['policy_loss']:.3f} | "
+            f"val {self.stats['value_loss']:.3f} | "
+            f"ent {self.stats['entropy']:.3f} | "
+            f"kl {self.stats['approx_kl']:.4f} | "
+            f"clip {self.stats['clip_frac']:.3f} | "
+            f"ev {self.stats['explained_var']:.3f} | "
+            f"grad {self.stats['grad_norm']:.2f} | "
+            f"clip_range {self.clip_range:.3f}"
+        )
+
+    def compute_entropy_coef(self):
+
         if self.anneal_entropy_flag:
 
             entropy_coef =\
                 self.entropy_coef_slope * self.update_idx +\
                 self.start_entropy_coef
         else:
-            entropy_coef = self.fixed_entropy_coef  
+            entropy_coef = self.fixed_entropy_coef
 
-        # ----- KL-adaptive clipping -----
-        # We adjust clip_range AFTER each epoch based on avg KL
-        target_kl = self.cfg.target_kl
-        kl_accum = 0.0
-        kl_count = 0
+        return entropy_coef 
+    
+    def init_stats(self):
 
-        tbptt_steps = self.cfg.tbptt_steps   # e.g., 16
-
-        for _ in range(self.epochs):
-
-            for batch in self.buffer.get_recurrent_minibatches():
-
-                # batch.obs: (T, B, obs_dim)
-                # batch.hxs: (B, H)
-                # batch.cxs: (B, H)
-
-                T, B, _ = batch.obs.shape
-
-                # Initial hidden state for the first chunk
-                hxs = batch.hxs
-                cxs = batch.cxs
-
-                # Loop over chunks
-                for t0 in range(0, T, tbptt_steps):
-
-                    t1 = min(t0 + tbptt_steps, T)
-
-                    obs_chunk = batch.obs[t0:t1]            # (K, B, obs_dim)
-                    actions_chunk = batch.actions[t0:t1]    # (K, B, 1)
-                    returns_chunk = batch.returns[t0:t1]    # (K, B)
-                    adv_chunk = batch.advantages[t0:t1]     # (K, B)
-                    old_logp_chunk = batch.logprobs[t0:t1]  # (K, B)
-                    old_values_chunk = batch.values[t0:t1]  # (K, B)
-
-                    # ----- Sequence-aware evaluation -----
-                    eval_output =\
-                        self.policy.evaluate_actions_sequence(
-                            PolicyEvalInput(obs=obs_chunk,
-                                            hxs=hxs,
-                                            cxs=cxs,
-                                            actions=actions_chunk)
-                        )
-
-                    # Detach hidden state for next chunk (truncate BPTT)
-                    hxs = eval_output.new_hxs.detach()
-                    cxs = eval_output.new_cxs.detach()
-
-                    # Flatten K,B → K*B
-                    Kc, Bc = eval_output.values.shape
-                    values = eval_output.values.view(Kc * Bc)
-                    new_logprobs = eval_output.logprobs.view(Kc * Bc)
-                    old_logp = old_logp_chunk.view(Kc * Bc)
-                    returns = returns_chunk.view(Kc * Bc)
-                    advantages = adv_chunk.view(Kc * Bc)
-                    old_values = old_values_chunk.view(Kc * Bc)
-
-                    # Normalize advantages per chunk
-                    advantages = (advantages - advantages.mean()) / (
-                        advantages.std(unbiased=False) + 1e-8
-                    )
-
-                    # ----- PPO ratio -----
-                    ratio = torch.exp(new_logprobs - old_logp)
-
-                    # ----- KL tracking -----
-                    approx_kl = (old_logp - new_logprobs).mean()
-                    kl_accum += approx_kl.item()
-                    kl_count += 1
-
-                    # ----- Clipped surrogate -----
-                    surr1 = ratio * advantages
-                    surr2 = torch.clamp(
-                        ratio,
-                        1.0 - self.clip_range,
-                        1.0 + self.clip_range,
-                    ) * advantages
-                    policy_loss = -torch.min(surr1, surr2).mean()
-
-                    # ----- Value function clipping -----
-                    value_pred_clipped = old_values + torch.clamp(
-                        values - old_values,
-                        -self.clip_range,
-                        self.clip_range,
-                    )
-                    value_losses = (values - returns).pow(2)
-                    
-                    value_losses_clipped =\
-                        (value_pred_clipped - returns).pow(2)
-                    
-                    value_loss =\
-                        0.5 * torch.max(value_losses,
-                                        value_losses_clipped).mean()
-
-                    # ----- Total loss -----
-                    loss = (
-                        policy_loss
-                        + self.vf_coef * value_loss
-                        - entropy_coef * eval_output.entropy
-                        + eval_output.ar_loss
-                        + eval_output.tar_loss
-                    )
-
-                    self.optimizer.zero_grad()
-                    loss.backward()
-
-                    nn.utils.clip_grad_norm_(self.policy.parameters(),
-                                             self.max_grad_norm)
-
-                    self.optimizer.step()
-
-            # ----- KL-adaptive clipping (after each epoch) -----
-            avg_kl = kl_accum / max(kl_count, 1)
-
-            if avg_kl > 2.0 * target_kl:
-                self.clip_range *= 0.9
-            elif avg_kl < 0.5 * target_kl:
-                self.clip_range *= 1.05
-
-            self.clip_range = float(torch.clamp(
-                torch.tensor(self.clip_range),
-                0.05,
-                0.3
-            ))
-
-    def train(self, total_updates: int):
-
-        if self.anneal_entropy_flag:
-
-            self.entropy_coef_slope =\
-                (self.end_entropy_coef - self.start_entropy_coef) /\
-                max(total_updates - 1, 1)
-
-        for self.update_idx in range(total_updates):
-
-            self.rollout_phase()
-
-            self.update_phase()
+        self.stats = {
+            "policy_loss": 0.0,
+            "value_loss": 0.0,
+            "entropy": 0.0,
+            "approx_kl": 0.0,
+            "clip_frac": 0.0,
+            "grad_norm": 0.0,
+            "explained_var": 0.0,
+            "steps": 0,
+        }
 
     def validate_tbptt(self, K=16):
         self.policy.eval()
@@ -447,3 +562,7 @@ class LSTMPPOTrainer:
             print(" |diff|         :", logp_diff[t, 0].item())
 
         print("=== Validation complete ===")
+
+def explained_variance(y_pred, y_true):
+    var_y = torch.var(y_true)
+    return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)

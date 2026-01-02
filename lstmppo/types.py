@@ -61,7 +61,12 @@ class PPOConfig:
     """LSTM temporal activation regularization (TAR)"""
     tbptt_steps: int = 16
     """ Truncated BPTT steps """
-
+    tb_logdir: str = "./tb_logs"
+    """ TensorBoard log directory """
+    jsonl_path: str = "./jsonl"
+    """ JSONL (one JSON object per line) log directory """
+    target_kl: float = 0.005
+    """ Target KL divergence threshold """
 
 @dataclass
 class RolloutStep:
@@ -77,6 +82,20 @@ class RolloutStep:
 
 
 @dataclass
+class RecurrentMiniBatch:
+    obs: torch.Tensor
+    actions: torch.Tensor
+    returns: torch.Tensor
+    advantages: torch.Tensor
+    old_logp: torch.Tensor
+    old_values: torch.Tensor
+    hxs0: torch.Tensor
+    cxs0: torch.Tensor
+    t0: int
+    t1: int
+
+
+@dataclass
 class RecurrentBatch:
     obs: torch.Tensor
     actions: torch.Tensor
@@ -89,6 +108,41 @@ class RecurrentBatch:
     terminated: torch.Tensor
     truncated: torch.Tensor
 
+    def iter_chunks(self, K: int):
+        """
+        Yield TBPTT chunks of length K.
+        Each chunk yields:
+            obs_chunk:      (K, B, obs_dim)
+            actions_chunk:  (K, B, 1)
+            returns_chunk:  (K, B)
+            adv_chunk:      (K, B)
+            old_logp_chunk: (K, B)
+            old_values:     (K, B)
+            hxs0:           (B, H) -- initial hidden state for this chunk
+            cxs0:           (B, H)
+        """
+        T = self.obs.size(0)
+        B = self.obs.size(1)
+
+        for t0 in range(0, T, K):
+            t1 = min(t0 + K, T)
+
+            # Hidden state at the *start* of the chunk
+            hxs0 = self.hxs[t0]   # (B, H)
+            cxs0 = self.cxs[t0]   # (B, H)
+
+            yield RecurrentMiniBatch(
+                obs=self.obs[t0:t1],
+                actions=self.actions[t0:t1],
+                returns=self.returns[t0:t1],
+                advantages=self.advantages[t0:t1],
+                old_logp=self.logprobs[t0:t1],
+                old_values=self.values[t0:t1],
+                hxs0=hxs0,
+                cxs0=cxs0,
+                t0=t0,
+                t1=t1
+            )
 
 @dataclass
 class PolicyInput:
