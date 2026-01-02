@@ -210,53 +210,59 @@ class LSTMPPOPolicy(nn.Module):
         return actions, logprobs, policy_output
 
     def evaluate_actions_sequence(self,
-                                  inp: PolicyEvalInput):
+                                inp: PolicyEvalInput) -> PolicyEvalOutput:
         """
         Fully sequence-aware PPO evaluation.
-        Uses the same sequence-aware forward() used by act().
 
-        obs: (T, B, obs_dim)
-        hxs, cxs: (B, H)
-        actions: (T, B) or (T, B, 1)
+        inp.obs:     (T, B, obs_dim)
+        inp.hxs:     (B, H)
+        inp.cxs:     (B, H)
+        inp.actions: (T, B) or (T, B, 1)
         """
         T, B = inp.obs.shape[0], inp.obs.shape[1]
 
-        # Reorder to (B, T, obs_dim) for batch_first LSTM
-        obs_bt = inp.obs.transpose(0, 1)
+        # (T, B, F) -> (B, T, F) for batch_first LSTM
+        obs_bt = inp.obs.transpose(0, 1)  # (B, T, obs_dim)
 
-        # Build PolicyInput for sequence mode
         policy_input = PolicyInput(
-            obs=obs_bt,   # (B, T, obs_dim)
-            hxs=inp.hxs,  # (B, H)
-            cxs=inp.cxs,  # (B, H)
+            obs=obs_bt,    # (B, T, obs_dim)
+            hxs=inp.hxs,   # (B, H)
+            cxs=inp.cxs,   # (B, H)
         )
 
-        # Forward pass (sequence-aware)
+        # Forward through encoder + LSTM + heads
         policy_output = self.forward(policy_input)
-        # logits: (B, T, A)
-        # values: (B, T)
+        # policy_output.logits: (B, T, A)
+        # policy_output.values: (B, T)
 
-        # Convert back to (T, B, ...)
-        logits = policy_output.logits.transpose(0, 1)   # (T, B, A)
-        values = policy_output.values.transpose(0, 1)   # (T, B)
+        # Back to (T, B, ...)
+        logits = policy_output.logits.transpose(0, 1)  # (T, B, A)
+        values = policy_output.values.transpose(0, 1)  # (T, B)
 
-        # Actions: (T, B, 1) → (T, B)
+        # Actions: ensure shape (T, B)
         if inp.actions.dim() == 3 and inp.actions.size(-1) == 1:
-            actions = actions.squeeze(-1)
+            actions = inp.actions.squeeze(-1)          # (T, B)
         else:
-            actions = inp.actions  # (T, B)
+            actions = inp.actions                      # (T, B)
 
         dist = Categorical(logits=logits)
 
-        logprobs = dist.log_prob(actions)   # (T, B)
-        entropy = dist.entropy().mean()     # scalar
+        assert logits.dim() == 3,\
+            f"logits must be (T,B,A), got {logits.shape}"
+        
+        assert actions.shape == (T, B),\
+            f"actions must be (T,B), got {actions.shape}"
+
+        # Correct shape: (T, B)
+        logprobs = dist.log_prob(actions)             # (T, B)
+        entropy = dist.entropy().mean()               # scalar
 
         return PolicyEvalOutput(
-            values=values,                  # (T, B)
-            logprobs=logprobs,              # (T, B)
-            entropy=entropy,                # scalar
-            new_hxs=policy_output.new_hxs,  # (B, H)
-            new_cxs=policy_output.new_cxs,  # (B, H)
-            ar_loss=policy_output.ar_loss,  # scalar
-            tar_loss=policy_output.tar_loss # scalar
+            values=values,                    # (T, B)
+            logprobs=logprobs,                # (T, B)
+            entropy=entropy,                  # scalar
+            new_hxs=policy_output.new_hxs,    # (B, H)
+            new_cxs=policy_output.new_cxs,    # (B, H)
+            ar_loss=policy_output.ar_loss,    # scalar
+            tar_loss=policy_output.tar_loss,  # scalar
         )

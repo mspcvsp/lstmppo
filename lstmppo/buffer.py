@@ -25,7 +25,7 @@ class RecurrentRolloutBuffer:
         
         self.actions = torch.zeros(self.rollout_steps,
                                    self.num_envs,
-                                   cfg.action_dim,
+                                   1,
                                    device=cfg.device)
 
         self.rewards = torch.zeros(self.rollout_steps,
@@ -75,13 +75,27 @@ class RecurrentRolloutBuffer:
             step: RolloutStep):
 
         t = self.step
+
+        assert step.obs.shape == (self.num_envs, *self.obs.shape[2:]), \
+            f"Obs shape mismatch: {step.obs.shape}"
+
         self.obs[t].copy_(step.obs)
 
-        # assume actions is (N,) → store as (N,1)
+        # PPO expects integer action indices of shape (T, B)
+        # (or (T, B, 1) before squeeze).
         if step.actions.dim() == 1:
+            # (B,) → (B,1)
             self.actions[t].copy_(step.actions.unsqueeze(-1))
-        else:
+        #------------------------------------------------------
+        elif step.actions.dim() == 2 and step.actions.size(-1) == 1:
+            # already (B,1)
             self.actions[t].copy_(step.actions)
+        #------------------------------------------------------
+        else:
+            raise RuntimeError(f"Invalid action shape: {step.actions.shape}")
+
+        assert self.actions[t].shape == (self.num_envs, 1), \
+            f"Stored actions must be (B,1), got {self.actions[t].shape}"
 
         self.rewards[t].copy_(step.rewards)
         self.values[t].copy_(step.values)

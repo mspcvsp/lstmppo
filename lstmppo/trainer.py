@@ -40,13 +40,18 @@ class LSTMPPOTrainer:
         self.start_entropy_coef = cfg.start_entropy_coef
         self.end_entropy_coef = cfg.end_entropy_coef
         self.entropy_coef_slope = None
+        self.seed = cfg.seed
 
-        random.seed(cfg.seed)
-        np.random.seed(cfg.seed)
-        torch.manual_seed(cfg.seed)
+        self.reset()
+
+    def reset(self):
+
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
 
         # persistent env state across rollouts
-        self.env_state = self.env.reset(seed=cfg.seed)
+        self.env_state = self.env.reset(seed=self.seed)
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)
@@ -155,8 +160,8 @@ class LSTMPPOTrainer:
                         )
 
                     # Detach hidden state for next chunk (truncate BPTT)
-                    hxs = eval_output.hxs_new.detach()
-                    cxs = eval_output.cxs_new.detach()
+                    hxs = eval_output.new_hxs.detach()
+                    cxs = eval_output.new_cxs.detach()
 
                     # Flatten K,B → K*B
                     Kc, Bc = eval_output.values.shape
@@ -299,7 +304,29 @@ class LSTMPPOTrainer:
 
         print("=== Validation complete ===")
 
+    def trace_hidden_states(self, steps=20):
+
+        self.reset()
+
+        self.policy.eval()
+        self.env.reset()
+
+        env_state = self.env_state
+        hxs_trace = []
+        cxs_trace = []
+
+        for _ in range(steps):
+            policy_in = to_policy_input(env_state)
+            hxs_trace.append(policy_in.hxs.clone())
+            cxs_trace.append(policy_in.cxs.clone())
+
+            actions, _, _ = self.policy.act(policy_in)
+            env_state = self.env.step(actions)
+
+        return hxs_trace, cxs_trace
+
     def run_deterministic_rollout(self, steps=50):
+
         self.policy.eval()
         self.env.reset()
         self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
@@ -322,42 +349,35 @@ class LSTMPPOTrainer:
 
         return obs_list, val_list, logp_list
 
-    def trace_hidden_states(self, steps=20):
-        self.policy.eval()
-        self.env.reset()
-
-        env_state = self.env_state
-        hxs_trace = []
-        cxs_trace = []
-
-        for _ in range(steps):
-            policy_in = to_policy_input(env_state)
-            hxs_trace.append(policy_in.hxs.clone())
-            cxs_trace.append(policy_in.cxs.clone())
-
-            actions, _, _ = self.policy.act(policy_in)
-            env_state = self.env.step(actions)
-
-        return hxs_trace, cxs_trace
-
     def validate_tbptt(self, K=16):
+
         self.policy.eval()
         self.rollout_phase()
 
         batch = next(self.buffer.get_recurrent_minibatches())
         T, B, _ = batch.obs.shape
+        print(f"T={T}, B={B}, K={K}")
 
-        # Full sequence
+        # ----- Full sequence -----
         with torch.no_grad():
-            full_vals, full_logp, _, _, _, _, _ = \
-                self.policy.evaluate_actions_sequence(
-                    obs=batch.obs,
-                    hxs=batch.hxs,
-                    cxs=batch.cxs,
-                    actions=batch.actions,
+            full = self.policy.evaluate_actions_sequence(
+                PolicyEvalInput(
+                    obs=batch.obs,        # (T, B, obs_dim)
+                    hxs=batch.hxs,        # (B, H)
+                    cxs=batch.cxs,        # (B, H)
+                    actions=batch.actions # (T, B, 1) or (T, B)
                 )
+            )
+            full_vals = full.values      # (T, B)
+            full_logp = full.logprobs    # (T, B)
 
-        # Chunked sequence
+        assert full_logp.shape == (T, B), \
+            f"full_logp must be (T,B), got {full_logp.shape}"
+
+        print("full_vals shape:", full_vals.shape)
+        print("full_logp shape:", full_logp.shape)
+
+        # ----- Chunked sequence -----
         hxs = batch.hxs
         cxs = batch.cxs
         vals_chunks = []
@@ -366,19 +386,48 @@ class LSTMPPOTrainer:
         with torch.no_grad():
             for t0 in range(0, T, K):
                 t1 = min(t0 + K, T)
-                v, lp, _, hxs, cxs, _, _ = \
-                    self.policy.evaluate_actions_sequence(
-                        obs=batch.obs[t0:t1],
-                        hxs=hxs,
-                        cxs=cxs,
-                        actions=batch.actions[t0:t1],
+
+                out = self.policy.evaluate_actions_sequence(
+                    PolicyEvalInput(
+                        obs=batch.obs[t0:t1],        # (K, B, obs_dim)
+                        hxs=hxs,                     # (B, H)
+                        cxs=cxs,                     # (B, H)
+                        actions=batch.actions[t0:t1] # (K, B, 1) or (K, B)
                     )
-                vals_chunks.append(v)
-                logp_chunks.append(lp)
+                )
 
-        vals_rec = torch.cat(vals_chunks, dim=0)
-        logp_rec = torch.cat(logp_chunks, dim=0)
+                vals_chunks.append(out.values)    # (K, B)
+                logp_chunks.append(out.logprobs)  # (K, B)
 
-        print("TBPTT value diff:", (vals_rec - full_vals).abs().max().item())
-        print("TBPTT logprob diff:", (logp_rec - full_logp).abs().max().item())
+                # carry hidden state forward across chunks
+                hxs = out.new_hxs.detach()        # (B, H)
+                cxs = out.new_cxs.detach()        # (B, H)
+
+        vals_rec = torch.cat(vals_chunks, dim=0)   # (T, B)
+        logp_rec = torch.cat(logp_chunks, dim=0)   # (T, B)
+
+        assert logp_rec.shape == (T, B), \
+            f"logp_rec must be (T,B), got {logp_rec.shape}"
+
+        print("vals_rec shape:", vals_rec.shape)
+        print("logp_rec shape:", logp_rec.shape)
+
+        print("TBPTT value diff:",
+              (vals_rec - full_vals).abs().max().item())
+
+        print("TBPTT logprob diff:",
+              (logp_rec - full_logp).abs().max().item())
+
+    def assert_rollout_deterministic(self):
+
+        self.policy.eval()
+        _, v1, p1 = self.run_deterministic_rollout()
+        _, v2, p2 = self.run_deterministic_rollout()
+
+        assert torch.allclose(v1[0], v2[0], atol=1e-6), \
+            "Rollout values are not deterministic"
+
+        assert torch.allclose(p1[0], p2[0], atol=1e-6), \
+            "Rollout logprobs are not deterministic"
+
 
