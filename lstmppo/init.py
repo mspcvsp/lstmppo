@@ -2,8 +2,6 @@ from dataclasses import dataclass
 import tyro
 import time
 import torch
-import random
-import numpy as np
 import gymnasium as gym
 import popgym
 from .types import PPOConfig
@@ -20,9 +18,6 @@ def initialize(seconds_since_epoch=None):
         f"{cfg.env_id}__{cfg.exp_name}__{cfg.seed}__" +\
         f"{seconds_since_epoch}"
 
-    random.seed(cfg.seed)
-    np.random.seed(cfg.seed)
-    torch.manual_seed(cfg.seed)
     torch.backends.cudnn.deterministic = cfg.torch_deterministic
 
     cfg.device = torch.device("cuda" if torch.cuda.is_available()

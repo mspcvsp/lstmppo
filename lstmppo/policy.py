@@ -9,42 +9,42 @@ from .types import PolicyEvalInput, PolicyEvalOutput
 class WeightDrop(nn.Module):
     """
     Applies DropConnect to the recurrent weights of an RNN module.
+    Respects .training so DropConnect is OFF in eval() mode.
     """
-    def __init__(self,
-                 module,
-                 weights,
-                 dropout):
-
+    def __init__(self, module, weights, dropout):
         super().__init__()
-
         self.module = module
         self.weights = weights
         self.dropout = dropout
 
-        # Save original parameters
+        # Save raw parameters
         for w in weights:
-
+            
             param = getattr(module, w)
 
             self.register_parameter(f"{w}_raw",
                                     nn.Parameter(param.data))
-
-            # Remove original parameter from module
+            
             del module._parameters[w]
 
     def _setweights(self):
-
+        """
+        Inject dropped or raw weights depending on self.training.
+        """
         for w in self.weights:
 
             raw = getattr(self, f"{w}_raw")
 
-            dropped = F.dropout(raw,
-                                p=self.dropout,
-                                training=self.training)
+            if self.training:
+                # DropConnect active
+                dropped = F.dropout(raw,
+                                    p=self.dropout,
+                                    training=True)
+            else:
+                # Deterministic: use raw weights
+                dropped = raw
 
-            setattr(self.module,
-                    w,
-                    dropped)
+            setattr(self.module, w, dropped)
 
     def forward(self, *args, **kwargs):
         self._setweights()

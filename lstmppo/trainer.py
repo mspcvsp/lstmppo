@@ -1,5 +1,7 @@
 # trainer.py
+import numpy as np
 import torch
+import random
 from torch import nn
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
@@ -39,6 +41,10 @@ class LSTMPPOTrainer:
         self.end_entropy_coef = cfg.end_entropy_coef
         self.entropy_coef_slope = None
 
+        random.seed(cfg.seed)
+        np.random.seed(cfg.seed)
+        torch.manual_seed(cfg.seed)
+
         # persistent env state across rollouts
         self.env_state = self.env.reset(seed=cfg.seed)
 
@@ -60,8 +66,7 @@ class LSTMPPOTrainer:
             policy_in = to_policy_input(env_state)
 
             # NEW: act() now takes a PolicyInput dataclass
-            with torch.no_grad():
-                actions, logprobs, policy_out = self.policy.act(policy_in)
+            actions, logprobs, policy_out = self.policy.act(policy_in)
 
             next_state = self.env.step(actions)
 
@@ -254,10 +259,10 @@ class LSTMPPOTrainer:
         # 2. Get a single recurrent minibatch
         #    For num_envs == 1, this should be the whole sequence.
         batches = list(self.buffer.get_recurrent_minibatches())
-        
+
         assert len(batches) == 1,\
             "For validation, use a single minibatch / single env."
-        
+
         batch = batches[0]
 
         # Shapes:
