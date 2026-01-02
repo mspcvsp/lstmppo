@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import random
 from torch import nn
+from torch.distributions.categorical import Categorical
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
@@ -254,56 +255,6 @@ class LSTMPPOTrainer:
 
             self.update_phase()
 
-    def validate_lstm_state_flow(self):
-
-        print("=== LSTM State-Flow Validation ===")
-
-        # Ensure deterministic DropConnect behavior
-        self.policy.eval()
-
-        # Run a rollout (num_envs = 1 recommended)
-        self.rollout_phase()
-
-        # Get the single batch
-        batches = list(self.buffer.get_recurrent_minibatches())
-        assert len(batches) == 1, "Use num_envs=1 for validation."
-        batch = batches[0]
-
-        T, B, _ = batch.obs.shape
-        print(f"T = {T}, B = {B}")
-
-        with torch.no_grad():
-
-            eval_output = \
-                self.policy.evaluate_actions_sequence(
-                    PolicyEvalInput(obs=batch.obs,
-                                    hxs=batch.hxs,
-                                    cxs=batch.cxs,
-                                    actions=batch.actions)
-                )
-
-        stored_values = batch.values
-        stored_logprobs = batch.logprobs
-
-        val_diff = (eval_output.values - stored_values).abs()
-        logp_diff = (eval_output.logprobs - stored_logprobs).abs()
-
-        print("max |values_rec - stored_values|   :", val_diff.max().item())
-        print("max |logprobs_rec - stored_logprobs|:", logp_diff.max().item())
-
-        for t in range(min(T, 5)):
-            print(eval_output.logprobs[t,:0])
-
-            print(f"\n[t = {t}]")
-            print(" stored value   :", stored_values[t, 0].item())
-            print(" recomputed val :", eval_output.values[t, 0].item())
-            print(" |diff|         :", val_diff[t, 0].item())
-            print(" stored logprob :", stored_logprobs[t, 0].item())
-            print(" recomputed logp:", eval_output.logprobs[t, 0].item())
-            print(" |diff|         :", logp_diff[t, 0].item())
-
-        print("=== Validation complete ===")
-
     def validate_tbptt(self, K=16):
 
         self.policy.eval()
@@ -440,4 +391,72 @@ class LSTMPPOTrainer:
             env_state = self.env.step(actions)
 
         return hxs_trace, cxs_trace
+    
+    def validate_lstm_state_flow(self):
+        print("=== LSTM State-Flow Validation ===")
+
+        self.policy.eval()
+        self.rollout_phase()
+
+        batches = list(self.buffer.get_recurrent_minibatches())
+        assert len(batches) == 1, "Use num_envs=1 for validation."
+        batch = batches[0]
+
+        T, B, _ = batch.obs.shape
+        print(f"T = {T}, B = {B}")
+
+        stored_values = batch.values          # (T, B)
+        stored_logprobs = batch.logprobs      # (T, B)
+
+        rec_values = []
+        rec_logprobs = []
+
+        with torch.no_grad():
+            for t in range(T):
+                obs_t = batch.obs[t]          # (B, obs_dim)
+                hxs_t = batch.hxs             # (B, H) at t=0 only in your current design
+                cxs_t = batch.cxs             # (B, H)
+
+                # If you want per-timestep hidden states, you can store hxs[t], cxs[t]
+                # in the buffer instead of only hxs[0], cxs[0]. For now, we just
+                # validate using the stored start state and full-sequence eval.
+
+                # Build a single-step PolicyInput using the *stored* hidden state
+                policy_in = PolicyInput(
+                    obs=obs_t,                # (B, obs_dim)
+                    hxs=hxs_t,                # (B, H)
+                    cxs=cxs_t,                # (B, H)
+                )
+
+                policy_out = self.policy.forward(policy_in)
+                dist = Categorical(logits=policy_out.logits)
+
+                act_t = batch.actions[t]
+                actions = act_t.squeeze(-1) if act_t.dim() == 2 else act_t
+
+                val_t = policy_out.values     # (B,)
+                logp_t = dist.log_prob(actions)  # (B,)
+
+                rec_values.append(val_t.unsqueeze(0))    # (1, B)
+                rec_logprobs.append(logp_t.unsqueeze(0)) # (1, B)
+
+        values_rec = torch.cat(rec_values, dim=0)      # (T, B)
+        logprobs_rec = torch.cat(rec_logprobs, dim=0)  # (T, B)
+
+        val_diff = (values_rec - stored_values).abs()
+        logp_diff = (logprobs_rec - stored_logprobs).abs()
+
+        print("max |values_rec - stored_values|   :", val_diff.max().item())
+        print("max |logprobs_rec - stored_logprobs|:", logp_diff.max().item())
+
+        for t in range(min(T, 5)):
+            print(f"\n[t = {t}]")
+            print(" stored value   :", stored_values[t, 0].item())
+            print(" recomputed val :", values_rec[t, 0].item())
+            print(" |diff|         :", val_diff[t, 0].item())
+            print(" stored logprob :", stored_logprobs[t, 0].item())
+            print(" recomputed logp:", logprobs_rec[t, 0].item())
+            print(" |diff|         :", logp_diff[t, 0].item())
+
+        print("=== Validation complete ===")
 

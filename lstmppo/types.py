@@ -86,6 +86,8 @@ class RecurrentBatch:
     advantages: torch.Tensor
     hxs: torch.Tensor
     cxs: torch.Tensor
+    terminated: torch.Tensor
+    truncated: torch.Tensor
 
 
 @dataclass

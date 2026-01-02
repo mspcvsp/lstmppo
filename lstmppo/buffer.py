@@ -169,6 +169,8 @@ class RecurrentRolloutBuffer:
                 advantages=self.advantages[:, idx],
                 hxs=self.hxs[0, idx],
                 cxs=self.cxs[0, idx],
+                terminated=self.terminated[:, idx],
+                truncated=self.truncated[:, idx],
             )
 
     def get_last_lstm_states(self):
