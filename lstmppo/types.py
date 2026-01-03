@@ -73,8 +73,8 @@ class TrainerConfig:
     """ Sets the value of torch.backends.cudnn.deterministic """
     rollout_steps: int = 128
     """ Horizon"""
-    mini_batch_envs: int = 4 
-    """number of envs per recurrent minibatch"""
+    update_epochs: int = 4
+    """ Number of optimize policy update epochs """
     updates_per_checkpoint: int = 10
     """ Number of updates / checkpoint """
     debug_mode: bool = True
@@ -99,6 +99,7 @@ class LoggingConfig:
     run_name: str = ""
     """ Run Name """
 
+
 @dataclass
 class EnvironmentConfig:
 
@@ -110,6 +111,8 @@ class EnvironmentConfig:
     """ Observation shape """
     action_dim: int = 0
     """ Action dimension """
+    max_episode_steps: int = None
+    """ Maximum number of steps per episode """
 
 
 @dataclass
@@ -325,8 +328,14 @@ def initialize_config(cfg: Config,
 
     # Build dummy env
     dummy_env = gym.make(cfg.env.env_id)
+
     cfg.env.obs_shape = dummy_env.observation_space.shape
     cfg.env.action_dim = dummy_env.action_space.n
+    cfg.env.max_episode_steps = dummy_env.spec.max_episode_steps
+
+    obs, _ = dummy_env.reset()
+    print("Obs shape:", obs.shape)
+    print("Action dim:", dummy_env.action_space.n)
     dummy_env.close()
 
     # Build run name

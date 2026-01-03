@@ -33,7 +33,8 @@ class LSTMPPOTrainer:
         
         self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
 
-        self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
+        self.buffer = RecurrentRolloutBuffer(self.state.cfg,
+                                             self.device)
 
         if self.state.validation_mode:
 
@@ -177,7 +178,7 @@ class LSTMPPOTrainer:
 
         self.state.init_stats()
 
-        for _ in range(self.state.cfg.epochs):
+        for _ in range(self.state.cfg.trainer.update_epochs):
 
             for batch in self.buffer.get_recurrent_minibatches():
 
@@ -248,7 +249,7 @@ class LSTMPPOTrainer:
             - self.state.entropy_coef * entropy
         )
 
-        if self.state.cfg.debug_mode is False:
+        if self.state.cfg.trainer.debug_mode is False:
 
             loss = (
                 loss
@@ -335,7 +336,10 @@ class LSTMPPOTrainer:
         #  ----- Compute EV over the entire rollout  -----
         all_values = self.buffer.values.view(-1)
         all_returns = self.buffer.returns.view(-1)
-        all_mask = self.buffer.mask.view(-1)
+        
+        all_mask =\
+            1.0 - (self.buffer.terminated | self.buffer.truncated).float()
+
         valid = all_mask > 0.5
 
         if valid.sum() == 0:
@@ -561,6 +565,18 @@ class LSTMPPOTrainer:
 def explained_variance(y_pred, y_true):
     var_y = torch.var(y_true)
     return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)
+
+
+def train_default():
+
+    cfg = Config()
+
+    cfg = initialize_config(cfg)
+
+    trainer = LSTMPPOTrainer(cfg)
+
+    trainer.train(total_updates=1000)
+
 
 def validate():
 
