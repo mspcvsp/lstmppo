@@ -162,8 +162,7 @@ class RecurrentRolloutBuffer:
                 hxs=self.hxs[:, idx],
                 cxs=self.cxs[:, idx],
                 terminated=self.terminated[:, idx],
-                truncated=self.truncated[:, idx],
-                mask=mask,
+                truncated=self.truncated[:, idx]
             )
 
     # ---------------------------------------------------------
