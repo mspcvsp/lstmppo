@@ -71,6 +71,8 @@ class PPOConfig:
     """ Ending learning rate percentage of base learning rate"""
     early_stopping_kl_factor: float = 1.5
     """ Stop early if approx_kl exceeds this factor times target_kl """
+    checkpoint_dir: str = "./checkpoints"
+    """ Model checkpoints directory"""
 
 
 @dataclass

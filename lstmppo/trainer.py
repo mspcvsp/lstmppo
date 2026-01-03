@@ -98,6 +98,9 @@ class TrainerState:
 
         record = {"update": self.update_idx, **self.stats}
 
+        record["lr"] = self.lr
+        record["entropy_coef"] = self.entropy_coef
+
         self.jsonl_fp.write(json.dumps(record) + "\n")
         self.jsonl_fp.flush()
 

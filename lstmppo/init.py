@@ -1,22 +1,20 @@
 from dataclasses import dataclass
 import tyro
-import time
+from datetime import datetime
 import torch
 import gymnasium as gym
 import popgym
 from .types import PPOConfig
 
 
-def initialize(seconds_since_epoch=None):
+def initialize(datetime_str = None):
     
     cfg = tyro.cli(PPOConfig)
 
-    if seconds_since_epoch is None:
-        seconds_since_epoch = int(time.time())
+    if datetime_str is None:
+        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    cfg.run_name =\
-        f"{cfg.env_id}__{cfg.exp_name}__{cfg.seed}__" +\
-        f"{seconds_since_epoch}"
+    cfg.run_name = f"{cfg.env_id}__{cfg.exp_name}_{datetime_str}"
 
     torch.backends.cudnn.deterministic = cfg.torch_deterministic
 
