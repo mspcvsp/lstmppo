@@ -17,23 +17,27 @@ from .trainer_state import TrainerState
 class LSTMPPOTrainer:
 
     def __init__(self,
-                 cfg: Config):
+                 cfg: Config,
+                 validation_mode: bool = False):
 
         self.device = torch.device(
             "cuda" if torch.cuda.is_available()
             and cfg.trainer.cuda else "cpu"
         )
 
-        self.state = TrainerState(cfg)
+        self.state = TrainerState(cfg,
+                                  validation_mode=validation_mode)
 
-        self.env = RecurrentVecEnvWrapper(cfg, self.device)
-        self.policy = LSTMPPOPolicy(cfg).to(self.device)
-        self.buffer = RecurrentRolloutBuffer(cfg, self.device)
-
-        self.checkpoint_dir = Path(*[cfg.log.checkpoint_dir,
-                                     cfg.env.env_id,
-                                     cfg.trainer.exp_name])
+        self.env = RecurrentVecEnvWrapper(self.state.cfg,
+                                          self.device)
         
+        self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
+        self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
+
+        self.checkpoint_dir = Path(*[self.state.cfg.log.checkpoint_dir,
+                                     self.state.cfg.env.env_id,
+                                     self.state.cfg.trainer.exp_name])
+
         if self.checkpoint_dir.exists() is False:
 
             self.checkpoint_dir.mkdir(parents=True,

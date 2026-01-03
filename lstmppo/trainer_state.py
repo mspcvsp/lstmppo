@@ -23,9 +23,26 @@ class TrainerState:
     jsonl_fp: io.TextIOWrapper
 
     def __init__(self,
-                 cfg: Config):
+                 cfg: Config,
+                 validation_mode: bool = False):
 
         self.cfg = cfg
+
+        if validation_mode:
+
+            self.cfg.env.num_envs = 1
+            self.cfg.trainer.mini_batch_envs = 1
+            
+            self.cfg.trainer.tbptt_chunk_len =\
+                self.cfg.trainer.rollout_steps  # full sequence
+            
+            self.cfg.sched.anneal_entropy_flag = False
+            self.cfg.sched.start_entropy_coef = 0.0
+            self.cfg.sched.end_entropy_coef = 0.0
+            self.cfg.ppo.initial_clip_range = 0.0
+            self.cfg.ppo.target_kl = 1e9  # disable early stopping
+            self.cfg.trainer.debug_mode = True  # disable DropConnect
+
         self.clip_range = cfg.ppo.initial_clip_range
  
         self.early_stopping_kl =\
