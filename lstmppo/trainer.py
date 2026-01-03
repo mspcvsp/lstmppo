@@ -181,6 +181,16 @@ class LSTMPPOTrainer:
         self.policy = LSTMPPOPolicy(cfg).to(self.cfg.device)
         self.buffer = RecurrentRolloutBuffer(cfg)
 
+        checkpoint_dir = Path(*[cfg.checkpoint_dir,
+                                cfg.env_id,
+                                cfg.exp_name])
+        
+        if checkpoint_dir.exists() is False:
+            checkpoint_dir.mkdir(parents=True)
+
+        self.checkpoint_pth =\
+            checkpoint_dir.joinpath(cfg.run_name + ".ckpt")
+
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
             lr=self.cfg.base_lr,
