@@ -5,7 +5,6 @@ import torch
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
-import tyro
 
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
@@ -18,11 +17,7 @@ from .trainer_state import TrainerState
 class LSTMPPOTrainer:
 
     def __init__(self,
-                 datetime_str = None):
-
-        cfg = tyro.cli(Config)
-
-        cfg.init_run_name(datetime_str)
+                 cfg: Config):
 
         self.device = torch.device(
             "cuda" if torch.cuda.is_available()

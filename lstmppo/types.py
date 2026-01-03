@@ -1,5 +1,11 @@
+"""
+• 	Config dataclasses must be pure data containers
+• 	No side effects in __init__
+• 	No environment creation
+• 	No torch backend mutation
+"""
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, List
 import torch
 import gymnasium as gym
@@ -72,13 +78,6 @@ class TrainerConfig:
     exp_name: str = "RLWarmup"
     """ Experiment name """
 
-    def __init__(self):
-
-        torch.backends.cudnn.deterministic = self.torch_deterministic
-
-        if self.debug_mode:
-            torch.autograd.set_detect_anomaly(True)
-
 
 @dataclass
 class LoggingConfig:
@@ -98,13 +97,10 @@ class EnvironmentConfig:
     """Environment identifier"""
     num_envs: int = 16
     """ Number of environments """
-
-    def __init__(self):
-
-        dummy_env = gym.make(self.env_id)
-        self.obs_shape = dummy_env.observation_space.shape
-        self.action_dim = dummy_env.action_space.n
-        dummy_env.close()
+    obs_shape: tuple = ()
+    """ Observation shape """
+    action_dim: int = 0
+    """ Action dimension """
 
 
 @dataclass
@@ -121,17 +117,14 @@ class BufferConfig:
 @dataclass
 class Config:
 
-    trainer: TrainerConfig = TrainerConfig()
-    
-    env: EnvironmentConfig = EnvironmentConfig()
-    
-    ppo: PPOHyperparams = PPOHyperparams()
-    
-    lstm: LSTMConfig = LSTMConfig()
-    
-    sched: ScheduleConfig = ScheduleConfig()
-    
-    log: LoggingConfig = LoggingConfig()
+    # field(default_factory=...) avoids the same instance of each sub‑config
+    # from being shared across all Config() objects
+    trainer: TrainerConfig = field(default_factory=TrainerConfig)
+    env: EnvironmentConfig = field(default_factory=EnvironmentConfig)
+    ppo: PPOHyperparams = field(default_factory=PPOHyperparams)
+    lstm: LSTMConfig = field(default_factory=LSTMConfig)
+    sched: ScheduleConfig = field(default_factory=ScheduleConfig)
+    log: LoggingConfig = field(default_factory=LoggingConfig)
 
     def to_buffer_config(self) -> BufferConfig:
 
@@ -312,3 +305,22 @@ class PolicyUpdateInfo:
     clip_frac: torch.Tensor
     grad_norm: float
 
+
+def initialize_config(cfg: Config):
+
+    # Set torch flags
+    torch.backends.cudnn.deterministic = cfg.trainer.torch_deterministic
+
+    if cfg.trainer.debug_mode:
+        torch.autograd.set_detect_anomaly(True)
+
+    # Build dummy env
+    dummy_env = gym.make(cfg.env.env_id)
+    cfg.env.obs_shape = dummy_env.observation_space.shape
+    cfg.env.action_dim = dummy_env.action_space.n
+    dummy_env.close()
+
+    # Build run name
+    cfg.init_run_name()
+
+    return cfg
