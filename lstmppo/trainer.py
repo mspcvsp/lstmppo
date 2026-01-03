@@ -49,7 +49,6 @@ class LSTMPPOTrainer:
         self.end_entropy_coef = cfg.end_entropy_coef
         self.seed = cfg.seed
         self.tbptt_steps = cfg.tbptt_steps
-        self.target_kl = cfg.target_kl
         self.stats = None
         self.stat_steps = None
 
@@ -165,6 +164,8 @@ class LSTMPPOTrainer:
         self.compute_average_stats()
 
         self.adapt_clip_range()
+
+        self.log_metrics()
 
     def update_chunk(self, mb: RecurrentMiniBatch, entropy_coef):
 
@@ -293,9 +294,9 @@ class LSTMPPOTrainer:
 
     def compute_average_stats(self):
 
-        if self.steps["steps"] > 0:
+        if self.stats["steps"] > 0:
 
-            norm_factor = 1.0 / self.steps["steps"]
+            norm_factor = 1.0 / self.stats["steps"]
 
             for key in ["policy_loss",
                         "value_loss",
@@ -308,7 +309,7 @@ class LSTMPPOTrainer:
 
     def adapt_clip_range(self):
 
-        avg_kl = self.steps["approx_kl"]
+        avg_kl = self.stats["approx_kl"]
 
         if avg_kl > 2.0 * self.target_kl:
             self.clip_range *= 0.9
@@ -317,8 +318,8 @@ class LSTMPPOTrainer:
 
         self.clip_range = float(torch.clamp(
             torch.tensor(self.clip_range),
-            0.001,
-            0.02
+            0.05,
+            0.3
         ))
 
     def log_metrics(self):

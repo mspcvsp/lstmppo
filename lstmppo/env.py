@@ -90,8 +90,9 @@ class RecurrentVecEnvWrapper:
             initial_hxs = last_lstm_states.hxs
             initial_cxs = last_lstm_states.cxs
 
-        # Only carry over states for non-terminal envs
-        carry_mask = ~self.last_terminated  # stored from previous rollout
+        # Only carry over states for environments that didn't terminate or
+        # truncate
+        carry_mask = ~self.last_terminated 
 
         self.hxs[carry_mask] = initial_hxs[carry_mask]
         self.cxs[carry_mask] = initial_cxs[carry_mask]
@@ -108,6 +109,34 @@ class RecurrentVecEnvWrapper:
 
         obs, rewards, terminated, truncated, info = self.venv.step(actions_np)
 
+        # ------ Convert flags to tensors ------
+        terminated = torch.as_tensor(terminated,
+                                     device=self.device,
+                                     dtype=torch.bool)
+        
+        truncated = torch.as_tensor(truncated,
+                                    device=self.device,
+                                    dtype=torch.bool)
+
+        """
+        Vectorized environment wrapper is the only place that knows which
+        environments:
+
+        • 	Terminated at this step
+        • 	Truncated due to time limit
+        • 	Are still alive
+        • 	Have just been reset
+
+        The trainer and buffer only see batched tensors — they don’t 
+        know which envs just died.
+        """
+        done_mask = terminated | truncated
+
+        if done_mask.any():
+
+            self.hxs[done_mask].zero_()
+            self.cxs[done_mask].zero_()
+
         obs = torch.as_tensor(obs,
                               device=self.device,
                               dtype=torch.float32)
@@ -116,23 +145,7 @@ class RecurrentVecEnvWrapper:
                                   device=self.device,
                                   dtype=torch.float32)
 
-        terminated = torch.as_tensor(terminated,
-                                     device=self.device,
-                                     dtype=torch.bool)
-        
-        truncated = torch.as_tensor(truncated,
-                                    device=self.device,
-                                    dtype=torch.bool)
-        
-        self.last_terminated = terminated.clone()
-
-        # Reset hidden states only for true terminals
-        done_mask = terminated
-
-        if done_mask.any():
-
-            self.hxs[done_mask].zero_()
-            self.cxs[done_mask].zero_()
+        self.last_terminated = done_mask.clone()
 
         return VecEnvState(
             obs=obs,
