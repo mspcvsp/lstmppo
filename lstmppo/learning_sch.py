@@ -9,13 +9,14 @@ class EntropySchdeduler(object):
 
         self.fixed_entropy_coef = cfg.fixed_entropy_coef
         self.anneal_entropy_flag = cfg.anneal_entropy_flag
+        self.debug_mode = cfg.debug_mode
         self.start_entropy_coef = cfg.start_entropy_coef
         self.end_entropy_coef = cfg.end_entropy_coef
 
     def reset(self,
               total_updates: int):
 
-        if self.anneal_entropy_flag:
+        if self.anneal_entropy_flag and self.debug_mode is False:
 
             self.slope =\
                 (self.end_entropy_coef - self.start_entropy_coef) /\
@@ -81,6 +82,8 @@ class LearningRateScheduler(object):
     - both curves taper together"
     """
     def __init__(self, cfg: PPOConfig):
+
+        self.debug_mode = cfg.debug_mode
         self.base_lr = cfg.base_lr
         self.end_lr = self.base_lr * cfg.end_lr_perc / 100
         self.perc_warmup_updates = cfg.perc_warmup_updates
@@ -99,17 +102,20 @@ class LearningRateScheduler(object):
     def __call__(self,
                  update_idx: int):
 
-        # Zero learning rate is expected for 1st update                
-        if update_idx < self.warmup_updates:
-            lr = self.base_lr * (update_idx / self.warmup_updates)
-        # Learning rate cosine decay afterwards
+        if self.debug_mode:
+            return self.base_lr
         else:
-            denom = max(self.total_updates - self.warmup_updates, 1)
-            progress = (update_idx - self.warmup_updates) / denom
-            lr = (
-                self.end_lr +
-                0.5 * (self.base_lr - self.end_lr) * 
-                (1 + math.cos(math.pi * progress))
-            )
+            # Zero learning rate is expected for 1st update                
+            if update_idx < self.warmup_updates:
+                lr = self.base_lr * (update_idx / self.warmup_updates)
+            # Learning rate cosine decay afterwards
+            else:
+                denom = max(self.total_updates - self.warmup_updates, 1)
+                progress = (update_idx - self.warmup_updates) / denom
+                lr = (
+                    self.end_lr +
+                    0.5 * (self.base_lr - self.end_lr) * 
+                    (1 + math.cos(math.pi * progress))
+                )
 
-        return lr
+            return lr

@@ -18,6 +18,9 @@ def initialize(datetime_str = None):
 
     torch.backends.cudnn.deterministic = cfg.torch_deterministic
 
+    if cfg.debug_mode:
+        torch.autograd.set_detect_anomaly(True)
+
     cfg.device = torch.device("cuda" if torch.cuda.is_available()
                                and cfg.cuda else "cpu")
     

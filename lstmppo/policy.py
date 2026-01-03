@@ -101,11 +101,14 @@ class LSTMPPOPolicy(nn.Module):
                 H = cfg.lstm_hidden_size
                 param.data[H:2*H] = 1.0  # forget gate bias
 
-        self.lstm = WeightDrop(
-            base_lstm,
-            weights=["weight_hh_l0"],
-            dropout=cfg.dropconnect_p,
-        )
+        if cfg.debug_mode:
+            self.lstm = base_lstm
+        else:
+            self.lstm = WeightDrop(
+                base_lstm,
+                weights=["weight_hh_l0"],
+                dropout=cfg.dropconnect_p,
+            )
 
         self.ln = nn.LayerNorm(cfg.lstm_hidden_size)
 

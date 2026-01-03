@@ -75,6 +75,9 @@ class PPOConfig:
     """ Model checkpoints directory"""
     updates_per_checkpoint: int = 10
     """ Number of updates / checkpoint """
+    debug_mode: bool = True
+    """ Toggles debug mode """
+
 
 @dataclass
 class RolloutStep:
@@ -223,3 +226,13 @@ class PolicyEvalOutput:
     new_cxs: torch.Tensor   # (B,H)
     ar_loss: torch.Tensor   # scalar
     tar_loss: torch.Tensor  # scalar
+
+
+@dataclass
+class PolicyUpdateInfo:
+    policy_loss: float
+    value_loss: float
+    entropy: float
+    approx_kl: float
+    clip_frac: float
+    grad_norm: float

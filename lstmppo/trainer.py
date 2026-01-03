@@ -12,7 +12,7 @@ from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import PPOConfig, PolicyEvalInput, PolicyInput
-from .types import RecurrentMiniBatch
+from .types import RecurrentMiniBatch, PolicyUpdateInfo
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
 from torch.utils.tensorboard import SummaryWriter
 
@@ -30,13 +30,10 @@ class TrainerState:
     jsonl_file: str
     jsonl_fp: io.TextIOWrapper
 
-    _entropy_sch: EntropySchdeduler
-    _lr_sch = LearningRateScheduler
-    _updates_per_checkpoint: int
-
     def __init__(self,
                  cfg: PPOConfig):
 
+        self.debug_mode = cfg.debug_mode
         self.clip_range = cfg.clip_range
         self.target_kl = cfg.target_kl
         self._updates_per_checkpoint = cfg.updates_per_checkpoint
@@ -64,19 +61,14 @@ class TrainerState:
         self._lr_sch.reset(total_updates)
 
     def update_stats(self,
-                     policy_loss,
-                     value_loss,
-                     entropy,
-                     approx_kl,
-                     clip_frac,
-                     grad_norm):
+                     upd: PolicyUpdateInfo):
 
-        self.stats["policy_loss"] += policy_loss.item()
-        self.stats["value_loss"] += value_loss.item()
-        self.stats["entropy"] += entropy.item()
-        self.stats["approx_kl"] += approx_kl.item()
-        self.stats["clip_frac"] += clip_frac.item()
-        self.stats["grad_norm"] += grad_norm
+        self.stats["policy_loss"] += upd.policy_loss.item()
+        self.stats["value_loss"] += upd.value_loss.item()
+        self.stats["entropy"] += upd.entropy.item()
+        self.stats["approx_kl"] += upd.approx_kl.item()
+        self.stats["clip_frac"] += upd.clip_frac.item()
+        self.stats["grad_norm"] += upd.grad_norm
         self.stats["steps"] += 1
 
     def compute_average_stats(self):
@@ -92,11 +84,17 @@ class TrainerState:
 
     def log_metrics(self):
 
+        global_step = (
+            self.update_idx * 
+            self.rollout_steps *
+            self.num_envs
+        )
+
         for key, value in self.stats.items():
 
             self.writer.add_scalar(key,
                                    value,
-                                   self.update_idx)
+                                   global_step)
 
         record = {"update": self.update_idx, **self.stats}
 
@@ -115,7 +113,7 @@ class TrainerState:
             f"clip {self.stats['clip_frac']:.3f} | "
             f"ev {self.stats['explained_var']:.3f} | "
             f"grad {self.stats['grad_norm']:.2f} | "
-            f"clip_range {self.cfg.clip_range:.3f}"
+            f"clip_range {self.clip_range:.3f}"
         )
     
     def init_stats(self):
@@ -131,8 +129,8 @@ class TrainerState:
             "steps": 0,
         }
 
-    def update(self,
-               optimizer: torch.optim.Adam):
+    def apply_schedules(self,
+                        optimizer: torch.optim.Adam):
 
         self.entropy_coef = self._entropy_sch(self.update_idx)
         self.lr = self._lr_sch(self.update_idx)
@@ -150,29 +148,34 @@ class TrainerState:
 
     def adapt_clip_range(self):
 
-        avg_kl = self.stats["approx_kl"]
+        if self.debug_mode is False:
 
-        if avg_kl > 2.0 * self.target_kl:
-            self.clip_range *= 0.9
-        elif avg_kl < 0.5 * self.target_kl:
-            self.clip_range *= 1.05
+            avg_kl = self.stats["approx_kl"]
 
-        self.clip_range = float(torch.clamp(
-            torch.tensor(self.clip_range),
-            0.05,
-            0.3
-        ))
+            if avg_kl > 2.0 * self.target_kl:
+                self.clip_range *= 0.9
+            elif avg_kl < 0.5 * self.target_kl:
+                self.clip_range *= 1.05
+
+            self.clip_range = float(torch.clamp(
+                torch.tensor(self.clip_range),
+                0.05,
+                0.3
+            ))
 
     def should_stop_early(self):
 
-        if self.stats["approx_kl"] > self.early_stopping_kl:
-            return True
+        stop_early = (
+            self.stats["approx_kl"] > self.early_stopping_kl
+            and self.debug_mode is False
+        )
 
-        return False
+        return stop_early
 
     def save_checkpoint(self):
 
         return self.update_idx % self._updates_per_checkpoint == 0
+
 
 class LSTMPPOTrainer:
 
@@ -219,7 +222,7 @@ class LSTMPPOTrainer:
 
             for self.state.update_idx in range(total_updates):
 
-                self.state.update()
+                self.state.apply_schedules(self.optimizer)
 
                 last_value = self.collect_rollout()
 
@@ -306,7 +309,7 @@ class LSTMPPOTrainer:
         self.state.log_metrics()
 
     def optimize_chunk(self,
-                     mb: RecurrentMiniBatch):
+                       mb: RecurrentMiniBatch):
 
         # ------- Forward pass -------
         eval_output = self.policy.evaluate_actions_sequence(
@@ -356,18 +359,26 @@ class LSTMPPOTrainer:
             policy_loss
             + self.cfg.vf_coef * value_loss
             - self.state.entropy_coef * entropy
-            + eval_output.ar_loss
-            + eval_output.tar_loss
         )
+
+        if self.cfg.debug_mode is False:
+
+            loss = (
+                loss
+                + eval_output.ar_loss
+                + eval_output.tar_loss
+            )
 
         grad_norm = self.backward_and_clip(loss)
 
-        self.state.update_stats(policy_loss,
-                                value_loss,
-                                entropy,
-                                approx_kl,
-                                clip_frac,
-                                grad_norm)
+        self.state.update_stats(
+            PolicyUpdateInfo(policy_loss=policy_loss,
+                             value_loss=value_loss,
+                             entropy=entropy,
+                             approx_kl=approx_kl,
+                             clip_frac=clip_frac,
+                             grad_norm=grad_norm)
+        )
 
     def compute_losses(self,
                        values,
@@ -413,7 +424,9 @@ class LSTMPPOTrainer:
     def backward_and_clip(self,
                           loss):
 
-        self.optimizer.zero_grad()
+        # Disabling set to None reduces memory fragmentation and 
+        # speeds up training.
+        self.optimizer.zero_grad(set_to_none=False)
         loss.backward()
 
         grad_norm = 0.0
@@ -449,8 +462,8 @@ class LSTMPPOTrainer:
     def save_checkpoint(self):
 
         checkpoint_pth =\
-            self.checkpoint_dir.joinpath(self.run_name +
-                                         "checkpoint_" +
+            self.checkpoint_dir.joinpath(self.cfg.run_name +
+                                         "_checkpoint_" +
                                          f"{self.state.update_idx}.pt")
         torch.save({
             "policy": self.policy.state_dict(),
