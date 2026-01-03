@@ -26,9 +26,9 @@ class LSTMPPOTrainer:
 
         self.state = TrainerState(cfg)
 
-        self.env = RecurrentVecEnvWrapper(cfg)
+        self.env = RecurrentVecEnvWrapper(cfg, self.device)
         self.policy = LSTMPPOPolicy(cfg).to(self.device)
-        self.buffer = RecurrentRolloutBuffer(cfg)
+        self.buffer = RecurrentRolloutBuffer(cfg, self.device)
 
         self.checkpoint_dir = Path(*[cfg.log.checkpoint_dir,
                                      cfg.env.env_id,

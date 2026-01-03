@@ -21,8 +21,8 @@ class RecurrentVecEnvWrapper:
                  cfg: Config,
                  device):
 
-        self.venv = SyncVectorEnv([make_env(cfg.env_id)
-                                   for _ in range(cfg.num_envs)])
+        self.venv = SyncVectorEnv([make_env(cfg.env.env_id)
+                                   for _ in range(cfg.env.num_envs)])
 
         self.num_envs = cfg.env.num_envs
         self.hidden_size = cfg.lstm.lstm_hidden_size

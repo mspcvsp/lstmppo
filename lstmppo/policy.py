@@ -58,17 +58,16 @@ class LSTMPPOPolicy(nn.Module):
 
         super().__init__()
 
-        self.ar_coef = cfg.lstm_ar_coef
-        self.tar_coef = cfg.lstm_tar_coef
-        self.device = cfg.device
+        self.ar_coef = cfg.lstm.lstm_ar_coef
+        self.tar_coef = cfg.lstm.lstm_tar_coef
 
         # --- SiLU encoder ---
         self.encoder = nn.Sequential(
-            nn.Linear(cfg.obs_shape[0],
-                      cfg.enc_hidden_size),
+            nn.Linear(cfg.env.obs_shape[0],
+                      cfg.lstm.enc_hidden_size),
             nn.SiLU(),
-            nn.Linear(cfg.enc_hidden_size,
-                      cfg.enc_hidden_size),
+            nn.Linear(cfg.lstm.enc_hidden_size,
+                      cfg.lstm.enc_hidden_size),
             nn.SiLU(),
         )
 
@@ -79,8 +78,8 @@ class LSTMPPOPolicy(nn.Module):
 
         # --- LN-LSTM with DropConnect ---
         base_lstm = nn.LSTM(
-            input_size=cfg.enc_hidden_size,
-            hidden_size=cfg.lstm_hidden_size,
+            input_size=cfg.lstm.enc_hidden_size,
+            hidden_size=cfg.lstm.lstm_hidden_size,
             num_layers=1,
             batch_first=True,
         )
@@ -98,25 +97,25 @@ class LSTMPPOPolicy(nn.Module):
             # Bias: zero + forget gate bias trick
             elif "bias" in name:
                 param.data.fill_(0.0)
-                H = cfg.lstm_hidden_size
+                H = cfg.lstm.lstm_hidden_size
                 param.data[H:2*H] = 1.0  # forget gate bias
 
-        if cfg.debug_mode:
+        if cfg.trainer.debug_mode:
             self.lstm = base_lstm
         else:
             self.lstm = WeightDrop(
                 base_lstm,
                 weights=["weight_hh_l0"],
-                dropout=cfg.dropconnect_p,
+                dropout=cfg.lstm.dropconnect_p,
             )
 
-        self.ln = nn.LayerNorm(cfg.lstm_hidden_size)
+        self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
 
         # --- Heads ---
-        self.actor = nn.Linear(cfg.lstm_hidden_size,
-                               cfg.action_dim)
+        self.actor = nn.Linear(cfg.lstm.lstm_hidden_size,
+                               cfg.env.action_dim)
         
-        self.critic = nn.Linear(cfg.lstm_hidden_size, 1)
+        self.critic = nn.Linear(cfg.lstm.lstm_hidden_size, 1)
 
         nn.init.xavier_uniform_(self.actor.weight)
         nn.init.xavier_uniform_(self.critic.weight)

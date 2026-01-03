@@ -84,7 +84,7 @@ class LearningRateScheduler(object):
                  cfg: Config):
 
         self.debug_mode = cfg.trainer.debug_mode
-        self.base_lr = cfg.trainer.base_lr
+        self.base_lr = cfg.sched.base_lr
         self.end_lr = self.base_lr * cfg.sched.lr_final_pct / 100
         self.perc_warmup_updates = cfg.sched.lr_warmup_pct
         self.warmup_updates = None

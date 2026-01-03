@@ -14,6 +14,7 @@ import popgym
 
 @dataclass
 class PPOHyperparams:
+
     gamma: float = 0.99
     """ Discount factor"""
     gae_lambda: float = 0.95
@@ -34,6 +35,7 @@ class PPOHyperparams:
 
 @dataclass
 class LSTMConfig:
+
     enc_hidden_size: int = 128
     """Encoder hidden size"""
     lstm_hidden_size: int = 128
@@ -115,7 +117,6 @@ class BufferConfig:
     rollout_steps: int
     num_envs: int
     mini_batch_envs: int
-    device: str
     gamma: float
     lam: float
     lstm_hidden_size: int
