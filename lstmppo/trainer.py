@@ -32,12 +32,14 @@ class TrainerState:
 
     _entropy_sch: EntropySchdeduler
     _lr_sch = LearningRateScheduler
+    _updates_per_checkpoint: int
 
     def __init__(self,
                  cfg: PPOConfig):
 
         self.clip_range = cfg.clip_range
         self.target_kl = cfg.target_kl
+        self._updates_per_checkpoint = cfg.updates_per_checkpoint
 
         self.early_stopping_kl =\
             self.target_kl * cfg.early_stopping_kl_factor
@@ -168,6 +170,9 @@ class TrainerState:
 
         return False
 
+    def save_checkpoint(self):
+
+        return self.update_idx % self._updates_per_checkpoint == 0
 
 class LSTMPPOTrainer:
 
@@ -181,15 +186,12 @@ class LSTMPPOTrainer:
         self.policy = LSTMPPOPolicy(cfg).to(self.cfg.device)
         self.buffer = RecurrentRolloutBuffer(cfg)
 
-        checkpoint_dir = Path(*[cfg.checkpoint_dir,
-                                cfg.env_id,
-                                cfg.exp_name])
+        self.checkpoint_dir = Path(*[cfg.checkpoint_dir,
+                                   cfg.env_id,
+                                    cfg.exp_name])
         
-        if checkpoint_dir.exists() is False:
-            checkpoint_dir.mkdir(parents=True)
-
-        self.checkpoint_pth =\
-            checkpoint_dir.joinpath(cfg.run_name + ".ckpt")
+        if self.checkpoint_dir.exists() is False:
+            self.checkpoint_dir.mkdir(parents=True)
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
@@ -227,6 +229,9 @@ class LSTMPPOTrainer:
 
                 if self.state.should_stop_early():
                     break
+
+                if self.state.save_checkpoint():
+                    self.save_checkpoint()
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)
@@ -440,6 +445,19 @@ class LSTMPPOTrainer:
                                     all_returns[valid])
 
             self.state.stats["explained_var"] = ev.item()
+
+    def save_checkpoint(self):
+
+        checkpoint_pth =\
+            self.checkpoint_dir.joinpath(self.run_name +
+                                         "checkpoint_" +
+                                         f"{self.state.update_idx}.pt")
+        torch.save({
+            "policy": self.policy.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "update_idx": self.state.update_idx,
+            "state": self.state,
+        }, checkpoint_pth)
 
     def validate_tbptt(self, K=16):
 

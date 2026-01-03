@@ -73,7 +73,8 @@ class PPOConfig:
     """ Stop early if approx_kl exceeds this factor times target_kl """
     checkpoint_dir: str = "./checkpoints"
     """ Model checkpoints directory"""
-
+    updates_per_checkpoint: int = 10
+    """ Number of updates / checkpoint """
 
 @dataclass
 class RolloutStep:
