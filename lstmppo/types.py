@@ -206,10 +206,10 @@ class PolicyEvalInput:
 
 @dataclass
 class PolicyEvalOutput:
-    values: torch.Tensor       # (N,)
-    logprobs: torch.Tensor     # (N,)
-    entropy: torch.Tensor      # scalar
-    new_hxs: torch.Tensor      # (N,H)
-    new_cxs: torch.Tensor      # (N,H)
-    ar_loss: torch.Tensor      # scalar
-    tar_loss: torch.Tensor     # scalar
+    values: torch.Tensor    # (T, B)
+    logprobs: torch.Tensor  # (T, B)
+    entropy: torch.Tensor   # (T, B)
+    new_hxs: torch.Tensor   # (B,H)
+    new_cxs: torch.Tensor   # (B,H)
+    ar_loss: torch.Tensor   # scalar
+    tar_loss: torch.Tensor  # scalar

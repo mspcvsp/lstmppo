@@ -216,8 +216,8 @@ class LSTMPPOTrainer:
                                 adv,
                                 mask)
 
-        dist = Categorical(logits=eval_output.logits.view(K * B, -1))
-        entropy = dist.entropy()
+        # --- Masked entropy from eval_output ---
+        entropy = eval_output.entropy.view(K * B)   # (K*B,)
         entropy = (entropy * mask).sum() / mask.sum()
 
         loss = (

@@ -72,13 +72,10 @@ class LSTMPPOPolicy(nn.Module):
             nn.SiLU(),
         )
 
-        for name, param in self.encoder.named_parameters():
-
-            if "fc" in name:
-                if "weight" in name:
-                    nn.init.xavier_uniform_(param)
-                elif "bias" in name:
-                    nn.init.zeros_(param)
+        for m in self.encoder:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.zeros_(m.bias)
 
         # --- LN-LSTM with DropConnect ---
         base_lstm = nn.LSTM(
@@ -254,13 +251,13 @@ class LSTMPPOPolicy(nn.Module):
             f"actions must be (T,B), got {actions.shape}"
 
         # Correct shape: (T, B)
-        logprobs = dist.log_prob(actions)             # (T, B)
-        entropy = dist.entropy().mean()               # scalar
+        logprobs = dist.log_prob(actions)     # (T, B)
+        entropy = dist.entropy()              # (T, B)
 
         return PolicyEvalOutput(
             values=values,                    # (T, B)
             logprobs=logprobs,                # (T, B)
-            entropy=entropy,                  # scalar
+            entropy=entropy,                  # (T, B)
             new_hxs=policy_output.new_hxs,    # (B, H)
             new_cxs=policy_output.new_cxs,    # (B, H)
             ar_loss=policy_output.ar_loss,    # scalar
