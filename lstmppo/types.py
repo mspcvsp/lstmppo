@@ -29,8 +29,6 @@ class PPOConfig:
     """ Clip coefficient"""
     update_epochs: int = 4
     """ Number of update eophics"""
-    target_kl: float = 0.01
-    """ Target KL divergence threshold"""
     fixed_entropy_coef: float = 0.01
     """Fixed coefficient of the entropy if annealing is disabled"""
     anneal_entropy_flag: bool = True
@@ -79,7 +77,7 @@ class RolloutStep:
     truncated: torch.Tensor
     hxs: torch.Tensor
     cxs: torch.Tensor
-    mask: torch.Tensor # (K, B)
+
 
 @dataclass
 class RecurrentMiniBatch:
@@ -91,6 +89,7 @@ class RecurrentMiniBatch:
     old_values: torch.Tensor
     hxs0: torch.Tensor
     cxs0: torch.Tensor
+    mask: torch.Tensor  # (K, B)
     t0: int
     t1: int
 
@@ -107,7 +106,6 @@ class RecurrentBatch:
     cxs: torch.Tensor  # (T, B, H)
     terminated: torch.Tensor
     truncated: torch.Tensor
-    mask: torch.Tensor # (T, B)
 
     def iter_chunks(self, K: int):
         """
