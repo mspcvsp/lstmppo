@@ -11,8 +11,13 @@ class WeightDrop(nn.Module):
     Applies DropConnect to the recurrent weights of an RNN module.
     Respects .training so DropConnect is OFF in eval() mode.
     """
-    def __init__(self, module, weights, dropout):
+    def __init__(self,
+                 module,
+                 weights,
+                 dropout):
+
         super().__init__()
+
         self.module = module
         self.weights = weights
         self.dropout = dropout

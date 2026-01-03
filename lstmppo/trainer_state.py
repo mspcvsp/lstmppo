@@ -21,14 +21,17 @@ class TrainerState:
     writer: SummaryWriter
     jsonl_file: str
     jsonl_fp: io.TextIOWrapper
+    validation_mode: bool
+
 
     def __init__(self,
                  cfg: Config,
                  validation_mode: bool = False):
 
         self.cfg = cfg
+        self.validation_mode = validation_mode
 
-        if validation_mode:
+        if self.validation_mode:
 
             self.cfg.env.num_envs = 1
             self.cfg.trainer.mini_batch_envs = 1

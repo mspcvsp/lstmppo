@@ -314,7 +314,8 @@ class PolicyUpdateInfo:
     grad_norm: float
 
 
-def initialize_config(cfg: Config):
+def initialize_config(cfg: Config,
+                      **kwargs):
 
     # Set torch flags
     torch.backends.cudnn.deterministic = cfg.trainer.torch_deterministic
@@ -329,6 +330,6 @@ def initialize_config(cfg: Config):
     dummy_env.close()
 
     # Build run name
-    cfg.init_run_name()
+    cfg.init_run_name(kwargs.get("datetime_str", None))
 
     return cfg

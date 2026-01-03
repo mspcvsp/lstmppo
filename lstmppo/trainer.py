@@ -9,7 +9,7 @@ from torch.distributions.categorical import Categorical
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
-from .types import Config, PolicyEvalInput, PolicyInput
+from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
 from .types import RecurrentMiniBatch, PolicyUpdateInfo
 from .trainer_state import TrainerState
 
@@ -32,6 +32,10 @@ class LSTMPPOTrainer:
                                           self.device)
         
         self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
+
+        if self.state.validation_mode:
+            self.policy.eval()
+
         self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
 
         self.checkpoint_dir = Path(*[self.state.cfg.log.checkpoint_dir,
@@ -527,3 +531,33 @@ class LSTMPPOTrainer:
 def explained_variance(y_pred, y_true):
     var_y = torch.var(y_true)
     return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)
+
+
+@classmethod
+def for_validation(cls):
+    """
+    Construct a trainer in validation mode.
+    Ensures deterministic behavior and single-env operation.
+    """
+    cfg = Config()
+
+    return cls(cfg, validation_mode=True)
+
+
+@classmethod
+def from_preset(cls,
+                preset_name: str,
+                **kwargs):
+
+    cfg = Config()
+
+    if preset_name == "cartpole_easy":
+
+        cfg.env.env_id = "popgym-PositionOnlyCartPoleEasy-v0"
+        cfg.ppo.target_kl = 0.005
+        cfg.sched.start_entropy_coef = 0.1
+        cfg.sched.end_entropy_coef = 0.0
+
+    cfg = initialize_config(cfg, **kwargs)
+
+    return cls(cfg)
