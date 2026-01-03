@@ -1,52 +1,31 @@
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, List
 import torch
+import gymnasium as gym
+import popgym
 
 
 @dataclass
-class PPOConfig:
-    cuda: bool = True
-    """GPU/CPU toggle"""
-    env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
-    """Environment identifier"""
-    exp_name: str = "RLWarmup"
-    """Experiment name"""
-    total_steps: int = 200_000
-    """total timesteps of the experiments"""
-    num_envs: int = 16
-    """ Number of environments """
-    mini_batch_envs: int = 4 
-    """number of envs per recurrent minibatch"""
-    rollout_steps: int = 128
-    """ Horizon"""
+class PPOHyperparams:
     gamma: float = 0.99
     """ Discount factor"""
     gae_lambda: float = 0.95
     """ Generalized Advantage Estimate (GAE) lambda"""
-    base_lr: float = 3e-4
-    """Base learning rate"""
-    clip_range: float = 0.2
-    """ Clip coefficient"""
+    initial_clip_range: float = 0.2
+    """ Initial clip range """
     update_epochs: int = 4
-    """ Number of update eophics"""
-    fixed_entropy_coef: float = 0.01
-    """Fixed coefficient of the entropy if annealing is disabled"""
-    anneal_entropy_flag: bool = True
-    """Toggle entropy coefficient annealing"""
-    start_entropy_coef: float = 0.01
-    """Starting value of entropy coefficient for annealing"""
-    end_entropy_coef: float = 0.0
-    """Ending value of entropy coefficient for annealing"""
+    """ Number of update epochs """
     vf_coef: float = 0.5
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
-    """the maximum norm for the gradient clipping"""
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    """the name of this experiment"""
-    seed: int = 351530767
-    """seed of the experiment"""
-    torch_deterministic: bool = True
-    """if toggled, `torch.backends.cudnn.deterministic=False`"""
+    """the maximum norm for gradient clipping"""
+    early_stopping_kl_factor: float = 1.5
+    """ Stop early if approx_kl exceeds this factor times target_kl """
+
+
+@dataclass
+class LSTMConfig:
     enc_hidden_size: int = 128
     """Encoder hidden size"""
     lstm_hidden_size: int = 128
@@ -57,26 +36,122 @@ class PPOConfig:
     """LSTM activation regularization (AR)"""
     lstm_tar_coef: float = 1.0
     """LSTM temporal activation regularization (TAR)"""
-    tbptt_steps: int = 16
-    """ Truncated BPTT steps """
-    tb_logdir: str = "./tb_logs"
-    """ TensorBoard log directory """
-    jsonl_path: str = "./jsonl"
-    """ JSONL (one JSON object per line) log directory """
-    target_kl: float = 0.005
-    """ Target KL divergence threshold """
-    perc_warmup_updates: float = 5.0
-    """ Percentage of warmup updates """
-    end_lr_perc: float = 10.0
-    """ Ending learning rate percentage of base learning rate"""
-    early_stopping_kl_factor: float = 1.5
-    """ Stop early if approx_kl exceeds this factor times target_kl """
-    checkpoint_dir: str = "./checkpoints"
-    """ Model checkpoints directory"""
+
+
+@dataclass
+class ScheduleConfig:
+    base_lr: float = 3e-4
+    """ Base learning rate """
+    lr_warmup_pct: float = 5.0
+    """ Learning rate warmup percentage """
+    lr_final_pct: float = 10.0
+    """ Final learning rate percentage of base learning rate """
+    anneal_entropy_flag: bool = True
+    """ Toggle entropy coefficient annealing """
+    start_entropy_coef: float = 0.1
+    """ Starting value of entropy coefficient for annealing """
+    end_entropy_coef: float = 0.0
+
+
+@dataclass
+class TrainerConfig:
+    torch_deterministic: bool = True
+    """ Sets the value of torch.backends.cudnn.deterministic """
+    rollout_steps: int = 128
+    """ Horizon"""
+    mini_batch_envs: int = 4 
+    """number of envs per recurrent minibatch"""
     updates_per_checkpoint: int = 10
     """ Number of updates / checkpoint """
     debug_mode: bool = True
     """ Toggles debug mode """
+    seed: int = 351530767
+    """seed of the experiment"""
+    tbptt_chunk_len: int = 16
+    """ Truncated BPTT steps """
+    exp_name: str = "RLWarmup"
+    """ Experiment name """
+
+    def __init__(self):
+
+        torch.backends.cudnn.deterministic = self.torch_deterministic
+
+        if self.debug_mode:
+            torch.autograd.set_detect_anomaly(True)
+
+
+@dataclass
+class LoggingConfig:
+
+    tb_logdir: str = "./tb_logs"
+    """ TensorBoard log directory """
+    jsonl_path: str = "./jsonl"
+    """ JSONL (one JSON object per line) log directory """
+    checkpoint_dir: str = "./checkpoints"
+    """ Model checkpoints directory"""
+    run_name: str = ""
+    """ Run Name """
+
+@dataclass
+class EnvironmentConfig:
+    env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
+    """Environment identifier"""
+    num_envs: int = 16
+    """ Number of environments """
+
+    def __init__(self):
+
+        dummy_env = gym.make(self.env_id)
+        self.obs_shape = dummy_env.observation_space.shape
+        self.action_dim = dummy_env.action_space.n
+        dummy_env.close()
+
+
+@dataclass
+class BufferConfig:
+    rollout_steps: int
+    num_envs: int
+    mini_batch_envs: int
+    device: str
+    gamma: float
+    lam: float
+    lstm_hidden_size: int
+
+
+@dataclass
+class Config:
+
+    trainer: TrainerConfig = TrainerConfig()
+    
+    env: EnvironmentConfig = EnvironmentConfig()
+    
+    ppo: PPOHyperparams = PPOHyperparams()
+    
+    lstm: LSTMConfig = LSTMConfig()
+    
+    sched: ScheduleConfig = ScheduleConfig()
+    
+    log: LoggingConfig = LoggingConfig()
+
+    def to_buffer_config(self) -> BufferConfig:
+
+        return BufferConfig(
+            rollout_steps = self.trainer.rollout_steps,
+            num_envs = self.env.num_envs,
+            mini_batch_envs = self.trainer.mini_batch_envs,
+            gamma=self.ppo.gamma,
+            lam=self.ppo.gae_lambda,
+            lstm_hidden_size=self.lstm.lstm_hidden_size
+        )
+
+    def init_run_name(self,
+                      datetime_str=None):
+
+        if datetime_str is None:
+            datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        self.log.run_name =\
+            f"{self.env.env_id}__{self.trainer.exp_name}_{datetime_str}"
 
 
 @dataclass

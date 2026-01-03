@@ -1,62 +1,89 @@
 import torch
-from .types import RolloutStep, RecurrentBatch, LSTMStates
+from .types import Config, RolloutStep, RecurrentBatch, LSTMStates
 
 
 class RecurrentRolloutBuffer:
 
-    def __init__(self, cfg):
+    def __init__(self,
+                 cfg: Config,
+                 device):
 
-        self.rollout_steps = cfg.rollout_steps
-        self.num_envs = cfg.num_envs
-        self.mini_batch_envs = cfg.mini_batch_envs
-        self.device = cfg.device
-        self.gamma = cfg.gamma
-        self.lam = cfg.gae_lambda
-        self.lstm_hidden_size = cfg.lstm_hidden_size
+        self.device = device
+
+        self.cfg = cfg.to_buffer_config()
 
         # --- Storage ---
         self.obs = torch.zeros(
-            self.rollout_steps, self.num_envs, *cfg.obs_shape, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            *cfg.obs_shape,
+            device=self.device
         )
 
         self.actions = torch.zeros(
-            self.rollout_steps, self.num_envs, 1, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            1,
+            device=self.device
         )
 
         self.rewards = torch.zeros(
-            self.rollout_steps, self.num_envs, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            device=self.device
         )
 
         self.values = torch.zeros(
-            self.rollout_steps, self.num_envs, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            device=self.device
         )
 
         self.logprobs = torch.zeros(
-            self.rollout_steps, self.num_envs, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            device=self.device
         )
 
         self.terminated = torch.zeros(
-            self.rollout_steps, self.num_envs, dtype=torch.bool, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            dtype=torch.bool,
+            device=self.device
         )
 
         self.truncated = torch.zeros(
-            self.rollout_steps, self.num_envs, dtype=torch.bool, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            dtype=torch.bool,
+            device=self.device
         )
 
         # Hidden states at *start* of each timestep
         self.hxs = torch.zeros(
-            self.rollout_steps, self.num_envs, self.lstm_hidden_size, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            self.cfg.lstm_hidden_size,
+            device=self.device
         )
+
         self.cxs = torch.zeros(
-            self.rollout_steps, self.num_envs, self.lstm_hidden_size, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            self.cfg.lstm_hidden_size,
+            device=self.device
         )
 
         self.returns = torch.zeros(
-            self.rollout_steps, self.num_envs, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            device=self.device
         )
 
         self.advantages = torch.zeros(
-            self.rollout_steps, self.num_envs, device=self.device
+            self.cfg.rollout_steps,
+            self.cfg.num_envs,
+            device=self.device
         )
 
         self.reset()
@@ -69,11 +96,14 @@ class RecurrentRolloutBuffer:
         t = self.step
 
         # --- Shape checks ---
-        assert step.obs.shape == (self.num_envs, *self.obs.shape[2:]), \
+        assert step.obs.shape == (self.cfg.num_envs, *self.obs.shape[2:]), \
             f"Obs shape mismatch: {step.obs.shape}"
 
-        assert step.hxs.shape == (self.num_envs, self.lstm_hidden_size)
-        assert step.cxs.shape == (self.num_envs, self.lstm_hidden_size)
+        assert step.hxs.shape == (self.cfg.num_envs,
+                                  self.cfg.lstm_hidden_size)
+        
+        assert step.cxs.shape == (self.cfg.num_envs,
+                                  self.cfg.lstm_hidden_size)
 
         # --- Store rollout data ---
         self.obs[t].copy_(step.obs)
@@ -111,9 +141,9 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     def compute_returns_and_advantages(self, last_value):
 
-        last_gae = torch.zeros(self.num_envs, device=self.device)
+        last_gae = torch.zeros(self.cfg.num_envs, device=self.device)
 
-        for t in reversed(range(self.rollout_steps)):
+        for t in reversed(range(self.cfg.rollout_steps)):
 
             true_terminal = self.terminated[t]
 
@@ -121,17 +151,21 @@ class RecurrentRolloutBuffer:
             bootstrap = ~true_terminal
 
             next_value = (
-                last_value if t == self.rollout_steps - 1
+                last_value if t == self.cfg.rollout_steps - 1
                 else self.values[t + 1]
             )
 
             delta = (
                 self.rewards[t]
-                + self.gamma * next_value * bootstrap
+                + self.cfg.gamma * next_value * bootstrap
                 - self.values[t]
             )
 
-            last_gae = delta + self.gamma * self.lam * last_gae * bootstrap
+            last_gae = (
+                delta + self.cfg.gamma
+                * self.cfg.lam * last_gae * bootstrap
+            )
+
             self.advantages[t] = last_gae
 
         self.returns = self.values + self.advantages
@@ -141,11 +175,14 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     def get_recurrent_minibatches(self):
 
-        env_indices = torch.randperm(self.num_envs, device=self.device)
+        env_indices = torch.randperm(self.cfg.num_envs,
+                                     device=self.device)
 
-        for start in range(0, self.num_envs, self.mini_batch_envs):
+        for start in range(0,
+                           self.cfg.num_envs,
+                           self.cfg.mini_batch_envs):
 
-            idx = env_indices[start:start + self.mini_batch_envs]
+            idx = env_indices[start:start + self.cfg.mini_batch_envs]
 
             yield RecurrentBatch(
                 obs=self.obs[:, idx],
@@ -183,5 +220,5 @@ class RecurrentRolloutBuffer:
     # Optional safety check
     # ---------------------------------------------------------
     def finalize(self):
-        assert self.step == self.rollout_steps, \
-            f"Rollout incomplete: {self.step}/{self.rollout_steps}"
+        assert self.step == self.cfg.rollout_steps, \
+            f"Rollout incomplete: {self.step}/{self.cfg.rollout_steps}"

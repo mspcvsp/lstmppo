@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
-from .types import PPOConfig, PolicyInput, PolicyOutput
+from .types import Config, PolicyInput, PolicyOutput
 from .types import PolicyEvalInput, PolicyEvalOutput
 
 
@@ -54,7 +54,7 @@ class WeightDrop(nn.Module):
 class LSTMPPOPolicy(nn.Module):
 
     def __init__(self,
-                 cfg: PPOConfig):
+                 cfg: Config):
 
         super().__init__()
 

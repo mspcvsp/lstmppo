@@ -2,7 +2,7 @@ from numpy.random import Generator, MT19937, SeedSequence
 import gymnasium as gym
 from gymnasium.vector import SyncVectorEnv
 import torch
-from .types import PPOConfig, VecEnvState, PolicyInput, LSTMStates
+from .types import Config, VecEnvState, PolicyInput, LSTMStates
 
 
 def make_env(env_id):
@@ -18,22 +18,23 @@ class RecurrentVecEnvWrapper:
     """
 
     def __init__(self,
-                 cfg: PPOConfig):
+                 cfg: Config,
+                 device):
 
         self.venv = SyncVectorEnv([make_env(cfg.env_id)
                                    for _ in range(cfg.num_envs)])
 
-        self.num_envs = cfg.num_envs
-        self.hidden_size = cfg.lstm_hidden_size
-        self.device = cfg.device
+        self.num_envs = cfg.env.num_envs
+        self.hidden_size = cfg.lstm.lstm_hidden_size
+        self.device = device
 
         self.hxs = torch.zeros(self.num_envs,
                                self.hidden_size,
-                               device=cfg.device)
+                               device=self.device)
 
         self.cxs = torch.zeros(self.num_envs,
                                self.hidden_size,
-                               device=cfg.device)
+                               device=self.device)
         
         self.last_terminated = torch.zeros(self.num_envs,
                                            dtype=torch.bool,

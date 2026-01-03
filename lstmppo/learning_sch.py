@@ -1,17 +1,16 @@
 import math
-from .types import PPOConfig
+from .types import Config
 
 
 class EntropySchdeduler(object):
 
     def __init__(self,
-                 cfg: PPOConfig):
+                 cfg: Config):
 
-        self.fixed_entropy_coef = cfg.fixed_entropy_coef
-        self.anneal_entropy_flag = cfg.anneal_entropy_flag
-        self.debug_mode = cfg.debug_mode
-        self.start_entropy_coef = cfg.start_entropy_coef
-        self.end_entropy_coef = cfg.end_entropy_coef
+        self.anneal_entropy_flag = cfg.sched.anneal_entropy_flag
+        self.debug_mode = cfg.trainer.debug_mode
+        self.start_entropy_coef = cfg.sched.start_entropy_coef
+        self.end_entropy_coef = cfg.sched.end_entropy_coef
 
     def reset(self,
               total_updates: int):
@@ -25,7 +24,7 @@ class EntropySchdeduler(object):
             self.bias = self.start_entropy_coef
         else:
             self.slope = 0
-            self.bias = self.fixed_entropy_coef
+            self.bias = self.start_entropy_coef
 
     def __call__(self,
                  update_idx):
@@ -81,12 +80,13 @@ class LearningRateScheduler(object):
     - LR ↓ encourages fine‑tuning
     - both curves taper together"
     """
-    def __init__(self, cfg: PPOConfig):
+    def __init__(self,
+                 cfg: Config):
 
-        self.debug_mode = cfg.debug_mode
-        self.base_lr = cfg.base_lr
-        self.end_lr = self.base_lr * cfg.end_lr_perc / 100
-        self.perc_warmup_updates = cfg.perc_warmup_updates
+        self.debug_mode = cfg.trainer.debug_mode
+        self.base_lr = cfg.trainer.base_lr
+        self.end_lr = self.base_lr * cfg.sched.lr_final_pct / 100
+        self.perc_warmup_updates = cfg.sched.lr_warmup_pct
         self.warmup_updates = None
         self.total_updates = None
     

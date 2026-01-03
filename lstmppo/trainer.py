@@ -5,11 +5,12 @@ import torch
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
+import tyro
 
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
-from .types import PPOConfig, PolicyEvalInput, PolicyInput
+from .types import Config, PolicyEvalInput, PolicyInput
 from .types import RecurrentMiniBatch, PolicyUpdateInfo
 from .trainer_state import TrainerState
 
@@ -17,17 +18,26 @@ from .trainer_state import TrainerState
 class LSTMPPOTrainer:
 
     def __init__(self,
-                 cfg:PPOConfig):
+                 datetime_str = None):
+
+        cfg = tyro.cli(Config)
+
+        cfg.init_run_name(datetime_str)
+
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available()
+            and cfg.cuda else "cpu"
+        )
 
         self.state = TrainerState(cfg)
 
         self.env = RecurrentVecEnvWrapper(cfg)
-        self.policy = LSTMPPOPolicy(cfg).to(self.state.cfg.device)
+        self.policy = LSTMPPOPolicy(cfg).to(self.device)
         self.buffer = RecurrentRolloutBuffer(cfg)
 
-        self.checkpoint_dir = Path(*[cfg.checkpoint_dir,
-                                   cfg.env_id,
-                                    cfg.exp_name])
+        self.checkpoint_dir = Path(*[cfg.log.checkpoint_dir,
+                                     cfg.env.env_id,
+                                     cfg.trainer.exp_name])
         
         if self.checkpoint_dir.exists() is False:
 
