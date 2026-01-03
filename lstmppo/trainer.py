@@ -12,6 +12,7 @@ from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import PPOConfig, PolicyEvalInput, PolicyInput
 from .types import RecurrentMiniBatch
+from .learning_sch import EntropyCoefficient
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -30,6 +31,7 @@ class LSTMPPOTrainer:
         self.env = RecurrentVecEnvWrapper(cfg)
         self.policy = LSTMPPOPolicy(cfg).to(self.device)
         self.buffer = RecurrentRolloutBuffer(cfg)
+        self.entropy_coef = EntropyCoefficient(cfg)
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
@@ -46,11 +48,7 @@ class LSTMPPOTrainer:
         self.vf_coef = cfg.vf_coef
         self.target_kl = cfg.target_kl
         self.max_grad_norm = cfg.max_grad_norm
-    
-        self.fixed_entropy_coef = cfg.fixed_entropy_coef
-        self.anneal_entropy_flag = cfg.anneal_entropy_flag
-        self.start_entropy_coef = cfg.start_entropy_coef
-        self.end_entropy_coef = cfg.end_entropy_coef
+
         self.seed = cfg.seed
         self.tbptt_steps = cfg.tbptt_steps
         self.stats = None
@@ -78,11 +76,7 @@ class LSTMPPOTrainer:
     def train(self,
               total_updates: int):
 
-        if self.anneal_entropy_flag:
-
-            self.entropy_coef_slope =\
-                (self.end_entropy_coef - self.start_entropy_coef) /\
-                max(total_updates - 1, 1)
+        self.entropy_coef.reset(total_updates)
 
         warmup_updates =\
             max(int((total_updates * self.perc_warmup_updates / 100) + 0.5),
@@ -214,7 +208,7 @@ class LSTMPPOTrainer:
         
     def update_phase_tbptt(self):
 
-        entropy_coef = self.compute_entropy_coef()
+        entropy_coef = self.entropy_coef(self.update_idx)
 
         self.init_stats()
 
@@ -439,18 +433,6 @@ class LSTMPPOTrainer:
             f"grad {self.stats['grad_norm']:.2f} | "
             f"clip_range {self.clip_range:.3f}"
         )
-
-    def compute_entropy_coef(self):
-
-        if self.anneal_entropy_flag:
-
-            entropy_coef =\
-                self.entropy_coef_slope * self.update_idx +\
-                self.start_entropy_coef
-        else:
-            entropy_coef = self.fixed_entropy_coef
-
-        return entropy_coef 
     
     def init_stats(self):
 
