@@ -230,9 +230,10 @@ class PolicyEvalOutput:
 
 @dataclass
 class PolicyUpdateInfo:
-    policy_loss: float
-    value_loss: float
-    entropy: float
-    approx_kl: float
-    clip_frac: float
+    policy_loss: torch.Tensor
+    value_loss: torch.Tensor
+    entropy: torch.Tensor
+    approx_kl: torch.Tensor
+    clip_frac: torch.Tensor
     grad_norm: float
+

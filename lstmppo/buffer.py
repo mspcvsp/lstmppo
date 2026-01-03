@@ -147,11 +147,6 @@ class RecurrentRolloutBuffer:
 
             idx = env_indices[start:start + self.mini_batch_envs]
 
-            # Mask: 1 = valid, 0 = terminated/truncated at that timestep
-            mask =\
-                1.0 - (self.terminated[:, idx] |
-                       self.truncated[:, idx]).float()
-
             yield RecurrentBatch(
                 obs=self.obs[:, idx],
                 actions=self.actions[:, idx],

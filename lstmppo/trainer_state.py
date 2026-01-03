@@ -26,6 +26,7 @@ class TrainerState:
                  cfg: PPOConfig):
 
         self.cfg = cfg
+        self.clip_range = cfg.clip_range
  
         self.early_stopping_kl =\
             self.cfg.target_kl * cfg.early_stopping_kl_factor
@@ -52,11 +53,11 @@ class TrainerState:
     def update_stats(self,
                      upd: PolicyUpdateInfo):
 
-        self.stats["policy_loss"] += upd.policy_loss.item()
-        self.stats["value_loss"] += upd.value_loss.item()
-        self.stats["entropy"] += upd.entropy.item()
-        self.stats["approx_kl"] += upd.approx_kl.item()
-        self.stats["clip_frac"] += upd.clip_frac.item()
+        self.stats["policy_loss"] += upd.policy_loss.detach()
+        self.stats["value_loss"] += upd.value_loss.detach()
+        self.stats["entropy"] += upd.entropy.detach()
+        self.stats["approx_kl"] += upd.approx_kl.detach()
+        self.stats["clip_frac"] += upd.clip_frac.detach()
         self.stats["grad_norm"] += upd.grad_norm
         self.stats["steps"] += 1
 
@@ -75,8 +76,8 @@ class TrainerState:
 
         global_step = (
             self.update_idx * 
-            self.rollout_steps *
-            self.num_envs
+            self.cfg.rollout_steps *
+            self.cfg.num_envs
         )
 
         for key, value in self.stats.items():
@@ -102,7 +103,7 @@ class TrainerState:
             f"clip {self.stats['clip_frac']:.3f} | "
             f"ev {self.stats['explained_var']:.3f} | "
             f"grad {self.stats['grad_norm']:.2f} | "
-            f"clip_range {self.cfg.clip_range:.3f}"
+            f"clip_range {self.clip_range:.3f}"
         )
     
     def init_stats(self):
@@ -142,12 +143,12 @@ class TrainerState:
             avg_kl = self.stats["approx_kl"]
 
             if avg_kl > 2.0 * self.cfg.target_kl:
-                self.cfg.clip_range *= 0.9
+                self.clip_range *= 0.9
             elif avg_kl < 0.5 * self.cfg.target_kl:
-                self.cfg.clip_range *= 1.05
+                self.clip_range *= 1.05
 
-            self.cfg.clip_range = float(torch.clamp(
-                torch.tensor(self.cfg.clip_range),
+            self.clip_range = float(torch.clamp(
+                torch.tensor(self.clip_range),
                 0.05,
                 0.3
             ))
@@ -161,6 +162,6 @@ class TrainerState:
 
         return stop_early
 
-    def save_checkpoint(self):
+    def should_save_checkpoint(self):
 
         return self.update_idx % self.cfg.updates_per_checkpoint == 0

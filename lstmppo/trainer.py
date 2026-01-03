@@ -30,7 +30,9 @@ class LSTMPPOTrainer:
                                     cfg.exp_name])
         
         if self.checkpoint_dir.exists() is False:
-            self.checkpoint_dir.mkdir(parents=True)
+
+            self.checkpoint_dir.mkdir(parents=True,
+                                      exist_ok=True)
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
@@ -69,7 +71,7 @@ class LSTMPPOTrainer:
                 if self.state.should_stop_early():
                     break
 
-                if self.state.save_checkpoint():
+                if self.state.should_save_checkpoint():
                     self.save_checkpoint()
 
     # ---------------------------------------------------------
