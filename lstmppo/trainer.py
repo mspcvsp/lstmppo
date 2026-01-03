@@ -23,6 +23,8 @@ class TrainerState:
     lr: float
     entropy_coef: float
     clip_range: float
+    target_kl: float
+    early_stopping_kl: float
     stats: dict
     writer: SummaryWriter
     jsonl_file: str
@@ -33,6 +35,12 @@ class TrainerState:
 
     def __init__(self,
                  cfg: PPOConfig):
+
+        self.clip_range = cfg.clip_range
+        self.target_kl = cfg.target_kl
+
+        self.early_stopping_kl =\
+            self.target_kl * cfg.early_stopping_kl_factor
 
         self._entropy_sch = EntropySchdeduler(cfg)
         self._lr_sch = LearningRateScheduler(cfg)
@@ -50,8 +58,8 @@ class TrainerState:
               total_updates: int):
 
         self.update_idx = 0
-        self.entropy_sch.reset(total_updates)
-        self.lr_sch.reset(total_updates)
+        self._entropy_sch.reset(total_updates)
+        self._lr_sch.reset(total_updates)
 
     def update_stats(self,
                      policy_loss,
@@ -75,12 +83,8 @@ class TrainerState:
 
             norm_factor = 1.0 / self.stats["steps"]
 
-            for key in ["policy_loss",
-                        "value_loss",
-                        "entropy",
-                        "approx_kl",
-                        "clip_frac",
-                        "grad_norm"]:
+            for key in [key for key in self.stats.keys()
+                        if key not in ["steps"]]:
 
                 self.stats[key] *= norm_factor
 
@@ -122,10 +126,9 @@ class TrainerState:
             "steps": 0,
         }
 
-    def step(self,
-             optimizer: torch.optim.Adam):
+    def update(self,
+               optimizer: torch.optim.Adam):
 
-        self.update_idx += 1
         self.entropy_coef = self._entropy_sch(self.update_idx)
         self.lr = self._lr_sch(self.update_idx)
 
@@ -144,16 +147,23 @@ class TrainerState:
 
         avg_kl = self.stats["approx_kl"]
 
-        if avg_kl > 2.0 * self.cfg.target_kl:
+        if avg_kl > 2.0 * self.target_kl:
             self.clip_range *= 0.9
-        elif avg_kl < 0.5 * self.cfg.target_kl:
+        elif avg_kl < 0.5 * self.target_kl:
             self.clip_range *= 1.05
 
         self.clip_range = float(torch.clamp(
-            torch.tensor(self.cfg.clip_range),
+            torch.tensor(self.clip_range),
             0.05,
             0.3
         ))
+
+    def should_stop_early(self):
+
+        if self.stats["approx_kl"] > self.early_stopping_kl:
+            return True
+
+        return False
 
 
 class LSTMPPOTrainer:
@@ -163,9 +173,6 @@ class LSTMPPOTrainer:
 
         self.cfg = cfg
         self.state = TrainerState(cfg)
-
-        self.early_stopping_kl =\
-            self.cfg.target_kl * cfg.early_stopping_kl_factor
 
         self.env = RecurrentVecEnvWrapper(cfg)
         self.policy = LSTMPPOPolicy(cfg).to(self.cfg.device)
@@ -195,23 +202,23 @@ class LSTMPPOTrainer:
 
         with open(self.state.jsonl_file, "w") as self.state.jsonl_fp:
 
-            for self.update_idx in range(total_updates):
+            for self.state.update_idx in range(total_updates):
 
-                last_value = self.rollout_phase()
+                self.state.update()
+
+                last_value = self.collect_rollout()
 
                 self.buffer.compute_returns_and_advantages(last_value)
 
-                self.update_phase_tbptt()
+                self.optimize_policy()
 
-                if self.should_stop_early():
+                if self.state.should_stop_early():
                     break
-
-                self.state.step()
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)
     # ---------------------------------------------------------
-    def rollout_phase(self):
+    def collect_rollout(self):
 
         self.buffer.reset()
         env_state = self.env_state
@@ -260,7 +267,7 @@ class LSTMPPOTrainer:
 
         return last_value
 
-    def update_phase_tbptt(self):
+    def optimize_policy(self):
 
         self.state.init_stats()
 
@@ -270,7 +277,7 @@ class LSTMPPOTrainer:
 
                 for mb in batch.iter_chunks(self.cfg.tbptt_steps):
 
-                    self.update_chunk(mb)
+                    self.optimize_chunk(mb)
 
         self.compute_explained_variance()
 
@@ -280,7 +287,7 @@ class LSTMPPOTrainer:
 
         self.state.log_metrics()
 
-    def update_chunk(self,
+    def optimize_chunk(self,
                      mb: RecurrentMiniBatch):
 
         # ------- Forward pass -------
@@ -414,23 +421,17 @@ class LSTMPPOTrainer:
         valid = all_mask > 0.5
 
         if valid.sum() == 0:
-            self.stats["explained_var"] = 0.0
+            self.state.stats["explained_var"] = 0.0
         else:
             ev = explained_variance(all_values[valid],
                                     all_returns[valid])
-            
-            self.stats["explained_var"] = ev.item()
 
-    def should_stop_early(self):
-
-        if self.stats["approx_kl"] > self.early_stopping_kl:
-            return True
-
-        return False
+            self.state.stats["explained_var"] = ev.item()
 
     def validate_tbptt(self, K=16):
+
         self.policy.eval()
-        self.rollout_phase()
+        self.collect_rollout()
 
         batch = next(self.buffer.get_recurrent_minibatches())
         T, B, _ = batch.obs.shape
@@ -555,13 +556,14 @@ class LSTMPPOTrainer:
         return hxs_trace, cxs_trace
     
     def validate_lstm_state_flow(self):
+
         print("=== LSTM State-Flow Validation ===")
 
         # Deterministic policy
         self.policy.eval()
 
         # Single-env rollout recommended
-        self.rollout_phase()
+        self.collect_rollout()
 
         batches = list(self.buffer.get_recurrent_minibatches())
         assert len(batches) == 1, "Use num_envs=1 for validation."
