@@ -16,7 +16,7 @@ class RecurrentRolloutBuffer:
         self.obs = torch.zeros(
             self.cfg.rollout_steps,
             self.cfg.num_envs,
-            *cfg.obs_shape,
+            *cfg.env.obs_shape,
             device=self.device
         )
 
