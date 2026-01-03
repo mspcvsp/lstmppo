@@ -1,9 +1,10 @@
 # trainer.py
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import numpy as np
 import torch
-import math
+import io
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
@@ -12,8 +13,147 @@ from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import PPOConfig, PolicyEvalInput, PolicyInput
 from .types import RecurrentMiniBatch
-from .learning_sch import EntropyCoefficient
+from .learning_sch import EntropySchdeduler, LearningRateScheduler
 from torch.utils.tensorboard import SummaryWriter
+
+
+@dataclass
+class TrainerState:
+    update_idx: int
+    lr: float
+    entropy_coef: float
+    clip_range: float
+    stats: dict
+    writer: SummaryWriter
+    jsonl_file: str
+    jsonl_fp: io.TextIOWrapper
+
+    _entropy_sch: EntropySchdeduler
+    _lr_sch = LearningRateScheduler
+
+    def __init__(self,
+                 cfg: PPOConfig):
+
+        self._entropy_sch = EntropySchdeduler(cfg)
+        self._lr_sch = LearningRateScheduler(cfg)
+
+        tb_logdir = Path(*[cfg.tb_logdir,
+                           cfg.run_name])
+
+        self.jsonl_fp = None
+        self.jsonl_file = Path(*[cfg.jsonl_path,
+                               cfg.run_name + ".json"])
+
+        self.writer = SummaryWriter(log_dir=tb_logdir)
+
+    def reset(self,
+              total_updates: int):
+
+        self.update_idx = 0
+        self.entropy_sch.reset(total_updates)
+        self.lr_sch.reset(total_updates)
+
+    def update_stats(self,
+                     policy_loss,
+                     value_loss,
+                     entropy,
+                     approx_kl,
+                     clip_frac,
+                     grad_norm):
+
+        self.stats["policy_loss"] += policy_loss.item()
+        self.stats["value_loss"] += value_loss.item()
+        self.stats["entropy"] += entropy.item()
+        self.stats["approx_kl"] += approx_kl.item()
+        self.stats["clip_frac"] += clip_frac.item()
+        self.stats["grad_norm"] += grad_norm
+        self.stats["steps"] += 1
+
+    def compute_average_stats(self):
+
+        if self.stats["steps"] > 0:
+
+            norm_factor = 1.0 / self.stats["steps"]
+
+            for key in ["policy_loss",
+                        "value_loss",
+                        "entropy",
+                        "approx_kl",
+                        "clip_frac",
+                        "grad_norm"]:
+
+                self.stats[key] *= norm_factor
+
+    def log_metrics(self):
+
+        for key, value in self.stats.items():
+
+            self.writer.add_scalar(key,
+                                   value,
+                                   self.update_idx)
+
+        record = {"update": self.update_idx, **self.stats}
+
+        self.jsonl_fp.write(json.dumps(record) + "\n")
+        self.jsonl_fp.flush()
+
+        print(
+            f"upd {self.update_idx:04d} | "
+            f"pol {self.stats['policy_loss']:.3f} | "
+            f"val {self.stats['value_loss']:.3f} | "
+            f"ent {self.stats['entropy']:.3f} | "
+            f"kl {self.stats['approx_kl']:.4f} | "
+            f"clip {self.stats['clip_frac']:.3f} | "
+            f"ev {self.stats['explained_var']:.3f} | "
+            f"grad {self.stats['grad_norm']:.2f} | "
+            f"clip_range {self.cfg.clip_range:.3f}"
+        )
+    
+    def init_stats(self):
+
+        self.stats = {
+            "policy_loss": 0.0,
+            "value_loss": 0.0,
+            "entropy": 0.0,
+            "approx_kl": 0.0,
+            "clip_frac": 0.0,
+            "grad_norm": 0.0,
+            "explained_var": 0.0,
+            "steps": 0,
+        }
+
+    def step(self,
+             optimizer: torch.optim.Adam):
+
+        self.update_idx += 1
+        self.entropy_coef = self._entropy_sch(self.update_idx)
+        self.lr = self._lr_sch(self.update_idx)
+
+        self.writer.add_scalar("entropy_coef",
+                                self.entropy_coef,
+                                self.update_idx)
+
+        self.writer.add_scalar("learning_rate",
+                               self.lr,
+                               self.update_idx)
+
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = self.lr
+
+    def adapt_clip_range(self):
+
+        avg_kl = self.stats["approx_kl"]
+
+        if avg_kl > 2.0 * self.cfg.target_kl:
+            self.clip_range *= 0.9
+        elif avg_kl < 0.5 * self.cfg.target_kl:
+            self.clip_range *= 1.05
+
+        self.clip_range = float(torch.clamp(
+            torch.tensor(self.cfg.clip_range),
+            0.05,
+            0.3
+        ))
 
 
 class LSTMPPOTrainer:
@@ -22,137 +162,51 @@ class LSTMPPOTrainer:
                  cfg:PPOConfig):
 
         self.cfg = cfg
-        self.device = cfg.device
-        self.update_idx = 0
-        self.base_lr = cfg.base_lr
-        self.end_lr = self.base_lr * cfg.end_lr_perc / 100
-        self.perc_warmup_updates = cfg.perc_warmup_updates
+        self.state = TrainerState(cfg)
+
+        self.early_stopping_kl =\
+            self.cfg.target_kl * cfg.early_stopping_kl_factor
 
         self.env = RecurrentVecEnvWrapper(cfg)
-        self.policy = LSTMPPOPolicy(cfg).to(self.device)
+        self.policy = LSTMPPOPolicy(cfg).to(self.cfg.device)
         self.buffer = RecurrentRolloutBuffer(cfg)
-        self.entropy_coef = EntropyCoefficient(cfg)
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
-            lr=self.base_lr,
+            lr=self.cfg.base_lr,
             eps=1e-5
         )
-
-        self.entropy_coef_slope = None
-        self.jsonl_fp = None
-
-        self.rollout_steps = cfg.rollout_steps
-        self.epochs = cfg.update_epochs
-        self.clip_range = cfg.clip_range
-        self.vf_coef = cfg.vf_coef
-        self.target_kl = cfg.target_kl
-        self.max_grad_norm = cfg.max_grad_norm
-
-        self.seed = cfg.seed
-        self.tbptt_steps = cfg.tbptt_steps
-        self.stats = None
-        self.stat_steps = None
-
-        tb_logdir = Path(*[cfg.tb_logdir,
-                           cfg.run_name])
-
-        self.writer = SummaryWriter(log_dir=tb_logdir)
-
-        self.jsonl_file = Path(*[cfg.jsonl_path,
-                               cfg.run_name + ".json"])
 
         self.reset()
 
     def reset(self):
 
-        random.seed(self.seed)
-        np.random.seed(self.seed)
-        torch.manual_seed(self.seed)
+        random.seed(self.cfg.seed)
+        np.random.seed(self.cfg.seed)
+        torch.manual_seed(self.cfg.seed)
 
         # persistent env state across rollouts
-        self.env_state = self.env.reset(seed=self.seed)
+        self.env_state = self.env.reset(seed=self.cfg.seed)
 
     def train(self,
               total_updates: int):
 
-        self.entropy_coef.reset(total_updates)
+        self.state.reset(total_updates)
 
-        warmup_updates =\
-            max(int((total_updates * self.perc_warmup_updates / 100) + 0.5),
-                    1)
+        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp:
 
-        with open(self.jsonl_file, "w") as self.jsonl_fp:
-
-            """
-            Warmup + cosien decay learning rate schedule
-
-            Microsoft Copilot explanation of why this is an optimal strategy:
-            ----------------------------------------------------------------
-            "Warmup solves a very specific problem. Early in training, the 
-            policy logits and value estimates are garbage.
-
-            A high LR causes catastrophic updates. With LSTMs, this is even 
-            worse because:
-            
-            - hidden states are untrained
-            - DropConnect amplifies noise
-            - AR/TAR gradients are large early on
-            - TBPTT chunks propagate instability
-            
-            Warmup gives the network time to “settle” before applying
-            full‑strength PPO updates.
-            
-            Typical warmup:
-            - 5% of total updates
-            - LR ramps from 0 → base LR
-            
-            This alone often cuts early‑training variance in half.
-
-            Linear decay is simple, but it has a flaw: It keeps the LR too
-            high for too long, then too low too early. Cosine annealing
-            instead:
-
-            - decays slowly at first
-            - decays rapidly near the end
-            - gives you a long “productive plateau”
-            - ends with a gentle landing
-
-            This is ideal for PPO because:
-            
-            - early updates need stability
-            - mid‑training needs exploration of parameter space
-            - late training benefits from fine‑grained adjustments
-
-            Cosine annealing also interacts beautifully with entropy
-            annealing:
-            
-            - entropy ↓ encourages exploitation
-            - LR ↓ encourages fine‑tuning
-            - both curves taper together"
-            """
             for self.update_idx in range(total_updates):
 
-                # Zero learning rate is expected for 1st update                
-                if self.update_idx < warmup_updates:
-                    lr = self.base_lr * (self.update_idx / warmup_updates)
-                # Learning rate cosine decay afterwards
-                else:
-                    denom = max(total_updates - warmup_updates, 1)
-                    progress = (self.update_idx - warmup_updates) / denom
-                    
-                    lr = (
-                        self.end_lr +
-                        0.5 * (self.base_lr - self.end_lr) * 
-                        (1 + math.cos(math.pi * progress))
-                    )
+                last_value = self.rollout_phase()
 
-                for param_group in self.optimizer.param_groups:
-                    param_group["lr"] = lr
-
-                self.rollout_phase()
+                self.buffer.compute_returns_and_advantages(last_value)
 
                 self.update_phase_tbptt()
+
+                if self.should_stop_early():
+                    break
+
+                self.state.step()
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)
@@ -167,7 +221,7 @@ class LSTMPPOTrainer:
             self.buffer.get_last_lstm_states()
         )
 
-        for _ in range(self.rollout_steps):
+        for _ in range(self.cfg.rollout_steps):
 
             policy_in = to_policy_input(env_state)
 
@@ -204,43 +258,30 @@ class LSTMPPOTrainer:
             last_value = last_policy_out.values
             self.buffer.store_last_lstm_states(last_policy_out)
 
-        self.buffer.compute_returns_and_advantages(last_value)
-        
+        return last_value
+
     def update_phase_tbptt(self):
 
-        entropy_coef = self.entropy_coef(self.update_idx)
+        self.state.init_stats()
 
-        self.init_stats()
-
-        for _ in range(self.epochs):
+        for _ in range(self.cfg.epochs):
 
             for batch in self.buffer.get_recurrent_minibatches():
 
                 for mb in batch.iter_chunks(self.cfg.tbptt_steps):
 
-                    self.update_chunk(mb, entropy_coef)
+                    self.update_chunk(mb)
 
-        #  ----- Compute EV over the entire rollout  -----
-        all_values = self.buffer.values.view(-1)
-        all_returns = self.buffer.returns.view(-1)
-        all_mask = self.buffer.mask.view(-1)
-        valid = all_mask > 0.5
+        self.compute_explained_variance()
 
-        if valid.sum() == 0:
-            self.stats["explained_var"] = 0.0
-        else:
-            ev = explained_variance(all_values[valid],
-                                    all_returns[valid])
-            
-            self.stats["explained_var"] = ev.item()
+        self.state.compute_average_stats()
 
-        self.compute_average_stats()
+        self.state.adapt_clip_range()
 
-        self.adapt_clip_range()
+        self.state.log_metrics()
 
-        self.log_metrics()
-
-    def update_chunk(self, mb: RecurrentMiniBatch, entropy_coef):
+    def update_chunk(self,
+                     mb: RecurrentMiniBatch):
 
         # ------- Forward pass -------
         eval_output = self.policy.evaluate_actions_sequence(
@@ -288,20 +329,20 @@ class LSTMPPOTrainer:
 
         loss = (
             policy_loss
-            + self.vf_coef * value_loss
-            - entropy_coef * entropy
+            + self.cfg.vf_coef * value_loss
+            - self.state.entropy_coef * entropy
             + eval_output.ar_loss
             + eval_output.tar_loss
         )
 
         grad_norm = self.backward_and_clip(loss)
 
-        self.update_stats(policy_loss,
-                            value_loss,
-                            entropy,
-                            approx_kl,
-                            clip_frac,
-                            grad_norm)
+        self.state.update_stats(policy_loss,
+                                value_loss,
+                                entropy,
+                                approx_kl,
+                                clip_frac,
+                                grad_norm)
 
     def compute_losses(self,
                        values,
@@ -318,22 +359,22 @@ class LSTMPPOTrainer:
         approx_kl = (kl * mask).sum() / mask.sum()
 
         clip_frac = (
-            ((ratio > 1 + self.clip_range) |
-             (ratio < 1 - self.clip_range)).float() * mask
+            ((ratio > 1 + self.cfg.clip_range) |
+             (ratio < 1 - self.cfg.clip_range)).float() * mask
         ).sum() / mask.sum()
 
         surr1 = ratio * adv
 
         surr2 = torch.clamp(ratio,
-                            1 - self.clip_range,
-                            1 + self.clip_range) * adv
+                            1 - self.cfg.clip_range,
+                            1 + self.cfg.clip_range) * adv
 
         policy_loss = -(torch.min(surr1, surr2) * mask).sum() / mask.sum()
 
         value_pred_clipped = old_values + torch.clamp(
             values - old_values,
-            -self.clip_range,
-            self.clip_range,
+            -self.cfg.clip_range,
+            self.cfg.clip_range,
         )
 
         value_loss = 0.5 * torch.max(
@@ -358,94 +399,34 @@ class LSTMPPOTrainer:
         grad_norm = grad_norm ** 0.5
 
         nn.utils.clip_grad_norm_(self.policy.parameters(),
-                                 self.max_grad_norm)
+                                 self.cfg.max_grad_norm)
         
         self.optimizer.step()
 
         return grad_norm
 
-    def update_stats(self,
-                     policy_loss,
-                     value_loss,
-                     entropy,
-                     approx_kl,
-                     clip_frac,
-                     grad_norm):
+    def compute_explained_variance(self):
 
-        self.stats["policy_loss"] += policy_loss.item()
-        self.stats["value_loss"] += value_loss.item()
-        self.stats["entropy"] += entropy.item()
-        self.stats["approx_kl"] += approx_kl.item()
-        self.stats["clip_frac"] += clip_frac.item()
-        self.stats["grad_norm"] += grad_norm
-        self.stats["steps"] += 1
+        #  ----- Compute EV over the entire rollout  -----
+        all_values = self.buffer.values.view(-1)
+        all_returns = self.buffer.returns.view(-1)
+        all_mask = self.buffer.mask.view(-1)
+        valid = all_mask > 0.5
 
-    def compute_average_stats(self):
+        if valid.sum() == 0:
+            self.stats["explained_var"] = 0.0
+        else:
+            ev = explained_variance(all_values[valid],
+                                    all_returns[valid])
+            
+            self.stats["explained_var"] = ev.item()
 
-        if self.stats["steps"] > 0:
+    def should_stop_early(self):
 
-            norm_factor = 1.0 / self.stats["steps"]
+        if self.stats["approx_kl"] > self.early_stopping_kl:
+            return True
 
-            for key in ["policy_loss",
-                        "value_loss",
-                        "entropy",
-                        "approx_kl",
-                        "clip_frac",
-                        "grad_norm"]:
-
-                self.stats[key] *= norm_factor
-
-    def adapt_clip_range(self):
-
-        avg_kl = self.stats["approx_kl"]
-
-        if avg_kl > 2.0 * self.target_kl:
-            self.clip_range *= 0.9
-        elif avg_kl < 0.5 * self.target_kl:
-            self.clip_range *= 1.05
-
-        self.clip_range = float(torch.clamp(
-            torch.tensor(self.clip_range),
-            0.05,
-            0.3
-        ))
-
-    def log_metrics(self):
-
-        for key, value in self.stats.items():
-
-            self.writer.add_scalar(key,
-                                   value,
-                                   self.update_idx)
-
-        record = {"update": self.update_idx, **self.stats}
-        self.jsonl_fp.write(json.dumps(record) + "\n")
-        self.jsonl_fp.flush()
-
-        print(
-            f"upd {self.update_idx:04d} | "
-            f"pol {self.stats['policy_loss']:.3f} | "
-            f"val {self.stats['value_loss']:.3f} | "
-            f"ent {self.stats['entropy']:.3f} | "
-            f"kl {self.stats['approx_kl']:.4f} | "
-            f"clip {self.stats['clip_frac']:.3f} | "
-            f"ev {self.stats['explained_var']:.3f} | "
-            f"grad {self.stats['grad_norm']:.2f} | "
-            f"clip_range {self.clip_range:.3f}"
-        )
-    
-    def init_stats(self):
-
-        self.stats = {
-            "policy_loss": 0.0,
-            "value_loss": 0.0,
-            "entropy": 0.0,
-            "approx_kl": 0.0,
-            "clip_frac": 0.0,
-            "grad_norm": 0.0,
-            "explained_var": 0.0,
-            "steps": 0,
-        }
+        return False
 
     def validate_tbptt(self, K=16):
         self.policy.eval()

@@ -69,6 +69,9 @@ class PPOConfig:
     """ Percentage of warmup updates """
     end_lr_perc: float = 10.0
     """ Ending learning rate percentage of base learning rate"""
+    early_stopping_kl_factor: float = 1.5
+    """ Stop early if approx_kl exceeds this factor times target_kl """
+
 
 @dataclass
 class RolloutStep:
