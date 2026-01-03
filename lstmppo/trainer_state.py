@@ -1,0 +1,166 @@
+from dataclasses import dataclass
+import io
+import json
+import torch
+from pathlib import Path
+
+from torch.utils.tensorboard import SummaryWriter
+from .types import PPOConfig, PolicyUpdateInfo
+from .learning_sch import EntropySchdeduler, LearningRateScheduler
+
+
+@dataclass
+class TrainerState:
+    update_idx: int
+    lr: float
+    entropy_coef: float
+    clip_range: float
+    target_kl: float
+    early_stopping_kl: float
+    stats: dict
+    writer: SummaryWriter
+    jsonl_file: str
+    jsonl_fp: io.TextIOWrapper
+
+    def __init__(self,
+                 cfg: PPOConfig):
+
+        self.cfg = cfg
+ 
+        self.early_stopping_kl =\
+            self.cfg.target_kl * cfg.early_stopping_kl_factor
+
+        self._entropy_sch = EntropySchdeduler(cfg)
+        self._lr_sch = LearningRateScheduler(cfg)
+
+        tb_logdir = Path(*[cfg.tb_logdir,
+                           cfg.run_name])
+
+        self.jsonl_fp = None
+        self.jsonl_file = Path(*[cfg.jsonl_path,
+                               cfg.run_name + ".json"])
+
+        self.writer = SummaryWriter(log_dir=tb_logdir)
+
+    def reset(self,
+              total_updates: int):
+
+        self.update_idx = 0
+        self._entropy_sch.reset(total_updates)
+        self._lr_sch.reset(total_updates)
+
+    def update_stats(self,
+                     upd: PolicyUpdateInfo):
+
+        self.stats["policy_loss"] += upd.policy_loss.item()
+        self.stats["value_loss"] += upd.value_loss.item()
+        self.stats["entropy"] += upd.entropy.item()
+        self.stats["approx_kl"] += upd.approx_kl.item()
+        self.stats["clip_frac"] += upd.clip_frac.item()
+        self.stats["grad_norm"] += upd.grad_norm
+        self.stats["steps"] += 1
+
+    def compute_average_stats(self):
+
+        if self.stats["steps"] > 0:
+
+            norm_factor = 1.0 / self.stats["steps"]
+
+            for key in [key for key in self.stats.keys()
+                        if key not in ["steps"]]:
+
+                self.stats[key] *= norm_factor
+
+    def log_metrics(self):
+
+        global_step = (
+            self.update_idx * 
+            self.rollout_steps *
+            self.num_envs
+        )
+
+        for key, value in self.stats.items():
+
+            self.writer.add_scalar(key,
+                                   value,
+                                   global_step)
+
+        record = {"update": self.update_idx, **self.stats}
+
+        record["lr"] = self.lr
+        record["entropy_coef"] = self.entropy_coef
+
+        self.jsonl_fp.write(json.dumps(record) + "\n")
+        self.jsonl_fp.flush()
+
+        print(
+            f"upd {self.update_idx:04d} | "
+            f"pol {self.stats['policy_loss']:.3f} | "
+            f"val {self.stats['value_loss']:.3f} | "
+            f"ent {self.stats['entropy']:.3f} | "
+            f"kl {self.stats['approx_kl']:.4f} | "
+            f"clip {self.stats['clip_frac']:.3f} | "
+            f"ev {self.stats['explained_var']:.3f} | "
+            f"grad {self.stats['grad_norm']:.2f} | "
+            f"clip_range {self.cfg.clip_range:.3f}"
+        )
+    
+    def init_stats(self):
+
+        self.stats = {
+            "policy_loss": 0.0,
+            "value_loss": 0.0,
+            "entropy": 0.0,
+            "approx_kl": 0.0,
+            "clip_frac": 0.0,
+            "grad_norm": 0.0,
+            "explained_var": 0.0,
+            "steps": 0,
+        }
+
+    def apply_schedules(self,
+                        optimizer: torch.optim.Adam):
+
+        self.entropy_coef = self._entropy_sch(self.update_idx)
+        self.lr = self._lr_sch(self.update_idx)
+
+        self.writer.add_scalar("entropy_coef",
+                                self.entropy_coef,
+                                self.update_idx)
+
+        self.writer.add_scalar("learning_rate",
+                               self.lr,
+                               self.update_idx)
+
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = self.lr
+
+    def adapt_clip_range(self):
+
+        if self.cfg.debug_mode is False:
+
+            avg_kl = self.stats["approx_kl"]
+
+            if avg_kl > 2.0 * self.cfg.target_kl:
+                self.cfg.clip_range *= 0.9
+            elif avg_kl < 0.5 * self.cfg.target_kl:
+                self.cfg.clip_range *= 1.05
+
+            self.cfg.clip_range = float(torch.clamp(
+                torch.tensor(self.cfg.clip_range),
+                0.05,
+                0.3
+            ))
+
+    def should_stop_early(self):
+
+        stop_early = (
+            self.stats["approx_kl"] > self.early_stopping_kl
+            and self.cfg.debug_mode is False
+        )
+
+        return stop_early
+
+    def save_checkpoint(self):
+
+        return self.update_idx % self.cfg.updates_per_checkpoint == 0

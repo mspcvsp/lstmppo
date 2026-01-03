@@ -1,180 +1,17 @@
 # trainer.py
-from dataclasses import dataclass
-import json
 from pathlib import Path
 import numpy as np
 import torch
-import io
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
+
 from .env import RecurrentVecEnvWrapper, to_policy_input
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import PPOConfig, PolicyEvalInput, PolicyInput
 from .types import RecurrentMiniBatch, PolicyUpdateInfo
-from .learning_sch import EntropySchdeduler, LearningRateScheduler
-from torch.utils.tensorboard import SummaryWriter
-
-
-@dataclass
-class TrainerState:
-    update_idx: int
-    lr: float
-    entropy_coef: float
-    clip_range: float
-    target_kl: float
-    early_stopping_kl: float
-    stats: dict
-    writer: SummaryWriter
-    jsonl_file: str
-    jsonl_fp: io.TextIOWrapper
-
-    def __init__(self,
-                 cfg: PPOConfig):
-
-        self.debug_mode = cfg.debug_mode
-        self.clip_range = cfg.clip_range
-        self.target_kl = cfg.target_kl
-        self._updates_per_checkpoint = cfg.updates_per_checkpoint
-
-        self.early_stopping_kl =\
-            self.target_kl * cfg.early_stopping_kl_factor
-
-        self._entropy_sch = EntropySchdeduler(cfg)
-        self._lr_sch = LearningRateScheduler(cfg)
-
-        tb_logdir = Path(*[cfg.tb_logdir,
-                           cfg.run_name])
-
-        self.jsonl_fp = None
-        self.jsonl_file = Path(*[cfg.jsonl_path,
-                               cfg.run_name + ".json"])
-
-        self.writer = SummaryWriter(log_dir=tb_logdir)
-
-    def reset(self,
-              total_updates: int):
-
-        self.update_idx = 0
-        self._entropy_sch.reset(total_updates)
-        self._lr_sch.reset(total_updates)
-
-    def update_stats(self,
-                     upd: PolicyUpdateInfo):
-
-        self.stats["policy_loss"] += upd.policy_loss.item()
-        self.stats["value_loss"] += upd.value_loss.item()
-        self.stats["entropy"] += upd.entropy.item()
-        self.stats["approx_kl"] += upd.approx_kl.item()
-        self.stats["clip_frac"] += upd.clip_frac.item()
-        self.stats["grad_norm"] += upd.grad_norm
-        self.stats["steps"] += 1
-
-    def compute_average_stats(self):
-
-        if self.stats["steps"] > 0:
-
-            norm_factor = 1.0 / self.stats["steps"]
-
-            for key in [key for key in self.stats.keys()
-                        if key not in ["steps"]]:
-
-                self.stats[key] *= norm_factor
-
-    def log_metrics(self):
-
-        global_step = (
-            self.update_idx * 
-            self.rollout_steps *
-            self.num_envs
-        )
-
-        for key, value in self.stats.items():
-
-            self.writer.add_scalar(key,
-                                   value,
-                                   global_step)
-
-        record = {"update": self.update_idx, **self.stats}
-
-        record["lr"] = self.lr
-        record["entropy_coef"] = self.entropy_coef
-
-        self.jsonl_fp.write(json.dumps(record) + "\n")
-        self.jsonl_fp.flush()
-
-        print(
-            f"upd {self.update_idx:04d} | "
-            f"pol {self.stats['policy_loss']:.3f} | "
-            f"val {self.stats['value_loss']:.3f} | "
-            f"ent {self.stats['entropy']:.3f} | "
-            f"kl {self.stats['approx_kl']:.4f} | "
-            f"clip {self.stats['clip_frac']:.3f} | "
-            f"ev {self.stats['explained_var']:.3f} | "
-            f"grad {self.stats['grad_norm']:.2f} | "
-            f"clip_range {self.clip_range:.3f}"
-        )
-    
-    def init_stats(self):
-
-        self.stats = {
-            "policy_loss": 0.0,
-            "value_loss": 0.0,
-            "entropy": 0.0,
-            "approx_kl": 0.0,
-            "clip_frac": 0.0,
-            "grad_norm": 0.0,
-            "explained_var": 0.0,
-            "steps": 0,
-        }
-
-    def apply_schedules(self,
-                        optimizer: torch.optim.Adam):
-
-        self.entropy_coef = self._entropy_sch(self.update_idx)
-        self.lr = self._lr_sch(self.update_idx)
-
-        self.writer.add_scalar("entropy_coef",
-                                self.entropy_coef,
-                                self.update_idx)
-
-        self.writer.add_scalar("learning_rate",
-                               self.lr,
-                               self.update_idx)
-
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = self.lr
-
-    def adapt_clip_range(self):
-
-        if self.debug_mode is False:
-
-            avg_kl = self.stats["approx_kl"]
-
-            if avg_kl > 2.0 * self.target_kl:
-                self.clip_range *= 0.9
-            elif avg_kl < 0.5 * self.target_kl:
-                self.clip_range *= 1.05
-
-            self.clip_range = float(torch.clamp(
-                torch.tensor(self.clip_range),
-                0.05,
-                0.3
-            ))
-
-    def should_stop_early(self):
-
-        stop_early = (
-            self.stats["approx_kl"] > self.early_stopping_kl
-            and self.debug_mode is False
-        )
-
-        return stop_early
-
-    def save_checkpoint(self):
-
-        return self.update_idx % self._updates_per_checkpoint == 0
+from .trainer_state import TrainerState
 
 
 class LSTMPPOTrainer:
@@ -182,11 +19,10 @@ class LSTMPPOTrainer:
     def __init__(self,
                  cfg:PPOConfig):
 
-        self.cfg = cfg
         self.state = TrainerState(cfg)
 
         self.env = RecurrentVecEnvWrapper(cfg)
-        self.policy = LSTMPPOPolicy(cfg).to(self.cfg.device)
+        self.policy = LSTMPPOPolicy(cfg).to(self.state.cfg.device)
         self.buffer = RecurrentRolloutBuffer(cfg)
 
         self.checkpoint_dir = Path(*[cfg.checkpoint_dir,
@@ -198,7 +34,7 @@ class LSTMPPOTrainer:
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
-            lr=self.cfg.base_lr,
+            lr=self.state.cfg.base_lr,
             eps=1e-5
         )
 
@@ -206,12 +42,12 @@ class LSTMPPOTrainer:
 
     def reset(self):
 
-        random.seed(self.cfg.seed)
-        np.random.seed(self.cfg.seed)
-        torch.manual_seed(self.cfg.seed)
+        random.seed(self.state.cfg.seed)
+        np.random.seed(self.state.cfg.seed)
+        torch.manual_seed(self.state.cfg.seed)
 
         # persistent env state across rollouts
-        self.env_state = self.env.reset(seed=self.cfg.seed)
+        self.env_state = self.env.reset(seed=self.state.cfg.seed)
 
     def train(self,
               total_updates: int):
@@ -249,7 +85,7 @@ class LSTMPPOTrainer:
             self.buffer.get_last_lstm_states()
         )
 
-        for _ in range(self.cfg.rollout_steps):
+        for _ in range(self.state.cfg.rollout_steps):
 
             policy_in = to_policy_input(env_state)
 
@@ -281,9 +117,13 @@ class LSTMPPOTrainer:
 
         # Bootstrap value + store final LSTM states
         with torch.no_grad():
+
             policy_in = to_policy_input(self.env_state)
+
             _, _, last_policy_out = self.policy.act(policy_in)
+
             last_value = last_policy_out.values
+
             self.buffer.store_last_lstm_states(last_policy_out)
 
         return last_value
@@ -292,11 +132,11 @@ class LSTMPPOTrainer:
 
         self.state.init_stats()
 
-        for _ in range(self.cfg.epochs):
+        for _ in range(self.state.cfg.epochs):
 
             for batch in self.buffer.get_recurrent_minibatches():
 
-                for mb in batch.iter_chunks(self.cfg.tbptt_steps):
+                for mb in batch.iter_chunks(self.state.cfg.tbptt_steps):
 
                     self.optimize_chunk(mb)
 
@@ -357,11 +197,11 @@ class LSTMPPOTrainer:
 
         loss = (
             policy_loss
-            + self.cfg.vf_coef * value_loss
+            + self.state.cfg.vf_coef * value_loss
             - self.state.entropy_coef * entropy
         )
 
-        if self.cfg.debug_mode is False:
+        if self.state.cfg.debug_mode is False:
 
             loss = (
                 loss
@@ -395,22 +235,22 @@ class LSTMPPOTrainer:
         approx_kl = (kl * mask).sum() / mask.sum()
 
         clip_frac = (
-            ((ratio > 1 + self.cfg.clip_range) |
-             (ratio < 1 - self.cfg.clip_range)).float() * mask
+            ((ratio > 1 + self.state.cfg.clip_range) |
+             (ratio < 1 - self.state.cfg.clip_range)).float() * mask
         ).sum() / mask.sum()
 
         surr1 = ratio * adv
 
         surr2 = torch.clamp(ratio,
-                            1 - self.cfg.clip_range,
-                            1 + self.cfg.clip_range) * adv
+                            1 - self.state.cfg.clip_range,
+                            1 + self.state.cfg.clip_range) * adv
 
         policy_loss = -(torch.min(surr1, surr2) * mask).sum() / mask.sum()
 
         value_pred_clipped = old_values + torch.clamp(
             values - old_values,
-            -self.cfg.clip_range,
-            self.cfg.clip_range,
+            -self.state.cfg.clip_range,
+            self.state.cfg.clip_range,
         )
 
         value_loss = 0.5 * torch.max(
@@ -437,7 +277,7 @@ class LSTMPPOTrainer:
         grad_norm = grad_norm ** 0.5
 
         nn.utils.clip_grad_norm_(self.policy.parameters(),
-                                 self.cfg.max_grad_norm)
+                                 self.state.cfg.max_grad_norm)
         
         self.optimizer.step()
 
@@ -462,7 +302,7 @@ class LSTMPPOTrainer:
     def save_checkpoint(self):
 
         checkpoint_pth =\
-            self.checkpoint_dir.joinpath(self.cfg.run_name +
+            self.checkpoint_dir.joinpath(self.state.cfg.run_name +
                                          "_checkpoint_" +
                                          f"{self.state.update_idx}.pt")
         torch.save({
@@ -653,8 +493,11 @@ class LSTMPPOTrainer:
         val_diff = (values_rec - stored_values).abs()
         logp_diff = (logprobs_rec - stored_logprobs).abs()
 
-        print("max |values_rec - stored_values|   :", val_diff.max().item())
-        print("max |logprobs_rec - stored_logprobs|:", logp_diff.max().item())
+        print("max |values_rec - stored_values|   :",
+              val_diff.max().item())
+        
+        print("max |logprobs_rec - stored_logprobs|:",
+              logp_diff.max().item())
 
         for t in range(min(T, 5)):
             print(f"\n[t = {t}]")
@@ -666,6 +509,7 @@ class LSTMPPOTrainer:
             print(" |diff|         :", logp_diff[t, 0].item())
 
         print("=== Validation complete ===")
+
 
 def explained_variance(y_pred, y_true):
     var_y = torch.var(y_true)
