@@ -23,8 +23,8 @@ class PPOConfig:
     """ Discount factor"""
     gae_lambda: float = 0.95
     """ Generalized Advantage Estimate (GAE) lambda"""
-    learning_rate: float = 3e-4
-    """Learning rate"""
+    base_lr: float = 3e-4
+    """Base learning rate"""
     clip_range: float = 0.2
     """ Clip coefficient"""
     update_epochs: int = 4
@@ -65,6 +65,10 @@ class PPOConfig:
     """ JSONL (one JSON object per line) log directory """
     target_kl: float = 0.005
     """ Target KL divergence threshold """
+    perc_warmup_updates: float = 5.0
+    """ Percentage of warmup updates """
+    end_lr_perc: float = 10.0
+    """ Ending learning rate percentage of base learning rate"""
 
 @dataclass
 class RolloutStep:
