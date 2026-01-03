@@ -26,6 +26,8 @@ class PPOHyperparams:
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for gradient clipping"""
+    target_kl: float = 0.005
+    """ Target KL divergence """
     early_stopping_kl_factor: float = 1.5
     """ Stop early if approx_kl exceeds this factor times target_kl """
 
@@ -46,6 +48,7 @@ class LSTMConfig:
 
 @dataclass
 class ScheduleConfig:
+
     base_lr: float = 3e-4
     """ Base learning rate """
     lr_warmup_pct: float = 5.0
@@ -61,6 +64,9 @@ class ScheduleConfig:
 
 @dataclass
 class TrainerConfig:
+
+    cuda: bool = True
+    """ Whether to use CUDA """
     torch_deterministic: bool = True
     """ Sets the value of torch.backends.cudnn.deterministic """
     rollout_steps: int = 128
@@ -93,6 +99,7 @@ class LoggingConfig:
 
 @dataclass
 class EnvironmentConfig:
+
     env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
     """Environment identifier"""
     num_envs: int = 16

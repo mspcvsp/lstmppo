@@ -5,7 +5,7 @@ import torch
 from pathlib import Path
 
 from torch.utils.tensorboard import SummaryWriter
-from .types import PPOConfig, PolicyUpdateInfo
+from .types import Config, PolicyUpdateInfo
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
 
 
@@ -23,23 +23,24 @@ class TrainerState:
     jsonl_fp: io.TextIOWrapper
 
     def __init__(self,
-                 cfg: PPOConfig):
+                 cfg: Config):
 
         self.cfg = cfg
-        self.clip_range = cfg.clip_range
+        self.clip_range = cfg.ppo.initial_clip_range
  
         self.early_stopping_kl =\
-            self.cfg.target_kl * cfg.early_stopping_kl_factor
+            self.cfg.ppo.target_kl * cfg.ppo.early_stopping_kl_factor
 
         self._entropy_sch = EntropySchdeduler(cfg)
         self._lr_sch = LearningRateScheduler(cfg)
 
-        tb_logdir = Path(*[cfg.tb_logdir,
-                           cfg.run_name])
+        tb_logdir = Path(*[cfg.log.tb_logdir,
+                           cfg.log.run_name])
 
         self.jsonl_fp = None
-        self.jsonl_file = Path(*[cfg.jsonl_path,
-                               cfg.run_name + ".json"])
+
+        self.jsonl_file = Path(*[cfg.log.jsonl_path,
+                               cfg.log.run_name + ".json"])
 
         self.writer = SummaryWriter(log_dir=tb_logdir)
 
@@ -76,8 +77,8 @@ class TrainerState:
 
         global_step = (
             self.update_idx * 
-            self.cfg.rollout_steps *
-            self.cfg.num_envs
+            self.cfg.trainer.rollout_steps *
+            self.cfg.env.num_envs
         )
 
         for key, value in self.stats.items():
@@ -142,9 +143,9 @@ class TrainerState:
 
             avg_kl = self.stats["approx_kl"]
 
-            if avg_kl > 2.0 * self.cfg.target_kl:
+            if avg_kl > 2.0 * self.cfg.ppo.target_kl:
                 self.clip_range *= 0.9
-            elif avg_kl < 0.5 * self.cfg.target_kl:
+            elif avg_kl < 0.5 * self.cfg.ppo.target_kl:
                 self.clip_range *= 1.05
 
             self.clip_range = float(torch.clamp(
@@ -164,4 +165,7 @@ class TrainerState:
 
     def should_save_checkpoint(self):
 
-        return self.update_idx % self.cfg.updates_per_checkpoint == 0
+        return (
+            self.update_idx % 
+            self.cfg.trainer.updates_per_checkpoint == 0
+        )

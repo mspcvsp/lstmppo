@@ -21,7 +21,7 @@ class LSTMPPOTrainer:
 
         self.device = torch.device(
             "cuda" if torch.cuda.is_available()
-            and cfg.cuda else "cpu"
+            and cfg.trainer.cuda else "cpu"
         )
 
         self.state = TrainerState(cfg)
@@ -41,7 +41,7 @@ class LSTMPPOTrainer:
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
-            lr=self.state.cfg.base_lr,
+            lr=self.state.cfg.sched.base_lr,
             eps=1e-5
         )
 
@@ -49,12 +49,12 @@ class LSTMPPOTrainer:
 
     def reset(self):
 
-        random.seed(self.state.cfg.seed)
-        np.random.seed(self.state.cfg.seed)
-        torch.manual_seed(self.state.cfg.seed)
+        random.seed(self.state.cfg.trainer.seed)
+        np.random.seed(self.state.cfg.trainer.seed)
+        torch.manual_seed(self.state.cfg.trainer.seed)
 
         # persistent env state across rollouts
-        self.env_state = self.env.reset(seed=self.state.cfg.seed)
+        self.env_state = self.env.reset(seed=self.state.cfg.trainer.seed)
 
     def train(self,
               total_updates: int):
@@ -143,7 +143,9 @@ class LSTMPPOTrainer:
 
             for batch in self.buffer.get_recurrent_minibatches():
 
-                for mb in batch.iter_chunks(self.state.cfg.tbptt_steps):
+                for mb in batch.iter_chunks(
+                    self.state.cfg.trainer.tbptt_chunk_len
+                    ):
 
                     self.optimize_chunk(mb)
 
@@ -242,22 +244,22 @@ class LSTMPPOTrainer:
         approx_kl = (kl * mask).sum() / mask.sum()
 
         clip_frac = (
-            ((ratio > 1 + self.state.cfg.clip_range) |
-             (ratio < 1 - self.state.cfg.clip_range)).float() * mask
+            ((ratio > 1 + self.state.clip_range) |
+             (ratio < 1 - self.state.clip_range)).float() * mask
         ).sum() / mask.sum()
 
         surr1 = ratio * adv
 
         surr2 = torch.clamp(ratio,
-                            1 - self.state.cfg.clip_range,
-                            1 + self.state.cfg.clip_range) * adv
+                            1 - self.state.clip_range,
+                            1 + self.state.clip_range) * adv
 
         policy_loss = -(torch.min(surr1, surr2) * mask).sum() / mask.sum()
 
         value_pred_clipped = old_values + torch.clamp(
             values - old_values,
-            -self.state.cfg.clip_range,
-            self.state.cfg.clip_range,
+            -self.state.clip_range,
+            self.state.clip_range,
         )
 
         value_loss = 0.5 * torch.max(
@@ -284,8 +286,8 @@ class LSTMPPOTrainer:
         grad_norm = grad_norm ** 0.5
 
         nn.utils.clip_grad_norm_(self.policy.parameters(),
-                                 self.state.cfg.max_grad_norm)
-        
+                                 self.state.cfg.ppo.max_grad_norm)
+
         self.optimizer.step()
 
         return grad_norm
@@ -309,7 +311,7 @@ class LSTMPPOTrainer:
     def save_checkpoint(self):
 
         checkpoint_pth =\
-            self.checkpoint_dir.joinpath(self.state.cfg.run_name +
+            self.checkpoint_dir.joinpath(self.state.cfg.log.run_name +
                                          "_checkpoint_" +
                                          f"{self.state.update_idx}.pt")
         torch.save({
