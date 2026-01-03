@@ -2,3 +2,5 @@
 __pycache__/
 runs/
 wandb/
+tb_logs/
+jsonl/
