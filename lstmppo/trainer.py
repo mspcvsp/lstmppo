@@ -157,8 +157,17 @@ class LSTMPPOTrainer:
         #  ----- Compute EV over the entire rollout  -----
         all_values = self.buffer.values.view(-1)
         all_returns = self.buffer.returns.view(-1)
+        all_mask = self.buffer.mask.view(-1)
+        valid = all_mask > 0.5
 
-        ev = explained_variance(all_values, all_returns)
+        if valid.sum() == 0:
+            self.stats["explained_var"] = 0.0
+        else:
+            ev = explained_variance(all_values[valid],
+                                    all_returns[valid])
+            
+            self.stats["explained_var"] = ev.item()
+
         self.stats["explained_var"] = ev.item()
 
         self.compute_average_stats()
@@ -187,36 +196,48 @@ class LSTMPPOTrainer:
         returns = mb.returns.view(K * B)
         adv = mb.advantages.view(K * B)
         old_values = mb.old_values.view(K * B)
+        mask = mb.mask.view(K * B) # (K*B,)
 
-        adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
+        if mask.sum() == 0:
+            # All envs terminated/truncated at this chunk.
+            # No valid timesteps → skip this chunk entirely.
+            return
+        else:
+            valid_adv = adv[mask > 0.5]
+            
+            adv =\
+                (adv - valid_adv.mean()) /\
+                (valid_adv.std(unbiased=False) + 1e-8)
 
-        policy_loss, value_loss, approx_kl, clip_frac = \
-            self.compute_losses(values,
-                                new_logp,
-                                old_logp,
-                                old_values,
-                                returns,
-                                adv)
+            policy_loss, value_loss, approx_kl, clip_frac = \
+                self.compute_losses(values,
+                                    new_logp,
+                                    old_logp,
+                                    old_values,
+                                    returns,
+                                    adv,
+                                    mask)
 
-        dist = Categorical(logits=eval_output.logits.view(K * B, -1))
-        entropy = dist.entropy().mean()
+            dist = Categorical(logits=eval_output.logits.view(K * B, -1))
+            entropy = dist.entropy()
+            entropy = (entropy * mask).sum() / mask.sum()
 
-        loss = (
-            policy_loss
-            + self.vf_coef * value_loss
-            - entropy_coef * entropy
-            + eval_output.ar_loss
-            + eval_output.tar_loss
-        )
+            loss = (
+                policy_loss
+                + self.vf_coef * value_loss
+                - entropy_coef * entropy
+                + eval_output.ar_loss
+                + eval_output.tar_loss
+            )
 
-        grad_norm = self.backward_and_clip(loss)
+            grad_norm = self.backward_and_clip(loss)
 
-        self.update_stats(policy_loss,
-                          value_loss,
-                          entropy,
-                          approx_kl,
-                          clip_frac,
-                          grad_norm)
+            self.update_stats(policy_loss,
+                              value_loss,
+                              entropy,
+                              approx_kl,
+                              clip_frac,
+                              grad_norm)
 
     def compute_losses(self,
                        values,
@@ -224,16 +245,18 @@ class LSTMPPOTrainer:
                        old_logp,
                        old_values,
                        returns,
-                       adv):
+                       adv,
+                       mask):
 
         ratio = torch.exp(new_logp - old_logp)
 
-        approx_kl = 0.5 * (old_logp - new_logp).pow(2).mean()
+        kl = 0.5 * (old_logp - new_logp).pow(2)
+        approx_kl = (kl * mask).sum() / mask.sum()
 
         clip_frac = (
-            (ratio > 1 + self.clip_range) |
-            (ratio < 1 - self.clip_range)
-        ).float().mean()
+            ((ratio > 1 + self.clip_range) |
+             (ratio < 1 - self.clip_range)).float() * mask
+        ).sum() / mask.sum()
 
         surr1 = ratio * adv
 
@@ -241,7 +264,7 @@ class LSTMPPOTrainer:
                             1 - self.clip_range,
                             1 + self.clip_range) * adv
 
-        policy_loss = -torch.min(surr1, surr2).mean()
+        policy_loss = -(torch.min(surr1, surr2) * mask).sum() / mask.sum()
 
         value_pred_clipped = old_values + torch.clamp(
             values - old_values,
@@ -252,7 +275,8 @@ class LSTMPPOTrainer:
         value_loss = 0.5 * torch.max(
             (values - returns).pow(2),
             (value_pred_clipped - returns).pow(2)
-        ).mean()
+        )
+        value_loss = (value_loss * mask).sum() / mask.sum()
 
         return policy_loss, value_loss, approx_kl, clip_frac
     

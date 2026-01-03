@@ -79,7 +79,7 @@ class RolloutStep:
     truncated: torch.Tensor
     hxs: torch.Tensor
     cxs: torch.Tensor
-
+    mask: torch.Tensor # (K, B)
 
 @dataclass
 class RecurrentMiniBatch:
@@ -107,6 +107,7 @@ class RecurrentBatch:
     cxs: torch.Tensor  # (T, B, H)
     terminated: torch.Tensor
     truncated: torch.Tensor
+    mask: torch.Tensor # (T, B)
 
     def iter_chunks(self, K: int):
         """
@@ -131,6 +132,10 @@ class RecurrentBatch:
             hxs0 = self.hxs[t0]   # (B, H)
             cxs0 = self.cxs[t0]   # (B, H)
 
+            mb_terminated = self.terminated[t0:t1]
+            mb_truncated = self.truncated[t0:t1]
+            mb_mask = 1.0 - (mb_terminated | mb_truncated).float() # (T, B)
+
             yield RecurrentMiniBatch(
                 obs=self.obs[t0:t1],
                 actions=self.actions[t0:t1],
@@ -140,6 +145,7 @@ class RecurrentBatch:
                 old_values=self.values[t0:t1],
                 hxs0=hxs0,
                 cxs0=cxs0,
+                mask=mb_mask,
                 t0=t0,
                 t1=t1
             )
