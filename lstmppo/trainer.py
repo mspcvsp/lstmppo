@@ -33,10 +33,11 @@ class LSTMPPOTrainer:
         
         self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
 
-        if self.state.validation_mode:
-            self.policy.eval()
-
         self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
+
+        if self.state.validation_mode:
+
+            self.policy.eval()
 
         self.checkpoint_dir = Path(*[self.state.cfg.log.checkpoint_dir,
                                      self.state.cfg.env.env_id,
@@ -54,6 +55,35 @@ class LSTMPPOTrainer:
         )
 
         self.reset()
+
+    @classmethod
+    def for_validation(cls):
+        """
+        Construct a trainer in validation mode.
+        Ensures deterministic behavior and single-env operation.
+        """
+        cfg = Config()
+        cfg = initialize_config(cfg)
+
+        return cls(cfg, validation_mode=True)
+
+    @classmethod
+    def from_preset(cls,
+                    preset_name: str,
+                    **kwargs):
+
+        cfg = Config()
+
+        if preset_name == "cartpole_easy":
+
+            cfg.env.env_id = "popgym-PositionOnlyCartPoleEasy-v0"
+            cfg.ppo.target_kl = 0.005
+            cfg.sched.start_entropy_coef = 0.1
+            cfg.sched.end_entropy_coef = 0.0
+
+        cfg = initialize_config(cfg, **kwargs)
+
+        return cls(cfg)
 
     def reset(self):
 
@@ -100,7 +130,7 @@ class LSTMPPOTrainer:
             self.buffer.get_last_lstm_states()
         )
 
-        for _ in range(self.state.cfg.rollout_steps):
+        for _ in range(self.state.cfg.trainer.rollout_steps):
 
             policy_in = to_policy_input(env_state)
 
@@ -532,32 +562,11 @@ def explained_variance(y_pred, y_true):
     var_y = torch.var(y_true)
     return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)
 
+def validate():
 
-@classmethod
-def for_validation(cls):
-    """
-    Construct a trainer in validation mode.
-    Ensures deterministic behavior and single-env operation.
-    """
-    cfg = Config()
+    trainer = LSTMPPOTrainer.for_validation()
 
-    return cls(cfg, validation_mode=True)
-
-
-@classmethod
-def from_preset(cls,
-                preset_name: str,
-                **kwargs):
-
-    cfg = Config()
-
-    if preset_name == "cartpole_easy":
-
-        cfg.env.env_id = "popgym-PositionOnlyCartPoleEasy-v0"
-        cfg.ppo.target_kl = 0.005
-        cfg.sched.start_entropy_coef = 0.1
-        cfg.sched.end_entropy_coef = 0.0
-
-    cfg = initialize_config(cfg, **kwargs)
-
-    return cls(cfg)
+    trainer.assert_hidden_state_flow()
+    trainer.assert_rollout_deterministic()
+    trainer.validate_tbptt()
+    trainer.validate_lstm_state_flow()
