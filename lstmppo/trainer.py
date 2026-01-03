@@ -168,8 +168,6 @@ class LSTMPPOTrainer:
             
             self.stats["explained_var"] = ev.item()
 
-        self.stats["explained_var"] = ev.item()
-
         self.compute_average_stats()
 
         self.adapt_clip_range()
@@ -202,42 +200,42 @@ class LSTMPPOTrainer:
             # All envs terminated/truncated at this chunk.
             # No valid timesteps → skip this chunk entirely.
             return
-        else:
-            valid_adv = adv[mask > 0.5]
-            
-            adv =\
-                (adv - valid_adv.mean()) /\
-                (valid_adv.std(unbiased=False) + 1e-8)
 
-            policy_loss, value_loss, approx_kl, clip_frac = \
-                self.compute_losses(values,
-                                    new_logp,
-                                    old_logp,
-                                    old_values,
-                                    returns,
-                                    adv,
-                                    mask)
+        valid_adv = adv[mask > 0.5]
+        
+        adv =\
+            (adv - valid_adv.mean()) /\
+            (valid_adv.std(unbiased=False) + 1e-8)
 
-            dist = Categorical(logits=eval_output.logits.view(K * B, -1))
-            entropy = dist.entropy()
-            entropy = (entropy * mask).sum() / mask.sum()
+        policy_loss, value_loss, approx_kl, clip_frac = \
+            self.compute_losses(values,
+                                new_logp,
+                                old_logp,
+                                old_values,
+                                returns,
+                                adv,
+                                mask)
 
-            loss = (
-                policy_loss
-                + self.vf_coef * value_loss
-                - entropy_coef * entropy
-                + eval_output.ar_loss
-                + eval_output.tar_loss
-            )
+        dist = Categorical(logits=eval_output.logits.view(K * B, -1))
+        entropy = dist.entropy()
+        entropy = (entropy * mask).sum() / mask.sum()
 
-            grad_norm = self.backward_and_clip(loss)
+        loss = (
+            policy_loss
+            + self.vf_coef * value_loss
+            - entropy_coef * entropy
+            + eval_output.ar_loss
+            + eval_output.tar_loss
+        )
 
-            self.update_stats(policy_loss,
-                              value_loss,
-                              entropy,
-                              approx_kl,
-                              clip_frac,
-                              grad_norm)
+        grad_norm = self.backward_and_clip(loss)
+
+        self.update_stats(policy_loss,
+                            value_loss,
+                            entropy,
+                            approx_kl,
+                            clip_frac,
+                            grad_norm)
 
     def compute_losses(self,
                        values,
