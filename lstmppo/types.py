@@ -10,6 +10,7 @@ from typing import Any, List
 import torch
 import gymnasium as gym
 import popgym
+from .types import build_obs_encoder
 
 
 @dataclass
@@ -107,8 +108,10 @@ class EnvironmentConfig:
     """Environment identifier"""
     num_envs: int = 16
     """ Number of environments """
-    obs_shape: tuple = ()
-    """ Observation shape """
+    obs_space: gym.Space | None = None
+    """ Observation space """
+    flat_obs_dim: int
+    """ Flattened observation dimension """
     action_dim: int = 0
     """ Action dimension """
     max_episode_steps: int = None
@@ -329,7 +332,7 @@ def initialize_config(cfg: Config,
     # Build dummy env
     dummy_env = gym.make(cfg.env.env_id)
 
-    cfg.env.obs_shape = dummy_env.observation_space.shape
+    cfg.env.obs_space = dummy_env.observation_space
     cfg.env.action_dim = dummy_env.action_space.n
     cfg.env.max_episode_steps = dummy_env.spec.max_episode_steps
 
@@ -337,6 +340,10 @@ def initialize_config(cfg: Config,
     print("Obs shape:", obs.shape)
     print("Action dim:", dummy_env.action_space.n)
     dummy_env.close()
+
+    # Build dummy observation encoder
+    dummy_obs_encoder = build_obs_encoder(cfg.env.obs_space)
+    cfg.env.flat_obs_dim = dummy_obs_encoder.output_size
 
     # Build run name
     cfg.init_run_name(kwargs.get("datetime_str", None))

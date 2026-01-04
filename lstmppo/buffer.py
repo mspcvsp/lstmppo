@@ -1,5 +1,6 @@
 import torch
 from .types import Config, RolloutStep, RecurrentBatch, LSTMStates
+from .obs_encoder import build_obs_encoder
 
 
 class RecurrentRolloutBuffer:
@@ -16,7 +17,7 @@ class RecurrentRolloutBuffer:
         self.obs = torch.zeros(
             self.cfg.rollout_steps,
             self.cfg.num_envs,
-            *cfg.env.obs_shape,
+            cfg.env.flat_obs_dim,
             device=self.device
         )
 
@@ -106,7 +107,7 @@ class RecurrentRolloutBuffer:
                                   self.cfg.lstm_hidden_size)
 
         # --- Store rollout data ---
-        self.obs[t].copy_(step.obs)
+        self.obs[t].copy_(step.obs)   # step.obs is already flat
 
         # Actions must be (B,1)
         if step.actions.dim() == 1:

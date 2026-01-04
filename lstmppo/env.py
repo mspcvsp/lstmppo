@@ -2,6 +2,7 @@ from numpy.random import Generator, MT19937, SeedSequence
 import gymnasium as gym
 from gymnasium.vector import SyncVectorEnv
 import torch
+
 from .types import Config, VecEnvState, PolicyInput, LSTMStates
 
 
@@ -46,6 +47,9 @@ class RecurrentVecEnvWrapper:
         seeds = [int(elem * 1E9) for elem in rng.random(self.num_envs)]
 
         obs, info = self.venv.reset(seed=seeds)
+        
+        # flatten dict/tuple observations
+        obs = self._encode_obs(obs)
 
         self.hxs.zero_()
         self.cxs.zero_()
@@ -108,7 +112,10 @@ class RecurrentVecEnvWrapper:
         else:
             actions_np = actions.cpu().numpy()
 
-        obs, rewards, terminated, truncated, info = self.venv.step(actions_np)
+        obs, rewards, terminated, truncated, info =\
+            self.venv.step(actions_np)
+        
+        obs = self._encode_obs(obs)
 
         # ------ Convert flags to tensors ------
         terminated = torch.as_tensor(terminated,
@@ -157,6 +164,29 @@ class RecurrentVecEnvWrapper:
             hxs=self.hxs.clone(),
             cxs=self.cxs.clone(),
         )
+
+    def _encode_obs(self,
+                    obs):
+
+        if isinstance(obs, dict):
+
+            return {k: torch.as_tensor(v,
+                                       device=self.device,
+                                       dtype=torch.float32)
+                    for k, v in obs.items()}
+        # ------------------------------------------
+        elif isinstance(obs, tuple):
+
+            return tuple(torch.as_tensor(v,
+                                         device=self.device,
+                                         dtype=torch.float32)
+                        for v in obs)
+        # ------------------------------------------
+        else:
+
+            return torch.as_tensor(obs,
+                                   device=self.device,
+                                   dtype=torch.float32)
 
     def update_hidden_states(self,
                              new_hxs: torch.Tensor,

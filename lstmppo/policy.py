@@ -4,6 +4,7 @@ from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
 from .types import Config, PolicyInput, PolicyOutput
 from .types import PolicyEvalInput, PolicyEvalOutput
+from .obs_encoder import build_obs_encoder
 
 
 class WeightDrop(nn.Module):
@@ -66,9 +67,11 @@ class LSTMPPOPolicy(nn.Module):
         self.ar_coef = cfg.lstm.lstm_ar_coef
         self.tar_coef = cfg.lstm.lstm_tar_coef
 
+        self.obs_encoder = build_obs_encoder(cfg.env.obs_space)
+
         # --- SiLU encoder ---
         self.encoder = nn.Sequential(
-            nn.Linear(cfg.env.obs_shape[0],
+            nn.Linear(self.obs_encoder.output_size,
                       cfg.lstm.enc_hidden_size),
             nn.SiLU(),
             nn.Linear(cfg.lstm.enc_hidden_size,
@@ -138,12 +141,12 @@ class LSTMPPOPolicy(nn.Module):
         hxs, cxs: (B, H) initial hidden state per sequence
         """
 
-        # Normalize input shape to (B, T, F)
-        if x.dim() == 2:
-            # (B, F) -> (B, 1, F)
-            x = x.unsqueeze(1)
+        obs_flat = self.obs_encoder(x)  # x may be dict/tuple/box
 
-        enc = self.encoder(x)  # encoder must handle (B, T, F)
+        if obs_flat.dim() == 2:
+            obs_flat = obs_flat.unsqueeze(1)
+
+        enc = self.encoder(obs_flat)
 
         # LSTM expects (B, T, F) with batch_first=True
         out, (h_n, c_n) = self.lstm(
