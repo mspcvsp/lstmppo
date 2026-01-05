@@ -159,7 +159,7 @@ class TrainerState:
 
     def adapt_clip_range(self):
 
-        if self.cfg.debug_mode is False:
+        if self.cfg.trainer.debug_mode is False:
 
             avg_kl = self.stats["approx_kl"]
 
@@ -178,7 +178,7 @@ class TrainerState:
 
         stop_early = (
             self.stats["approx_kl"] > self.early_stopping_kl
-            and self.cfg.debug_mode is False
+            and self.cfg.trainer.debug_mode is False
         )
 
         return stop_early

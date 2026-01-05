@@ -178,7 +178,7 @@ class LSTMPPOTrainer:
 
         self.state.init_stats()
 
-        for _ in range(self.state.cfg.trainer.update_epochs):
+        for _ in range(self.state.cfg.ppo.update_epochs):
 
             for batch in self.buffer.get_recurrent_minibatches():
 

@@ -67,11 +67,12 @@ class LSTMPPOPolicy(nn.Module):
         self.ar_coef = cfg.lstm.lstm_ar_coef
         self.tar_coef = cfg.lstm.lstm_tar_coef
 
-        self.obs_encoder = build_obs_encoder(cfg.env.obs_space)
+        self.obs_encoder = build_obs_encoder(cfg.env.obs_space,
+                                             cfg.env.flat_obs_dim)
 
         # --- SiLU encoder ---
         self.encoder = nn.Sequential(
-            nn.Linear(self.obs_encoder.output_size,
+            nn.Linear(cfg.env.flat_obs_dim,
                       cfg.lstm.enc_hidden_size),
             nn.SiLU(),
             nn.Linear(cfg.lstm.enc_hidden_size,
@@ -140,7 +141,6 @@ class LSTMPPOPolicy(nn.Module):
         or (B, T, obs_dim)    for sequence
         hxs, cxs: (B, H) initial hidden state per sequence
         """
-
         obs_flat = self.obs_encoder(x)  # x may be dict/tuple/box
 
         if obs_flat.dim() == 2:

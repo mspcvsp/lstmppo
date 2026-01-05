@@ -11,6 +11,7 @@ import torch
 import gymnasium as gym
 import popgym
 from .types import build_obs_encoder
+from .obs_encoder import get_flat_obs_dim
 
 
 @dataclass
@@ -336,14 +337,9 @@ def initialize_config(cfg: Config,
     cfg.env.action_dim = dummy_env.action_space.n
     cfg.env.max_episode_steps = dummy_env.spec.max_episode_steps
 
-    obs, _ = dummy_env.reset()
-    print("Obs shape:", obs.shape)
-    print("Action dim:", dummy_env.action_space.n)
-    dummy_env.close()
+    cfg.env.flat_obs_dim = get_flat_obs_dim(cfg.env.obs_space)
 
-    # Build dummy observation encoder
-    dummy_obs_encoder = build_obs_encoder(cfg.env.obs_space)
-    cfg.env.flat_obs_dim = dummy_obs_encoder.output_size
+    dummy_env.close()
 
     # Build run name
     cfg.init_run_name(kwargs.get("datetime_str", None))

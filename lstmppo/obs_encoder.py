@@ -1,77 +1,93 @@
-import torch
-import torch.nn as nn
+# obs_encoder.py
 import numpy as np
 import gymnasium as gym
+import torch
+import torch.nn as nn
 
 
-class FlatObsEncoder(nn.Module):
+# ============================================================
+# 1. Compute flat observation dimension from any Gym space
+# ============================================================
 
-    def __init__(self,
-                 space: gym.spaces.Box):
-        
-        super().__init__()
-        
-        self.output_size = int(np.prod(space.shape))
-
-    def forward(self, obs):
-        return obs.view(obs.shape[0], -1)
-
-
-class DictObsEncoder(nn.Module):
-    
-    def __init__(self,
-                 space: gym.spaces.Dict):
-        
-        super().__init__()
-        
-        self.keys = list(space.spaces.keys())
-
-        self.encoders = nn.ModuleDict()
-
-        for k, subspace in space.spaces.items():
-            
-            if isinstance(subspace,
-                          gym.spaces.Box):
-
-                self.encoders[k] = FlatObsEncoder(subspace)
-            else:
-                raise NotImplementedError(
-                    f"Unsupported subspace: {subspace}"
-                )
-
-        self.output_size =\
-            sum(enc.output_size for enc in self.encoders.values())
-
-    def forward(self, obs_dict):
-        encoded = [self.encoders[k](obs_dict[k]) for k in self.keys]
-        return torch.cat(encoded, dim=-1)
-
-
-class TupleObsEncoder(nn.Module):
-
-    def __init__(self,
-                 space: gym.spaces.Tuple):
-        
-        super().__init__()
-        
-        self.encoders = nn.ModuleList(
-            [FlatObsEncoder(s) for s in space.spaces]
-        )
-        
-        self.output_size = sum(enc.output_size for enc in self.encoders)
-
-    def forward(self, obs_tuple):
-        encoded = [enc(o) for enc, o in zip(self.encoders, obs_tuple)]
-        return torch.cat(encoded, dim=-1)
-
-
-def build_obs_encoder(space):
-
+def get_flat_obs_dim(space: gym.Space) -> int:
+    """
+    Recursively compute the flattened observation dimension for:
+    - Box
+    - Dict
+    - Tuple
+    - Nested structures
+    """
     if isinstance(space, gym.spaces.Box):
-        return FlatObsEncoder(space)
+        return int(np.prod(space.shape))
+
     elif isinstance(space, gym.spaces.Dict):
-        return DictObsEncoder(space)
+        return sum(get_flat_obs_dim(sub) for sub in space.spaces.values())
+
     elif isinstance(space, gym.spaces.Tuple):
-        return TupleObsEncoder(space)
+        return sum(get_flat_obs_dim(sub) for sub in space.spaces)
+
     else:
         raise NotImplementedError(f"Unsupported observation space: {space}")
+
+
+# ============================================================
+# 2. Flatten raw observations into a numpy array (env wrapper)
+# ============================================================
+
+def flatten_obs(obs,
+                space: gym.Space) -> np.ndarray:
+    """
+    Convert an observation (possibly dict/tuple/nested) into a flat
+    numpy array of shape (N, flat_obs_dim).
+
+    This is used inside RecurrentVecEnvWrapper BEFORE converting to torch.
+    """
+    if isinstance(space, gym.spaces.Box):
+        # obs: (N, *shape)
+        return obs.reshape(obs.shape[0], -1)
+
+    elif isinstance(space, gym.spaces.Dict):
+        # obs: dict of arrays
+        parts = []
+        for key, subspace in space.spaces.items():
+            sub = flatten_obs(obs[key], subspace)
+            parts.append(sub)
+        return np.concatenate(parts, axis=-1)
+
+    elif isinstance(space, gym.spaces.Tuple):
+        # obs: tuple of arrays
+        parts = []
+        for i, subspace in enumerate(space.spaces):
+            sub = flatten_obs(obs[i], subspace)
+            parts.append(sub)
+        return np.concatenate(parts, axis=-1)
+
+    else:
+        raise NotImplementedError(f"Unsupported observation type: {type(obs)}")
+
+
+# ============================================================
+# 3. PyTorch encoder module for the policy
+# ============================================================
+
+class FlatObsEncoder(nn.Module):
+    """
+    Simple identity encoder: input is already flat.
+    """
+    def __init__(self, flat_dim: int):
+        super().__init__()
+        self.output_size = flat_dim
+
+    def forward(self,
+                obs: torch.Tensor) -> torch.Tensor:
+        # obs: (B, flat_dim) or (B, T, flat_dim)
+        return obs
+
+
+def build_obs_encoder(space: gym.Space,
+                      flat_dim: int) -> nn.Module:
+    """
+    Build a PyTorch encoder for the policy.
+    Since the env wrapper already flattens observations, this is trivial.
+    """
+    return FlatObsEncoder(flat_dim)
