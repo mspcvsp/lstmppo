@@ -336,11 +336,8 @@ class LSTMPPOTrainer:
         #  ----- Compute EV over the entire rollout  -----
         all_values = self.buffer.values.view(-1)
         all_returns = self.buffer.returns.view(-1)
-        
-        all_mask =\
-            1.0 - (self.buffer.terminated | self.buffer.truncated).float()
 
-        valid = all_mask > 0.5
+        valid = self.buffer.mask.view(-1) > 0.5
 
         if valid.sum() == 0:
             self.state.stats["explained_var"] = 0.0

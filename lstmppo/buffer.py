@@ -1,6 +1,5 @@
 import torch
 from .types import Config, RolloutStep, RecurrentBatch, LSTMStates
-from .obs_encoder import build_obs_encoder
 
 
 class RecurrentRolloutBuffer:
@@ -97,7 +96,7 @@ class RecurrentRolloutBuffer:
         t = self.step
 
         # --- Shape checks ---
-        assert step.obs.shape == (self.cfg.num_envs, *self.obs.shape[2:]), \
+        assert step.obs.shape == (self.cfg.num_envs, self.obs.size(-1)), \
             f"Obs shape mismatch: {step.obs.shape}"
 
         assert step.hxs.shape == (self.cfg.num_envs,
@@ -216,6 +215,14 @@ class RecurrentRolloutBuffer:
         self.step = 0
         self.last_hxs = None
         self.last_cxs = None
+
+    @property
+    def mask(self):
+        """
+        Mask of valid timesteps: 1 for alive, 0 for terminated/truncated.
+        Shape: (T, B)
+        """
+        return 1.0 - (self.terminated | self.truncated).float()
 
     # ---------------------------------------------------------
     # Optional safety check
