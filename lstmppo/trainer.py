@@ -57,6 +57,14 @@ class LSTMPPOTrainer:
 
         self.reset()
 
+    @property
+    def num_envs(self) -> int:
+        return self.state.cfg.env.num_envs
+
+    @property
+    def rollout_steps(self) -> int:
+        return self.state.cfg.trainer.rollout_steps
+
     @classmethod
     def for_validation(cls):
         """
@@ -131,7 +139,7 @@ class LSTMPPOTrainer:
             self.buffer.get_last_lstm_states()
         )
 
-        for _ in range(self.state.cfg.trainer.rollout_steps):
+        for _ in range(self.rollout_steps):
 
             policy_in = to_policy_input(env_state)
 

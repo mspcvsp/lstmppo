@@ -93,19 +93,21 @@ class TrainerState:
 
                 self.stats[key] *= norm_factor
 
-    def log_metrics(self):
-
-        global_step = (
-            self.update_idx * 
+    @property
+    def global_step(self) -> int:
+        return (
+            self.update_idx *
             self.cfg.trainer.rollout_steps *
             self.cfg.env.num_envs
         )
+
+    def log_metrics(self):
 
         for key, value in self.stats.items():
 
             self.writer.add_scalar(key,
                                    value,
-                                   global_step)
+                                   self.global_step)
 
         record = {"update": self.update_idx, **self.stats}
 
