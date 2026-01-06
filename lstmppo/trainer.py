@@ -6,7 +6,7 @@ import random
 from torch import nn
 from torch.distributions.categorical import Categorical
 
-from .env import RecurrentVecEnvWrapper, to_policy_input
+from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
@@ -172,7 +172,7 @@ class LSTMPPOTrainer:
         # Bootstrap value + store final LSTM states
         with torch.no_grad():
 
-            policy_in = to_policy_input(self.env_state)
+            policy_in = self.env_state.policy_input
 
             _, _, last_policy_out = self.policy.act(policy_in)
 

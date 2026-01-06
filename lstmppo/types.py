@@ -141,7 +141,8 @@ class Config:
     sched: ScheduleConfig = field(default_factory=ScheduleConfig)
     log: LoggingConfig = field(default_factory=LoggingConfig)
 
-    def to_buffer_config(self) -> BufferConfig:
+    @property
+    def buffer_config(self) -> BufferConfig:
 
         return BufferConfig(
             rollout_steps = self.trainer.rollout_steps,
@@ -261,8 +262,9 @@ class VecEnvState:
     hxs: torch.Tensor       # (N,H)
     cxs: torch.Tensor       # (N,H)
 
-    def to_policy_input(self,
-                        detach: bool = False) -> PolicyInput:
+    @property
+    def policy_input(self,
+                     detach: bool = False) -> PolicyInput:
 
         if detach:
             return PolicyInput(
