@@ -68,11 +68,11 @@ class LSTMPPOPolicy(nn.Module):
         self.tar_coef = cfg.lstm.lstm_tar_coef
 
         self.obs_encoder = build_obs_encoder(cfg.env.obs_space,
-                                             cfg.flat_obs_dim)
+                                             cfg.obs_dim)
 
         # --- SiLU encoder ---
         self.encoder = nn.Sequential(
-            nn.Linear(cfg.flat_obs_dim,
+            nn.Linear(cfg.obs_dim,
                       cfg.lstm.enc_hidden_size),
             nn.SiLU(),
             nn.Linear(cfg.lstm.enc_hidden_size,

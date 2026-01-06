@@ -10,7 +10,7 @@ class RecurrentRolloutBuffer:
 
         self.device = device
 
-        self.cfg = cfg.buffer_config()
+        self.cfg = cfg.buffer_config
 
         # --- Storage ---
         self.obs = torch.zeros(

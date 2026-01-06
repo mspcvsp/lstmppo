@@ -45,6 +45,10 @@ class RecurrentVecEnvWrapper:
     @property
     def observation_space(self):
         return self.venv.single_observation_space
+    
+    @property
+    def hidden_state(self):
+        return LSTMStates(self.hxs, self.cxs)
 
     def reset(self, seed=None) -> VecEnvState:
 

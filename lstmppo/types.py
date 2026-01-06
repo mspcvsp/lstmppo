@@ -152,7 +152,7 @@ class Config:
         )
 
     @property
-    def flat_obs_dim(self):
+    def obs_dim(self):
         return self.env.flat_obs_dim
 
     def init_run_name(self,
@@ -285,6 +285,16 @@ class PolicyOutput:
     ar_loss: torch.Tensor      # scalar
     tar_loss: torch.Tensor     # scalar
 
+    @property
+    def detached(self):
+        return PolicyOutput(
+            logits=self.logits.detach(),
+            values=self.values.detach(),
+            new_hxs=self.new_hxs.detach(),
+            new_cxs=self.new_cxs.detach(),
+            ar_loss=self.ar_loss.detach(),
+            tar_loss=self.tar_loss.detach(),
+        )
 
 @dataclass
 class LSTMStates:
