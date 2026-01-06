@@ -141,7 +141,7 @@ class LSTMPPOTrainer:
 
         for _ in range(self.rollout_steps):
 
-            policy_in = to_policy_input(env_state)
+            policy_in = env_state.policy_input
 
             # NEW: act() now takes a PolicyInput dataclass
             actions, logprobs, policy_out = self.policy.act(policy_in)
@@ -452,7 +452,8 @@ class LSTMPPOTrainer:
         env_state = self.env_state
 
         for _ in range(steps):
-            policy_in = to_policy_input(env_state)
+
+            policy_in = env_state.to_policy_input
             actions, logprobs, policy_out = self.policy.act(policy_in)
 
             obs_list.append(env_state.obs.clone())
@@ -486,7 +487,8 @@ class LSTMPPOTrainer:
         cxs_trace = []
 
         for _ in range(steps):
-            policy_in = to_policy_input(env_state)
+
+            policy_in = env_state.policy_input
             hxs_trace.append(policy_in.hxs.clone())
             cxs_trace.append(policy_in.cxs.clone())
 
