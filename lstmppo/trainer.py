@@ -453,7 +453,7 @@ class LSTMPPOTrainer:
 
         for _ in range(steps):
 
-            policy_in = env_state.to_policy_input
+            policy_in = env_state.policy_input
             actions, logprobs, policy_out = self.policy.act(policy_in)
 
             obs_list.append(env_state.obs.clone())

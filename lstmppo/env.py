@@ -41,6 +41,10 @@ class RecurrentVecEnvWrapper:
         self.last_terminated = torch.zeros(self.num_envs,
                                            dtype=torch.bool,
                                            device=self.device)
+        
+    @property
+    def observation_space(self):
+        return self.venv.single_observation_space
 
     def reset(self, seed=None) -> VecEnvState:
 

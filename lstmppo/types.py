@@ -9,8 +9,6 @@ from dataclasses import dataclass, field
 from typing import Any, List
 import torch
 import gymnasium as gym
-import popgym
-from .types import build_obs_encoder
 from .obs_encoder import get_flat_obs_dim
 
 
@@ -75,8 +73,8 @@ class TrainerConfig:
     """ Sets the value of torch.backends.cudnn.deterministic """
     rollout_steps: int = 128
     """ Horizon"""
-    update_epochs: int = 4
-    """ Number of optimize policy update epochs """
+    mini_batch_envs: int = 4
+    """ Number of environments / minibatch"""
     updates_per_checkpoint: int = 10
     """ Number of updates / checkpoint """
     debug_mode: bool = True
@@ -111,7 +109,7 @@ class EnvironmentConfig:
     """ Number of environments """
     obs_space: gym.Space | None = None
     """ Observation space """
-    flat_obs_dim: int
+    flat_obs_dim: int = 0
     """ Flattened observation dimension """
     action_dim: int = 0
     """ Action dimension """
@@ -152,6 +150,10 @@ class Config:
             lam=self.ppo.gae_lambda,
             lstm_hidden_size=self.lstm.lstm_hidden_size
         )
+
+    @property
+    def flat_obs_dim(self):
+        return self.env.flat_obs_dim
 
     def init_run_name(self,
                       datetime_str=None):
@@ -263,20 +265,16 @@ class VecEnvState:
     cxs: torch.Tensor       # (N,H)
 
     @property
-    def policy_input(self,
-                     detach: bool = False) -> PolicyInput:
+    def policy_input(self) -> PolicyInput:
+        return PolicyInput(self.obs, self.hxs, self.cxs)
 
-        if detach:
-            return PolicyInput(
-                obs=self.obs,
-                hxs=self.hxs.detach(),
-                cxs=self.cxs.detach(),
-            )
-        
+    """ Properties can't have parameters"""
+    @property
+    def detached_policy_input(self) -> PolicyInput:
         return PolicyInput(self.obs,
-                              self.hxs,
-                              self.cxs)
-    
+                           self.hxs.detach(),
+                           self.cxs.detach())
+
 
 @dataclass
 class PolicyOutput:
