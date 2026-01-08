@@ -59,8 +59,15 @@ class TrainerState:
 
         self.jsonl_fp = None
 
-        self.jsonl_file = Path(*[cfg.log.jsonl_path,
-                               cfg.log.run_name + ".json"])
+        jsonl_path = Path(cfg.log.jsonl_path)
+
+        if jsonl_path.exists() is False:
+
+            jsonl_path.mkdir(parents=True,
+                             exist_ok=True)
+
+        self.jsonl_file =\
+            jsonl_path.joinpath(cfg.log.run_name + ".json") 
 
         self.writer = SummaryWriter(log_dir=tb_logdir)
 

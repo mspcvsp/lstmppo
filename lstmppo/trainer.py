@@ -218,14 +218,20 @@ class LSTMPPOTrainer:
         )
 
         # ------- Flatten -------
-        K, B = eval_output.values.shape
-        values = eval_output.values.view(K * B)
-        new_logp = eval_output.logprobs.view(K * B)
-        old_logp = mb.old_logp.view(K * B)
-        returns = mb.returns.view(K * B)
-        adv = mb.advantages.view(K * B)
-        old_values = mb.old_values.view(K * B)
-        mask = mb.mask.view(K * B) # (K*B,)
+        # eval_output.values: [K, B] or [K, B, 1]
+        values = eval_output.values
+
+        if values.dim() == 3 and values.size(-1) == 1:
+            values = values.squeeze(-1)
+
+        values = values.reshape(-1)  # safer than view(K * B)
+
+        new_logp = eval_output.logprobs.reshape(-1)
+        old_logp = mb.old_logp.reshape(-1)
+        adv = mb.advantages.reshape(-1)
+        returns = mb.returns.reshape(-1)
+        old_values = mb.old_values.reshape(-1)
+        mask = mb.mask.reshape(-1)
 
         if mask.sum() == 0:
             # All envs terminated/truncated at this chunk.
@@ -248,12 +254,12 @@ class LSTMPPOTrainer:
                                 mask)
 
         # --- Masked entropy from eval_output ---
-        entropy = eval_output.entropy.view(K * B)   # (K*B,)
+        entropy = eval_output.entropy.reshape(-1)
         entropy = (entropy * mask).sum() / mask.sum()
 
         loss = (
             policy_loss
-            + self.state.cfg.vf_coef * value_loss
+            + self.state.cfg.ppo.vf_coef * value_loss
             - self.state.entropy_coef * entropy
         )
 
