@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, List
 import torch
 import gymnasium as gym
+import popgym
 from .obs_encoder import get_flat_obs_dim
 
 
