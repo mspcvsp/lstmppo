@@ -382,7 +382,8 @@ class LSTMPPOTrainer:
             }
         }, checkpoint_pth)
 
-    def load_checkpoint(self, checkpoint):
+    def load_checkpoint(self,
+                        checkpoint):
 
         trainer_state = checkpoint["trainer_state"]
 
