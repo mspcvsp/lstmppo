@@ -46,30 +46,30 @@ class TrainerState:
             self.cfg.ppo.target_kl = 1e9  # disable early stopping
             self.cfg.trainer.debug_mode = True  # disable DropConnect
 
-        self.clip_range = cfg.ppo.initial_clip_range
+        self.clip_range = self.cfg.ppo.initial_clip_range
+        self.target_kl = self.cfg.ppo.target_kl
  
         self.early_stopping_kl =\
             self.cfg.ppo.target_kl * cfg.ppo.early_stopping_kl_factor
 
-        self._entropy_sch = EntropySchdeduler(cfg)
-        self._lr_sch = LearningRateScheduler(cfg)
+        self._entropy_sch = EntropySchdeduler(self.cfg)
+        self._lr_sch = LearningRateScheduler(self.cfg)
 
-        tb_logdir = Path(*[cfg.log.tb_logdir,
-                           cfg.log.run_name])
+        tb_logdir = Path(*[self.cfg.log.tb_logdir,
+                           self.cfg.log.run_name])
+
+        self.writer = SummaryWriter(log_dir=tb_logdir)
 
         self.jsonl_fp = None
 
-        jsonl_path = Path(cfg.log.jsonl_path)
-
+        jsonl_path = Path(self.cfg.log.jsonl_path)
         if jsonl_path.exists() is False:
 
             jsonl_path.mkdir(parents=True,
                              exist_ok=True)
 
         self.jsonl_file =\
-            jsonl_path.joinpath(cfg.log.run_name + ".json") 
-
-        self.writer = SummaryWriter(log_dir=tb_logdir)
+            jsonl_path.joinpath(self.cfg.log.run_name + ".json")
 
     def reset(self,
               total_updates: int):
