@@ -116,10 +116,12 @@ class TrainerState:
                                    value,
                                    self.global_step)
 
-        record = {"update": self.update_idx, **self.stats}
+        record = {k: to_float(v) for k, v in self.stats.items()}
 
-        record["lr"] = self.lr
-        record["entropy_coef"] = self.entropy_coef
+        record["update"] = self.update_idx
+        record["lr"] = float(self.lr)
+        record["entropy_coef"] = float(self.entropy_coef)
+        record["clip_range"] = float(self.clip_range)
 
         self.jsonl_fp.write(json.dumps(record) + "\n")
         self.jsonl_fp.flush()
@@ -198,3 +200,7 @@ class TrainerState:
             self.update_idx % 
             self.cfg.trainer.updates_per_checkpoint == 0
         )
+    
+
+def to_float(x):
+    return x.item() if isinstance(x, torch.Tensor) else float(x)

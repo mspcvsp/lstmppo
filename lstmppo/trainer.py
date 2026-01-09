@@ -144,7 +144,8 @@ class LSTMPPOTrainer:
             policy_in = env_state.policy_input
 
             # NEW: act() now takes a PolicyInput dataclass
-            actions, logprobs, policy_out = self.policy.act(policy_in)
+            with torch.no_grad():
+                actions, logprobs, policy_out = self.policy.act(policy_in)
 
             next_state = self.env.step(actions)
 
