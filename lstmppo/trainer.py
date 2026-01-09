@@ -372,8 +372,26 @@ class LSTMPPOTrainer:
             "policy": self.policy.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "update_idx": self.state.update_idx,
-            "state": self.state,
+            "trainer_state": {
+                "update_idx": self.state.update_idx,
+                "lr": float(self.state.lr),
+                "entropy_coef": float(self.state.entropy_coef),
+                "clip_range": float(self.state.clip_range),
+                "target_kl": float(self.state.target_kl),
+                "early_stopping_kl": float(self.state.early_stopping_kl),
+            }
         }, checkpoint_pth)
+
+    def load_checkpoint(self, checkpoint):
+
+        trainer_state = checkpoint["trainer_state"]
+
+        self.state.update_idx = trainer_state["update_idx"]
+        self.state.lr = trainer_state["lr"]
+        self.state.entropy_coef = trainer_state["entropy_coef"]
+        self.state.clip_range = trainer_state["clip_range"]
+        self.state.target_kl = trainer_state["target_kl"]
+        self.state.early_stopping_kl = trainer_state["early_stopping_kl"]
 
     def validate_tbptt(self, K=16):
 
