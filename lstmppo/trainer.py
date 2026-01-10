@@ -523,13 +523,17 @@ class LSTMPPOTrainer:
 
         # ---- Sparkline panel ----
         spark = Table.grid()
-        
+        spark.add_column(width=12)  # label column
+        spark.add_column(width=32)  # sparkline column
+
         spark.add_row("avg_ep_len",
                       sparkline(self.state.ep_len_history,
+                                width=30,
                                 style="green"))
-        
+
         spark.add_row("avg_ep_returns",
                       sparkline(self.state.ep_return_history,
+                                width=30,
                                 style="magenta"))
 
         spark_panel = Panel(
@@ -544,26 +548,20 @@ class LSTMPPOTrainer:
                            box=box.SIMPLE)
         
         env_sparks.add_column("Env", justify="right")
-        env_sparks.add_column("Length Trend", justify="left")
-        
+        env_sparks.add_column("Length Trend", justify="left", width=32)
+        env_sparks.add_column("Current", justify="right")
+
         colors = ["cyan", "green", "magenta", "yellow", "red", "blue"]
 
         for row, history in enumerate(self.env.ep_len_history):
-
+        
             style = colors[row % len(colors)]
-            
-            env_sparks.add_row(f"{row}",
-                               sparkline(history,
-                                         width=30,
-                                         style=style))
-
-            env_sparks.add_column("Current", justify="right")
-            
-            env_sparks.add_row(f"{row}",
-                               sparkline(history,
-                                         width=30,
-                                         style=style),
-                               f"{self.env.ep_len[row].item()}")
+        
+            env_sparks.add_row(
+                f"{row}",
+                sparkline(history, width=30, style=style),
+                f"{self.env.ep_len[row].item()}"
+            )
 
         # ---------------- GROUP PANELS ----------------
         dashboard = Table.grid(expand=True)
