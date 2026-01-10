@@ -811,7 +811,9 @@ def sparkline(data,
     chars = [blocks[int(v * (len(blocks) - 1))] for v in norm]
 
     # Fit to width
-    if len(chars) > width:
+    if len(chars) < width:
+        chars = [" "] * (width - len(chars)) + chars
+    else:
         chars = chars[-width:]
 
     return Text("".join(chars), style=style)
