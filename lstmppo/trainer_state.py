@@ -23,7 +23,6 @@ class TrainerState:
     jsonl_fp: io.TextIOWrapper
     validation_mode: bool
 
-
     def __init__(self,
                  cfg: Config,
                  validation_mode: bool = False):
@@ -89,10 +88,26 @@ class TrainerState:
         self.stats["grad_norm"] += upd.grad_norm
         self.stats["steps"] += 1
 
-    def update_avg_episode_length(self,
-                                  avg_len: float):
+    def update_avg_ep_stats(self,
+                            avg_ep_len: float,
+                            avg_ep_returns: float):
 
-        self.stats["avg_ep_len"] = avg_len
+        self.stats["avg_ep_len"] = avg_ep_len
+        self.stats["avg_ep_returns"] = avg_ep_returns
+
+        ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
+
+        self.stats["avg_ep_len_ema"] = (
+            ema_alpha * self.stats.get("avg_ep_len_ema",
+                                       avg_ep_len) +
+            (1.0 - ema_alpha) * avg_ep_len
+        )
+
+        self.stats["avg_ep_returns_ema"] = (
+            ema_alpha * self.stats.get("avg_ep_returns_ema",
+                                       avg_ep_returns) +
+            (1.0 - ema_alpha) * avg_ep_returns
+        )
 
     def compute_average_stats(self):
 
@@ -102,9 +117,11 @@ class TrainerState:
 
             for key in [key for key in self.stats.keys()
                         if key not in ["steps",
-                                       "episodes"
+                                       "episodes",
                                        "avg_ep_len",
-                                       "avg_ep_returns"]]:
+                                       "avg_ep_len_ema",
+                                       "avg_ep_returns",
+                                       "avg_ep_returns_ema"]]:
 
                 self.stats[key] *= norm_factor
 
@@ -156,7 +173,6 @@ class TrainerState:
             "clip_frac": 0.0,
             "grad_norm": 0.0,
             "explained_var": 0.0,
-            "avg_ep_len": 0.0,
             "steps": 0,
         }
 

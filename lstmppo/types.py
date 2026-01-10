@@ -86,6 +86,8 @@ class TrainerConfig:
     """ Truncated BPTT steps """
     exp_name: str = "RLWarmup"
     """ Experiment name """
+    avg_ep_stat_ema_alpha: float = 0.9
+    """ Average episode statistics EMA alpha """
 
 
 @dataclass
@@ -356,3 +358,11 @@ def initialize_config(cfg: Config,
     cfg.init_run_name(kwargs.get("datetime_str", None))
 
     return cfg
+
+
+@dataclass
+class EpisodeStats:
+    alive_envs: int
+    max_ep_len: int
+    avg_ep_len: float
+    avg_ep_returns: float

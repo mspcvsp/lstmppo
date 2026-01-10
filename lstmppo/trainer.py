@@ -181,10 +181,13 @@ class LSTMPPOTrainer:
 
             self.buffer.store_last_lstm_states(last_policy_out)
 
-        self.state.stats["avg_ep_len"], self.state.stats["avg_ep_returns"] =\
+        self.state.stats["episodes"] = len(self.env.completed_ep_lens)
+
+        avg_ep_len, avg_ep_returns =\
             self.env.pop_avg_episode_stats()
 
-        self.state.stats["episodes"] = len(self.env.completed_ep_lens)
+        self.state.update_avg_ep_stats(avg_ep_len,
+                                       avg_ep_returns)
 
         return last_value
 
