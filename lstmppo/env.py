@@ -218,11 +218,14 @@ class RecurrentVecEnvWrapper:
             
             max_ep_len = 0
             avg_ep_len = 0.0
-            avg_ep_returns = 0
+            max_ep_returns = 0.0
+            avg_ep_returns = 0.0
         else:
             max_ep_len = max(self.completed_ep_lens)
             avg_ep_len = sum(self.completed_ep_lens) / episodes
             
+            max_ep_returns = max(self.completed_ep_returns)
+
             avg_ep_returns =\
                 (sum(self.completed_ep_returns) /
                  len(self.completed_ep_returns))
@@ -235,6 +238,7 @@ class RecurrentVecEnvWrapper:
             alive_envs=(self.ep_len > 0).sum().item(),
             max_ep_len=max_ep_len,
             avg_ep_len=float(avg_ep_len),
+            max_ep_returns=max_ep_returns,
             avg_ep_returns=float(avg_ep_returns)
         )
 

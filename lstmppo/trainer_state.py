@@ -93,9 +93,11 @@ class TrainerState:
 
         self.stats["episodes"] = ep_stats.episodes
         self.stats["alive_envs"] = ep_stats.alive_envs
+        
         self.stats["max_ep_len"] = ep_stats.max_ep_len
-
         self.stats["avg_ep_len"] = ep_stats.avg_ep_len
+
+        self.stats["max_ep_returns"] = ep_stats.max_ep_returns
         self.stats["avg_ep_returns"] = ep_stats.avg_ep_returns
 
         ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha

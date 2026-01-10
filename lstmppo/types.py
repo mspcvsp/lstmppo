@@ -366,4 +366,5 @@ class EpisodeStats:
     alive_envs: int
     max_ep_len: int
     avg_ep_len: float
+    max_ep_returns: float
     avg_ep_returns: float
