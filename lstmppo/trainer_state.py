@@ -127,6 +127,7 @@ class TrainerState:
                                        "max_ep_len",
                                        "avg_ep_len",
                                        "avg_ep_len_ema",
+                                       "max_ep_returns",
                                        "avg_ep_returns",
                                        "avg_ep_returns_ema"]]:
 

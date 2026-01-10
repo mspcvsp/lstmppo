@@ -212,7 +212,7 @@ class RecurrentVecEnvWrapper:
 
     def get_episode_stats(self):
 
-        episodes = len(self.env.completed_ep_lens)
+        episodes = len(self.completed_ep_lens)
 
         if episodes == 0:
             
