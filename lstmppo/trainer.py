@@ -112,9 +112,13 @@ class LSTMPPOTrainer:
 
         self.state.init_stats()
 
-        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp:
+        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp,\
+            Live(self._render_metrics(),
+                 refresh_per_second=4) as live:
 
             for self.state.update_idx in range(total_updates):
+
+                self.state.init_stats()
 
                 self.state.apply_schedules(self.optimizer)
 
@@ -123,6 +127,8 @@ class LSTMPPOTrainer:
                 self.buffer.compute_returns_and_advantages(last_value)
 
                 self.optimize_policy()
+
+                live.update(self._render_metrics())
 
                 if self.state.should_stop_early():
                     break
@@ -192,8 +198,6 @@ class LSTMPPOTrainer:
         return last_value
 
     def optimize_policy(self):
-
-        self.state.init_stats()
 
         for _ in range(self.state.cfg.ppo.update_epochs):
 

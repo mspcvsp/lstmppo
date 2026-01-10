@@ -158,18 +158,6 @@ class TrainerState:
 
         self.jsonl_fp.write(json.dumps(record) + "\n")
         self.jsonl_fp.flush()
-
-        print(
-            f"upd {self.update_idx:04d} | "
-            f"pol {self.stats['policy_loss']:.3f} | "
-            f"val {self.stats['value_loss']:.3f} | "
-            f"ent {self.stats['entropy']:.3f} | "
-            f"kl {self.stats['approx_kl']:.4f} | "
-            f"clip {self.stats['clip_frac']:.3f} | "
-            f"ev {self.stats['explained_var']:.3f} | "
-            f"grad {self.stats['grad_norm']:.2f} | "
-            f"clip_range {self.clip_range:.3f}"
-        )
     
     def init_stats(self):
 
