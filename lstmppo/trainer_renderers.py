@@ -152,10 +152,8 @@ def render_value_drift(self):
 
 def render_histogram(self):
 
-    if not self.state.completed_ep_returns:
-
-        return Panel(Text("Waiting for data..."),
-                     title="Value Function Drift")
+    if not self.env.completed_ep_returns:
+        return Panel(Text("Waiting for data..."), title="Recent Returns")
 
     return Panel(
         histogram(

@@ -3,12 +3,18 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Static
 from textual.reactive import reactive
+from rich.text import Text
+
 
 class MetricPanel(Static):
     """Wrapper for Rich-rendered panels/tables."""
     data = reactive(None)
 
     def render(self):
+        # Safely handle the initial None before the trainer has populated anything
+        if self.data is None:
+            return Text("Waiting...")
+
         return self.data
 
 

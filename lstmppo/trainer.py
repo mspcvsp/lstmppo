@@ -6,11 +6,6 @@ import random
 from torch import nn
 from torch.distributions.categorical import Categorical
 
-from rich.console import Console
-from rich.progress import Progress, BarColumn, TimeElapsedColumn
-from rich.progress import TimeRemainingColumn, TextColumn
-
-
 from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
@@ -115,26 +110,7 @@ class LSTMPPOTrainer:
 
         self.state.init_stats()
 
-        if detect_environment() == "jupyter":
-            console = Console(force_jupyter=True)
-        else:
-            console = Console()
-
-        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp, \
-            Progress(
-                TextColumn("[bold blue]Update {task.fields[update]:04d}"),
-                BarColumn(),
-                TextColumn("loss={task.fields[loss]:.3f}"),
-                TimeElapsedColumn(),
-                TimeRemainingColumn(),
-            ) as progress:
-
-            task = progress.add_task(
-                "training",
-                total=total_updates,
-                update=0,
-                loss=0.0,
-            )
+        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp:
 
             for self.state.update_idx in range(total_updates):
 
@@ -147,13 +123,6 @@ class LSTMPPOTrainer:
                 self.buffer.compute_returns_and_advantages(last_value)
 
                 self.optimize_policy()
-
-                progress.update(
-                    task,
-                    advance=1,
-                    update=self.state.update_idx,
-                    loss=float(self.state.stats["policy_loss"]),
-                )
 
                 if self.state.should_stop_early():
                     break
@@ -675,17 +644,3 @@ def validate():
     trainer.assert_rollout_deterministic()
     trainer.validate_tbptt()
     trainer.validate_lstm_state_flow()
-
-
-def detect_environment():
-    try:
-        from IPython import get_ipython
-        shell = get_ipython().__class__.__name__
-
-        if shell == "ZMQInteractiveShell":
-            return "jupyter"
-        if shell == "TerminalInteractiveShell":
-            return "ipython"
-        return "other"
-    except Exception:
-        return "python"
