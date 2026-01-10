@@ -362,6 +362,7 @@ def initialize_config(cfg: Config,
 
 @dataclass
 class EpisodeStats:
+    episodes: int
     alive_envs: int
     max_ep_len: int
     avg_ep_len: float

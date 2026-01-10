@@ -212,16 +212,16 @@ class RecurrentVecEnvWrapper:
 
     def get_episode_stats(self):
 
-        if len(self.completed_ep_lens) == 0:
+        episodes = len(self.env.completed_ep_lens)
+
+        if episodes == 0:
             
             max_ep_len = 0
             avg_ep_len = 0.0
             avg_ep_returns = 0
         else:
             max_ep_len = max(self.completed_ep_lens)
-
-            avg_ep_len =\
-                sum(self.completed_ep_lens) / len(self.completed_ep_lens)
+            avg_ep_len = sum(self.completed_ep_lens) / episodes
             
             avg_ep_returns =\
                 (sum(self.completed_ep_returns) /
@@ -231,7 +231,8 @@ class RecurrentVecEnvWrapper:
         self.completed_ep_returns.clear()
 
         return EpisodeStats(
-            alive_envs=(self.env.ep_len > 0).sum().item(),
+            episodes=episodes,
+            alive_envs=(self.ep_len > 0).sum().item(),
             max_ep_len=max_ep_len,
             avg_ep_len=float(avg_ep_len),
             avg_ep_returns=float(avg_ep_returns)

@@ -5,7 +5,7 @@ import torch
 from pathlib import Path
 
 from torch.utils.tensorboard import SummaryWriter
-from .types import Config, PolicyUpdateInfo
+from .types import Config, PolicyUpdateInfo, EpisodeStats
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
 
 
@@ -88,25 +88,28 @@ class TrainerState:
         self.stats["grad_norm"] += upd.grad_norm
         self.stats["steps"] += 1
 
-    def update_avg_ep_stats(self,
-                            avg_ep_len: float,
-                            avg_ep_returns: float):
+    def update_episode_stats(self,
+                             ep_stats: EpisodeStats):
 
-        self.stats["avg_ep_len"] = avg_ep_len
-        self.stats["avg_ep_returns"] = avg_ep_returns
+        self.stats["episodes"] = ep_stats.episodes
+        self.stats["alive_envs"] = ep_stats.alive_envs
+        self.stats["max_ep_len"] = ep_stats.max_ep_len
+
+        self.stats["avg_ep_len"] = ep_stats.avg_ep_len
+        self.stats["avg_ep_returns"] = ep_stats.avg_ep_returns
 
         ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
 
         self.stats["avg_ep_len_ema"] = (
             ema_alpha * self.stats.get("avg_ep_len_ema",
-                                       avg_ep_len) +
-            (1.0 - ema_alpha) * avg_ep_len
+                                       ep_stats.avg_ep_len) +
+            (1.0 - ema_alpha) * ep_stats.avg_ep_len
         )
 
         self.stats["avg_ep_returns_ema"] = (
             ema_alpha * self.stats.get("avg_ep_returns_ema",
-                                       avg_ep_returns) +
-            (1.0 - ema_alpha) * avg_ep_returns
+                                       ep_stats.avg_ep_returns) +
+            (1.0 - ema_alpha) * ep_stats.avg_ep_returns
         )
 
     def compute_average_stats(self):
@@ -118,6 +121,8 @@ class TrainerState:
             for key in [key for key in self.stats.keys()
                         if key not in ["steps",
                                        "episodes",
+                                       "alive_envs",
+                                       "max_ep_len",
                                        "avg_ep_len",
                                        "avg_ep_len_ema",
                                        "avg_ep_returns",
