@@ -5,6 +5,8 @@ import torch
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
+from rich.live import Live
+from rich.table import Table
 
 from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
@@ -107,6 +109,8 @@ class LSTMPPOTrainer:
               total_updates: int):
 
         self.state.reset(total_updates)
+
+        self.state.init_stats()
 
         with open(self.state.jsonl_file, "w") as self.state.jsonl_fp:
 
@@ -397,6 +401,17 @@ class LSTMPPOTrainer:
         self.state.clip_range = trainer_state["clip_range"]
         self.state.target_kl = trainer_state["target_kl"]
         self.state.early_stopping_kl = trainer_state["early_stopping_kl"]
+
+    def _render_metrics(self):
+
+        table = Table(title="Training Metrics")
+        table.add_column("Metric")
+        table.add_column("Value")
+
+        for k, v in self.state.stats.items():
+            table.add_row(k, f"{v:.3f}")
+
+        return table
 
     def validate_tbptt(self, K=16):
 

@@ -43,10 +43,12 @@ class RecurrentVecEnvWrapper:
                                            device=self.device)
 
         self.ep_len = torch.zeros(self.num_envs,
-                                  dtype=torch.int32)
+                                  dtype=torch.int32,
+                                  device=self.device)
         
         self.ep_return = torch.zeros(self.num_envs,
-                                     dtype=torch.float32)
+                                     dtype=torch.float32,
+                                     device=self.device)
 
         self.completed_ep_returns = []
 
@@ -150,7 +152,9 @@ class RecurrentVecEnvWrapper:
         self.ep_len += 1
 
         # Keep track of episode rewards
-        self.ep_return += rewards
+        self.ep_return += torch.as_tensor(rewards,
+                                          device=self.device,
+                                          dtype=torch.float32)
 
         """
         Vectorized environment wrapper is the only place that knows which
