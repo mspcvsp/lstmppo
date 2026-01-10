@@ -5,8 +5,14 @@ import torch
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
+from rich.console import Console
 from rich.live import Live
 from rich.table import Table
+from rich.panel import Panel
+from rich.progress import Progress, BarColumn, TimeElapsedColumn
+from rich.progress import TimeRemainingColumn, TextColumn
+from rich import box
+
 
 from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
@@ -112,9 +118,27 @@ class LSTMPPOTrainer:
 
         self.state.init_stats()
 
+        if detect_environment() == "jupyter":
+            console = Console(force_jupyter=True)
+        else:
+            console = Console()
+
         with open(self.state.jsonl_file, "w") as self.state.jsonl_fp,\
-            Live(self._render_metrics(),
-                 refresh_per_second=4) as live:
+            Progress(
+                TextColumn("[bold blue]Update {task.fields[update]:04d}"),
+                BarColumn(),
+                TextColumn("loss={task.fields[loss]:.3f}"),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+            ) as progress,\
+            Live(console=console, refresh_per_second=4) as live:
+
+            task = progress.add_task(
+                "training",
+                total=total_updates,
+                update=0,
+                loss=0.0,
+            )
 
             for self.state.update_idx in range(total_updates):
 
@@ -128,7 +152,14 @@ class LSTMPPOTrainer:
 
                 self.optimize_policy()
 
-                live.update(self._render_metrics())
+                progress.update(
+                    task,
+                    advance=1,
+                    update=self.state.update_idx,
+                    loss=float(self.state.stats["policy_loss"]),
+                )
+
+                live.update(self._render_dashboard())
 
                 if self.state.should_stop_early():
                     break
@@ -406,16 +437,96 @@ class LSTMPPOTrainer:
         self.state.target_kl = trainer_state["target_kl"]
         self.state.early_stopping_kl = trainer_state["early_stopping_kl"]
 
-    def _render_metrics(self):
+    def _render_dashboard(self):
+        stats = self.state.stats
 
-        table = Table(title="Training Metrics")
-        table.add_column("Metric")
-        table.add_column("Value")
+        # ---------------- PPO METRICS ----------------
+        ppo = Table(title="PPO Metrics",
+                    box=box.SIMPLE)
+        
+        ppo.add_column("Metric")
+        ppo.add_column("Value", justify="right")
 
-        for k, v in self.state.stats.items():
-            table.add_row(k, f"{v:.3f}")
+        def colorize(name,
+                     value):
 
-        return table
+            if name == "approx_kl":
+
+                if value > 2 * self.state.target_kl:
+                    return f"[red]{value:.4f}[/red]"
+                elif value > self.state.target_kl:
+                    return f"[yellow]{value:.4f}[/yellow]"
+                else:
+                    return f"[green]{value:.4f}[/green]"
+
+            if name == "entropy":
+
+                return (f"[green]{value:.3f}[/green]"
+                        if value > 1.0
+                        else f"[yellow]{value:.3f}[/yellow]")
+
+            if name == "clip_frac":
+                if value > 0.5:
+                    return f"[red]{value:.3f}[/red]"
+                elif value > 0.3:
+                    return f"[yellow]{value:.3f}[/yellow]"
+                else:
+                    return f"[green]{value:.3f}[/green]"
+            return f"{value:.3f}"
+
+        for key in ["policy_loss",
+                    "value_loss",
+                    "entropy",
+                    "approx_kl",
+                    "clip_frac",
+                    "explained_var",
+                    "grad_norm"]:
+
+            if key in stats:
+                ppo.add_row(key,
+                            colorize(key, float(stats[key])))
+
+        # ---------------- EPISODE METRICS ----------------
+        ep = Table(title="Episode Stats",
+                   box=box.SIMPLE)
+        
+        ep.add_column("Metric")
+        ep.add_column("Value", justify="right")
+
+        for key in ["episodes",
+                    "alive_envs",
+                    "max_ep_len",
+                    "avg_ep_len",
+                    "max_ep_returns",
+                    "avg_ep_returns",
+                    "avg_ep_len_ema",
+                    "avg_ep_returns_ema"]:
+            
+            if key in stats:
+                ep.add_row(key, f"{float(stats[key]):.3f}")
+
+        # ---------------- LSTM DIAGNOSTICS ----------------
+        lstm = Table(title="LSTM Diagnostics",
+                     box=box.SIMPLE)
+        
+        lstm.add_column("Metric")
+        lstm.add_column("Value", justify="right")
+
+        if hasattr(self, "env_state"):
+            h = self.env_state.hxs
+            c = self.env_state.cxs
+            lstm.add_row("h_norm", f"{h.norm().item():.3f}")
+            lstm.add_row("c_norm", f"{c.norm().item():.3f}")
+
+        # ---------------- GROUP PANELS ----------------
+        dashboard = Table.grid(expand=True)
+        dashboard.add_row(
+            Panel(ppo, title="PPO", border_style="cyan"),
+            Panel(ep, title="Episodes", border_style="green"),
+            Panel(lstm, title="LSTM", border_style="magenta"),
+        )
+
+        return dashboard
 
     def validate_tbptt(self, K=16):
 
@@ -642,3 +753,17 @@ def validate():
     trainer.assert_rollout_deterministic()
     trainer.validate_tbptt()
     trainer.validate_lstm_state_flow()
+
+
+def detect_environment():
+    try:
+        from IPython import get_ipython
+        shell = get_ipython().__class__.__name__
+
+        if shell == "ZMQInteractiveShell":
+            return "jupyter"
+        if shell == "TerminalInteractiveShell":
+            return "ipython"
+        return "other"
+    except Exception:
+        return "python"
