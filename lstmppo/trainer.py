@@ -523,7 +523,7 @@ class LSTMPPOTrainer:
 
         # ---- Sparkline panel ----
         spark = Table.grid()
-        spark.add_column(width=12)  # label column
+        spark.add_column(width=20)  # label column
         spark.add_column(width=32)  # sparkline column
 
         spark.add_row("avg_ep_len",
@@ -546,10 +546,18 @@ class LSTMPPOTrainer:
         # ---------------- GROUP PANELS ----------------
         env_sparks = Table(title="Per‑Env Episode Timelines",
                            box=box.SIMPLE)
+
+        env_sparks.add_column("Env",
+                              width=10,
+                              justify="right")
+
+        env_sparks.add_column("Length Trend",
+                              width=32,
+                              justify="left")
         
-        env_sparks.add_column("Env", justify="right")
-        env_sparks.add_column("Length Trend", justify="left", width=32)
-        env_sparks.add_column("Current", justify="right")
+        env_sparks.add_column("Current",
+                              width=10,
+                              justify="right")
 
         colors = ["cyan", "green", "magenta", "yellow", "red", "blue"]
 
