@@ -24,6 +24,9 @@ class TrainerState:
     validation_mode: bool
     ep_len_history: list
     ep_return_history: list
+    kl_history: list
+    entropy_history: list
+    ev_history: list
 
     def __init__(self,
                  cfg: Config,
@@ -74,7 +77,9 @@ class TrainerState:
         
         self.ep_len_history = []
         self.ep_return_history = []
-
+        self.kl_history = []
+        self.entropy_history = []
+        self.ev_history = []
 
     def reset(self,
               total_updates: int):
@@ -92,6 +97,20 @@ class TrainerState:
         self.stats["approx_kl"] += upd.approx_kl.detach()
         self.stats["clip_frac"] += upd.clip_frac.detach()
         self.stats["grad_norm"] += upd.grad_norm
+
+        self.kl_history.append(upd.approx_kl.item())
+        self.entropy_history.append(upd.entropy.item())
+        self.ev_history.append(self.stats.get("explained_var", 0.0))
+
+        if len(self.kl_history) > self.cfg.trainer.max_sparkline_history:
+            self.kl_history.pop(0)
+        
+        if len(self.entropy_history) > self.cfg.trainer.max_sparkline_history:
+            self.entropy_history.pop(0)
+        
+        if len(self.ev_history) > self.cfg.trainer.max_sparkline_history:
+            self.ev_history.pop(0)
+
         self.stats["steps"] += 1
 
     def update_episode_stats(self,

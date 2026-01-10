@@ -6,17 +6,12 @@ import random
 from torch import nn
 from torch.distributions.categorical import Categorical
 
-from rich import box
 from rich.console import Console
-from rich.highlighter import Highlighter
 from rich.live import Live
-from rich.panel import Panel
 from rich.progress import Progress, BarColumn, TimeElapsedColumn
 from rich.progress import TimeRemainingColumn, TextColumn
-from rich.style import Style
-from rich.table import Table
-from rich.text import Text
 
+from .dashboard import render_dashboard
 from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
@@ -134,7 +129,8 @@ class LSTMPPOTrainer:
                 TimeElapsedColumn(),
                 TimeRemainingColumn(),
             ) as progress,\
-            Live(console=console, refresh_per_second=4) as live:
+            Live(console=console,
+                 refresh_per_second=4) as live:
 
             task = progress.add_task(
                 "training",
@@ -162,7 +158,7 @@ class LSTMPPOTrainer:
                     loss=float(self.state.stats["policy_loss"]),
                 )
 
-                live.update(self._render_dashboard())
+                live.update(render_dashboard(self))
 
                 if self.state.should_stop_early():
                     break
@@ -440,156 +436,6 @@ class LSTMPPOTrainer:
         self.state.target_kl = trainer_state["target_kl"]
         self.state.early_stopping_kl = trainer_state["early_stopping_kl"]
 
-    def _render_dashboard(self):
-        stats = self.state.stats
-
-        # ---------------- PPO METRICS ----------------
-        ppo = Table(title="PPO Metrics",
-                    box=box.SIMPLE)
-        
-        ppo.add_column("Metric")
-        ppo.add_column("Value", justify="right")
-
-        def colorize(name,
-                     value):
-
-            if name == "approx_kl":
-
-                if value > 2 * self.state.target_kl:
-                    return f"[red]{value:.4f}[/red]"
-                elif value > self.state.target_kl:
-                    return f"[yellow]{value:.4f}[/yellow]"
-                else:
-                    return f"[green]{value:.4f}[/green]"
-
-            if name == "entropy":
-
-                return (f"[green]{value:.3f}[/green]"
-                        if value > 1.0
-                        else f"[yellow]{value:.3f}[/yellow]")
-
-            if name == "clip_frac":
-                if value > 0.5:
-                    return f"[red]{value:.3f}[/red]"
-                elif value > 0.3:
-                    return f"[yellow]{value:.3f}[/yellow]"
-                else:
-                    return f"[green]{value:.3f}[/green]"
-            return f"{value:.3f}"
-
-        for key in ["policy_loss",
-                    "value_loss",
-                    "entropy",
-                    "approx_kl",
-                    "clip_frac",
-                    "explained_var",
-                    "grad_norm"]:
-
-            if key in stats:
-                ppo.add_row(key,
-                            colorize(key, float(stats[key])))
-
-        # ---------------- EPISODE METRICS ----------------
-        ep = Table(title="Episode Stats",
-                   box=box.SIMPLE)
-        
-        ep.add_column("Metric")
-        ep.add_column("Value", justify="right")
-
-        for key in ["episodes",
-                    "alive_envs",
-                    "max_ep_len",
-                    "avg_ep_len",
-                    "max_ep_returns",
-                    "avg_ep_returns",
-                    "avg_ep_len_ema",
-                    "avg_ep_returns_ema"]:
-            
-            if key in stats:
-                ep.add_row(key, f"{float(stats[key]):.3f}")
-
-        # ---------------- LSTM DIAGNOSTICS ----------------
-        lstm = Table(title="LSTM Diagnostics",
-                     box=box.SIMPLE)
-        
-        lstm.add_column("Metric")
-        lstm.add_column("Value", justify="right")
-
-        if hasattr(self, "env_state"):
-            h = self.env_state.hxs
-            c = self.env_state.cxs
-            lstm.add_row("h_norm", f"{h.norm().item():.3f}")
-            lstm.add_row("c_norm", f"{c.norm().item():.3f}")
-
-        # ---- Sparkline panel ----
-        spark = Table.grid()
-        spark.add_column(width=20)  # label column
-        spark.add_column(width=32)  # sparkline column
-
-        spark.add_row("avg_ep_len",
-                      sparkline(self.state.ep_len_history,
-                                width=30,
-                                style="green"))
-
-        spark.add_row("avg_ep_returns",
-                      sparkline(self.state.ep_return_history,
-                                width=30,
-                                style="magenta"))
-
-        spark_panel = Panel(
-            spark,
-            title="Episode Trends",
-            border_style="yellow",
-            padding=(1, 2),
-        )
-
-        # ---------------- GROUP PANELS ----------------
-        env_sparks = Table(title="Per‑Env Episode Timelines",
-                           box=box.SIMPLE)
-
-        env_sparks.add_column("Env",
-                              width=10,
-                              justify="right")
-
-        env_sparks.add_column("Length Trend",
-                              width=32,
-                              justify="left")
-        
-        env_sparks.add_column("Current",
-                              width=10,
-                              justify="right")
-
-        colors = ["cyan", "green", "magenta", "yellow", "red", "blue"]
-
-        for row, history in enumerate(self.env.ep_len_history):
-        
-            style = colors[row % len(colors)]
-        
-            env_sparks.add_row(
-                f"{row}",
-                sparkline(history, width=30, style=style),
-                f"{self.env.ep_len[row].item()}"
-            )
-
-        # ---------------- GROUP PANELS ----------------
-        dashboard = Table.grid(expand=True)
-
-        dashboard.add_row(
-            Panel(ppo, title="PPO", border_style="cyan"),
-            Panel(ep, title="Episodes", border_style="green"),
-            Panel(lstm, title="LSTM", border_style="magenta"),
-        )
-
-        dashboard.add_row(spark_panel)
-        
-        dashboard.add_row(
-            Panel(env_sparks,
-                  title="Per‑Env Episode Timelines",
-                  border_style="blue")
-        )
-
-        return dashboard
-
     def validate_tbptt(self, K=16):
 
         self.policy.eval()
@@ -829,29 +675,3 @@ def detect_environment():
         return "other"
     except Exception:
         return "python"
-
-
-def sparkline(data,
-              width=30,
-              style="cyan"):
-
-    if not data:
-        return Text(" " * width)
-
-    # Normalize data to 0–1
-    mn = min(data)
-    mx = max(data)
-    rng = mx - mn if mx != mn else 1.0
-    norm = [(x - mn) / rng for x in data]
-
-    # Unicode sparkline blocks
-    blocks = "▁▂▃▄▅▆▇█"
-    chars = [blocks[int(v * (len(blocks) - 1))] for v in norm]
-
-    # Fit to width
-    if len(chars) < width:
-        chars = [" "] * (width - len(chars)) + chars
-    else:
-        chars = chars[-width:]
-
-    return Text("".join(chars), style=style)
