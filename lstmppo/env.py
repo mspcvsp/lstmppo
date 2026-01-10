@@ -29,6 +29,7 @@ class RecurrentVecEnvWrapper:
         self.num_envs = cfg.env.num_envs
         self.hidden_size = cfg.lstm.lstm_hidden_size
         self.device = device
+        self.max_history = cfg.env.max_env_history
 
         self.hxs = torch.zeros(self.num_envs,
                                self.hidden_size,
@@ -51,8 +52,9 @@ class RecurrentVecEnvWrapper:
                                      device=self.device)
 
         self.completed_ep_returns = []
-
-        self.completed_ep_lens = []   # store results for logging
+        self.completed_ep_lens = []
+        
+        self.ep_len_history = [[] for _ in range(self.num_envs)]
         
     @property
     def observation_space(self):
@@ -178,6 +180,18 @@ class RecurrentVecEnvWrapper:
             # record completed episode lengths
             finished_lengths = self.ep_len[done_mask].cpu().tolist()
             self.completed_ep_lens.extend(finished_lengths)
+
+            # Maintain rolling window of episode lengths for each 
+            # environment.
+            for idx, env_idx in enumerate(
+                done_mask.nonzero(as_tuple=False).squeeze(-1).tolist()
+                ):
+                
+                self.ep_len_history[env_idx].append(finished_lengths[idx])
+
+                if len(self.ep_len_history[env_idx]) > self.max_history:
+
+                    self.ep_len_history[env_idx].pop(0)
 
             # record completed episode rewards
             finished_returns = self.ep_return[done_mask].cpu().tolist()

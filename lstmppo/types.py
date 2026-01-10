@@ -119,7 +119,8 @@ class EnvironmentConfig:
     """ Action dimension """
     max_episode_steps: int = None
     """ Maximum number of steps per episode """
-
+    max_env_history: int = 30
+    """ Maximum per env history length """
 
 @dataclass
 class BufferConfig:

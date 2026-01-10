@@ -540,6 +540,32 @@ class LSTMPPOTrainer:
         )
 
         # ---------------- GROUP PANELS ----------------
+        env_sparks = Table(title="Per‑Env Episode Timelines",
+                           box=box.SIMPLE)
+        
+        env_sparks.add_column("Env", justify="right")
+        env_sparks.add_column("Length Trend", justify="left")
+        
+        colors = ["cyan", "green", "magenta", "yellow", "red", "blue"]
+
+        for row, history in enumerate(self.env.ep_len_history):
+
+            style = colors[row % len(colors)]
+            
+            env_sparks.add_row(f"{row}",
+                               sparkline(history,
+                                         width=30,
+                                         style=style))
+
+            env_sparks.add_column("Current", justify="right")
+            
+            env_sparks.add_row(f"{row}",
+                               sparkline(history,
+                                         width=30,
+                                         style=style),
+                               f"{self.env.ep_len[row].item()}")
+
+        # ---------------- GROUP PANELS ----------------
         dashboard = Table.grid(expand=True)
 
         dashboard.add_row(
@@ -549,6 +575,12 @@ class LSTMPPOTrainer:
         )
 
         dashboard.add_row(spark_panel)
+        
+        dashboard.add_row(
+            Panel(env_sparks,
+                  title="Per‑Env Episode Timelines",
+                  border_style="blue")
+        )
 
         return dashboard
 
