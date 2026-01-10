@@ -41,6 +41,16 @@ class RecurrentVecEnvWrapper:
         self.last_terminated = torch.zeros(self.num_envs,
                                            dtype=torch.bool,
                                            device=self.device)
+
+        self.ep_len = torch.zeros(self.num_envs,
+                                  dtype=torch.int32)
+        
+        self.ep_return = torch.zeros(self.num_envs,
+                                     dtype=torch.float32)
+
+        self.completed_ep_returns = []
+
+        self.completed_ep_lens = []   # store results for logging
         
     @property
     def observation_space(self):
@@ -135,6 +145,12 @@ class RecurrentVecEnvWrapper:
         truncated = torch.as_tensor(truncated,
                                     device=self.device,
                                     dtype=torch.bool)
+        
+        # increment all alive envs
+        self.ep_len += 1
+
+        # Keep track of episode rewards
+        self.ep_return += rewards
 
         """
         Vectorized environment wrapper is the only place that knows which
@@ -154,6 +170,18 @@ class RecurrentVecEnvWrapper:
 
             self.hxs[done_mask].zero_()
             self.cxs[done_mask].zero_()
+
+            # record completed episode lengths
+            finished_lengths = self.ep_len[done_mask].cpu().tolist()
+            self.completed_ep_lens.extend(finished_lengths)
+
+            # record completed episode rewards
+            finished_returns = self.ep_return[done_mask].cpu().tolist()
+            self.completed_ep_returns.extend(finished_returns)
+            self.ep_return[done_mask] = 0
+
+            # reset counters for those envs
+            self.ep_len[done_mask] = 0
 
         obs = torch.as_tensor(obs,
                               device=self.device,
@@ -181,6 +209,25 @@ class RecurrentVecEnvWrapper:
 
         self.hxs.copy_(new_hxs)
         self.cxs.copy_(new_cxs)
+
+    def pop_avg_episode_stats(self):
+
+        if len(self.completed_ep_lens) == 0:
+            return 0.0, 0.0
+
+        avg_ep_len =\
+            sum(self.completed_ep_lens) / len(self.completed_ep_lens)
+        
+        avg_ep_returns =\
+            sum(self.completed_ep_returns) / len(self.completed_ep_returns)
+
+        self.completed_ep_lens.clear()
+        self.completed_ep_returns.clear()
+
+        return avg_ep_len, avg_ep_returns
+
+
+
 
 
 # Helper on VecEnvState side

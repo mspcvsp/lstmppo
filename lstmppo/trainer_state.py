@@ -89,6 +89,11 @@ class TrainerState:
         self.stats["grad_norm"] += upd.grad_norm
         self.stats["steps"] += 1
 
+    def update_avg_episode_length(self,
+                                  avg_len: float):
+
+        self.stats["avg_ep_len"] = avg_len
+
     def compute_average_stats(self):
 
         if self.stats["steps"] > 0:
@@ -96,7 +101,10 @@ class TrainerState:
             norm_factor = 1.0 / self.stats["steps"]
 
             for key in [key for key in self.stats.keys()
-                        if key not in ["steps"]]:
+                        if key not in ["steps",
+                                       "episodes"
+                                       "avg_ep_len",
+                                       "avg_ep_returns"]]:
 
                 self.stats[key] *= norm_factor
 
@@ -148,6 +156,7 @@ class TrainerState:
             "clip_frac": 0.0,
             "grad_norm": 0.0,
             "explained_var": 0.0,
+            "avg_ep_len": 0.0,
             "steps": 0,
         }
 
