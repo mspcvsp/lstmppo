@@ -22,6 +22,8 @@ class TrainerState:
     jsonl_file: str
     jsonl_fp: io.TextIOWrapper
     validation_mode: bool
+    ep_len_history: list
+    ep_return_history: list
 
     def __init__(self,
                  cfg: Config,
@@ -69,6 +71,10 @@ class TrainerState:
 
         self.jsonl_file =\
             jsonl_path.joinpath(self.cfg.log.run_name + ".json")
+        
+        self.ep_len_history = []
+        self.ep_return_history = []
+
 
     def reset(self,
               total_updates: int):
@@ -100,6 +106,17 @@ class TrainerState:
         self.stats["max_ep_returns"] = ep_stats.max_ep_returns
         self.stats["avg_ep_returns"] = ep_stats.avg_ep_returns
 
+        # ---- Sparkline history tracking ----
+        self.ep_len_history.append(ep_stats.avg_ep_len)
+        self.ep_return_history.append(ep_stats.avg_ep_returns)
+
+        if len(self.ep_len_history) > self.cfg.trainer.max_sparkline_history:
+            self.ep_len_history.pop(0)
+
+        if len(self.ep_return_history) > self.cfg.trainer.max_sparkline_history:
+            self.ep_return_history.pop(0)
+
+        # ---- Exponential Moving Average ----
         ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
 
         self.stats["avg_ep_len_ema"] = (

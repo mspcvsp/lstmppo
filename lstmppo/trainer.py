@@ -5,14 +5,17 @@ import torch
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
+
+from rich import box
 from rich.console import Console
+from rich.highlighter import Highlighter
 from rich.live import Live
-from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, BarColumn, TimeElapsedColumn
 from rich.progress import TimeRemainingColumn, TextColumn
-from rich import box
-
+from rich.style import Style
+from rich.table import Table
+from rich.text import Text
 
 from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
@@ -518,13 +521,34 @@ class LSTMPPOTrainer:
             lstm.add_row("h_norm", f"{h.norm().item():.3f}")
             lstm.add_row("c_norm", f"{c.norm().item():.3f}")
 
+        # ---- Sparkline panel ----
+        spark = Table.grid()
+        
+        spark.add_row("avg_ep_len",
+                      sparkline(self.state.ep_len_history,
+                                style="green"))
+        
+        spark.add_row("avg_ep_returns",
+                      sparkline(self.state.ep_return_history,
+                                style="magenta"))
+
+        spark_panel = Panel(
+            spark,
+            title="Episode Trends",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+
         # ---------------- GROUP PANELS ----------------
         dashboard = Table.grid(expand=True)
+
         dashboard.add_row(
             Panel(ppo, title="PPO", border_style="cyan"),
             Panel(ep, title="Episodes", border_style="green"),
             Panel(lstm, title="LSTM", border_style="magenta"),
         )
+
+        dashboard.add_row(spark_panel)
 
         return dashboard
 
@@ -767,3 +791,27 @@ def detect_environment():
         return "other"
     except Exception:
         return "python"
+
+
+def sparkline(data,
+              width=30,
+              style="cyan"):
+
+    if not data:
+        return Text(" " * width)
+
+    # Normalize data to 0–1
+    mn = min(data)
+    mx = max(data)
+    rng = mx - mn if mx != mn else 1.0
+    norm = [(x - mn) / rng for x in data]
+
+    # Unicode sparkline blocks
+    blocks = "▁▂▃▄▅▆▇█"
+    chars = [blocks[int(v * (len(blocks) - 1))] for v in norm]
+
+    # Fit to width
+    if len(chars) > width:
+        chars = chars[-width:]
+
+    return Text("".join(chars), style=style)

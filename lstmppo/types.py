@@ -88,7 +88,8 @@ class TrainerConfig:
     """ Experiment name """
     avg_ep_stat_ema_alpha: float = 0.9
     """ Average episode statistics EMA alpha """
-
+    max_sparkline_history: int = 100
+    """ Maximum number of sparkline history points to keep """
 
 @dataclass
 class LoggingConfig:
