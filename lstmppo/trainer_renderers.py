@@ -87,6 +87,12 @@ def render_episode_table(self):
 
 
 def render_episode_trends(self):
+
+    if not self.state.ep_len_history and not self.state.ep_return_history:
+
+        return Panel(Text("Waiting for data..."),
+                     title="Episode Trends")
+
     table = Table.grid()
     table.add_column(width=12)
     table.add_column(width=32)
@@ -104,6 +110,12 @@ def render_episode_trends(self):
 
 
 def render_policy_stability(self):
+
+    if not self.state.kl_history and not self.state.entropy_history:
+
+        return Panel(Text("Waiting for data..."),
+                     title="Policy Stability")
+
     table = Table.grid()
     table.add_column(width=12)
     table.add_column(width=32)
@@ -120,6 +132,12 @@ def render_policy_stability(self):
 
 
 def render_value_drift(self):
+
+    if not self.state.ev_history:
+
+        return Panel(Text("Waiting for data..."),
+                     title="Value Function Drift")
+
     table = Table.grid()
     table.add_column(width=20)
     table.add_column(width=32)
@@ -133,6 +151,12 @@ def render_value_drift(self):
 
 
 def render_histogram(self):
+
+    if not self.state.completed_ep_returns:
+
+        return Panel(Text("Waiting for data..."),
+                     title="Value Function Drift")
+
     return Panel(
         histogram(
             self.env.completed_ep_returns,
@@ -145,6 +169,12 @@ def render_histogram(self):
 
 
 def render_env_timelines(self):
+
+    if not self.state.ep_len_history:
+
+        return Panel(Text("Waiting for data..."),
+                     title="Per-Env Timelines")
+
     colors = ["cyan", "green", "magenta", "yellow", "red", "blue"]
     env_panels = []
 
