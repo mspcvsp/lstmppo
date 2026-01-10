@@ -7,11 +7,10 @@ from torch import nn
 from torch.distributions.categorical import Categorical
 
 from rich.console import Console
-from rich.live import Live
 from rich.progress import Progress, BarColumn, TimeElapsedColumn
 from rich.progress import TimeRemainingColumn, TextColumn
 
-from .dashboard import render_dashboard
+
 from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
@@ -121,16 +120,14 @@ class LSTMPPOTrainer:
         else:
             console = Console()
 
-        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp,\
+        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp, \
             Progress(
                 TextColumn("[bold blue]Update {task.fields[update]:04d}"),
                 BarColumn(),
                 TextColumn("loss={task.fields[loss]:.3f}"),
                 TimeElapsedColumn(),
                 TimeRemainingColumn(),
-            ) as progress,\
-            Live(console=console,
-                 refresh_per_second=4) as live:
+            ) as progress:
 
             task = progress.add_task(
                 "training",
@@ -157,8 +154,6 @@ class LSTMPPOTrainer:
                     update=self.state.update_idx,
                     loss=float(self.state.stats["policy_loss"]),
                 )
-
-                live.update(render_dashboard(self))
 
                 if self.state.should_stop_early():
                     break
@@ -636,6 +631,25 @@ class LSTMPPOTrainer:
 
         print("=== Validation complete ===")
 
+# https://realpython.com/python-mixin/
+from .trainer_renderers import (
+    render_ppo_table,
+    render_episode_table,
+    render_episode_trends,
+    render_policy_stability,
+    render_value_drift,
+    render_histogram,
+    render_env_timelines,
+)
+
+# Attach as methods
+LSTMPPOTrainer.render_ppo_table = render_ppo_table
+LSTMPPOTrainer.render_episode_table = render_episode_table
+LSTMPPOTrainer.render_episode_trends = render_episode_trends
+LSTMPPOTrainer.render_policy_stability = render_policy_stability
+LSTMPPOTrainer.render_value_drift = render_value_drift
+LSTMPPOTrainer.render_histogram = render_histogram
+LSTMPPOTrainer.render_env_timelines = render_env_timelines
 
 def explained_variance(y_pred, y_true):
     var_y = torch.var(y_true)
