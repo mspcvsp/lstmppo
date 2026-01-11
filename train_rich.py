@@ -9,6 +9,9 @@ def train_rich(total_updates=300):
     trainer = LSTMPPOTrainer(cfg)
     trainer.state.reset(total_updates)
 
+    # Disable JSON logging for Rich loop
+    trainer.state.jsonl_fp = open('/dev/null', 'w')
+
     console = Console()
     with Progress(
         TextColumn("[bold blue]Update {task.fields[update]:04d}"),
