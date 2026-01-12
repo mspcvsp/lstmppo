@@ -18,13 +18,13 @@ class PPOHyperparams:
 
     gamma: float = 0.99
     """ Discount factor"""
-    gae_lambda: float = 0.95
+    gae_lambda: float = 0.97
     """ Generalized Advantage Estimate (GAE) lambda"""
-    initial_clip_range: float = 0.25
+    initial_clip_range: float = 0.15
     """ Initial clip range """
     update_epochs: int = 4
     """ Number of update epochs """
-    vf_coef: float = 0.5
+    vf_coef: float = 1.0
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for gradient clipping"""
@@ -43,9 +43,9 @@ class LSTMConfig:
     """LSTM hidden size"""
     dropconnect_p: float = 0.5
     """LSTM drop connect probability"""
-    lstm_ar_coef: float = 2.0
+    lstm_ar_coef: float = 1.0
     """LSTM activation regularization (AR)"""
-    lstm_tar_coef: float = 1.0
+    lstm_tar_coef: float = 0.5
     """LSTM temporal activation regularization (TAR)"""
 
 
@@ -60,9 +60,9 @@ class ScheduleConfig:
     """ Final learning rate percentage of base learning rate """
     anneal_entropy_flag: bool = True
     """ Toggle entropy coefficient annealing """
-    start_entropy_coef: float = 0.2
+    start_entropy_coef: float = 0.1
     """ Starting value of entropy coefficient for annealing """
-    end_entropy_coef: float = 0.05
+    end_entropy_coef: float = 0.02
 
 
 @dataclass
