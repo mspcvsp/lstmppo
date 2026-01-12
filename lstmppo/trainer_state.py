@@ -3,6 +3,7 @@ import io
 import json
 import torch
 from pathlib import Path
+from pprint import pprint
 
 from torch.utils.tensorboard import SummaryWriter
 from .types import Config, PolicyUpdateInfo, EpisodeStats
@@ -191,6 +192,8 @@ class TrainerState:
         record["lr"] = float(self.lr)
         record["entropy_coef"] = float(self.entropy_coef)
         record["clip_range"] = float(self.clip_range)
+
+        pprint(record)
 
         self.jsonl_fp.write(json.dumps(record) + "\n")
         self.jsonl_fp.flush()
