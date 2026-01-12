@@ -20,7 +20,7 @@ class PPOHyperparams:
     """ Discount factor"""
     gae_lambda: float = 0.95
     """ Generalized Advantage Estimate (GAE) lambda"""
-    initial_clip_range: float = 0.2
+    initial_clip_range: float = 0.25
     """ Initial clip range """
     update_epochs: int = 4
     """ Number of update epochs """
@@ -54,15 +54,15 @@ class ScheduleConfig:
 
     base_lr: float = 3e-4
     """ Base learning rate """
-    lr_warmup_pct: float = 5.0
+    lr_warmup_pct: float = 10.0
     """ Learning rate warmup percentage """
     lr_final_pct: float = 10.0
     """ Final learning rate percentage of base learning rate """
     anneal_entropy_flag: bool = True
     """ Toggle entropy coefficient annealing """
-    start_entropy_coef: float = 0.1
+    start_entropy_coef: float = 0.2
     """ Starting value of entropy coefficient for annealing """
-    end_entropy_coef: float = 0.0
+    end_entropy_coef: float = 0.05
 
 
 @dataclass
