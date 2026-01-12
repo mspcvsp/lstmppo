@@ -170,6 +170,11 @@ class RecurrentRolloutBuffer:
 
         self.returns = self.values + self.advantages
 
+        # ---- Return Normalization ----
+        # Normalize across all timesteps and environments
+        ret = self.returns
+        self.returns = (ret - ret.mean()) / (ret.std(unbiased=False) + 1e-8)
+
     # ---------------------------------------------------------
     # Yield minibatches of full sequences (T, B, ...)
     # ---------------------------------------------------------
