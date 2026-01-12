@@ -402,6 +402,9 @@ class LSTMPPOTrainer:
 
     def validate_tbptt(self, K=16):
 
+        self.state.reset(1)
+        self.state.init_stats()
+
         self.policy.eval()
         self.collect_rollout()
 
