@@ -3,7 +3,8 @@ import io
 import json
 import torch
 from pathlib import Path
-from pprint import pprint
+from rich.console import Console
+
 
 from torch.utils.tensorboard import SummaryWriter
 from .types import Config, PolicyUpdateInfo, EpisodeStats
@@ -193,8 +194,6 @@ class TrainerState:
         record["entropy_coef"] = float(self.entropy_coef)
         record["clip_range"] = float(self.clip_range)
 
-        pprint(record)
-
         self.jsonl_fp.write(json.dumps(record) + "\n")
         self.jsonl_fp.flush()
     
@@ -250,13 +249,52 @@ class TrainerState:
         # Use the same warmup_updates as your LR scheduler
         return self.update_idx >= self._lr_sch.warmup_updates
 
-    def should_stop_early(self):
-        stop_early = (
-            self.stats["approx_kl"] > self.early_stopping_kl
-            and self.cfg.trainer.debug_mode is False
-            and self.warmup_complete  # <-- Only allow after warmup
-        )
-        return stop_early
+    def console_print(self,
+                      console: Console):
+
+        policy_loss = self.stats.get("policy_loss", 0.0)
+        value_loss = self.stats.get("value_loss", 0.0)
+        entropy = self.stats.get("entropy", 0.0)
+        approx_kl = self.stats.get("approx_kl", 0.0)
+        
+        clip_frac = self.stats.get("clip_frac", 0.0)
+        grad_norm = self.stats.get("grad_norm", 0.0)
+        explained_var = self.stats.get("explained_var", 0.0)
+        clip_frac = self.stats.get("clip_frac", 0.0)
+        
+        grad_norm = self.stats.get("grad_norm", 0.0)
+        episodes = self.stats.get("episodes", 0.0)
+        alive_envs = self.stats.get("alive_envs", 0.0)
+        max_ep_len = self.stats.get("max_ep_len", 0.0)
+        
+        avg_ep_len = self.stats.get("avg_ep_len", 0.0)
+        max_ep_returns = self.stats.get("max_ep_returns", 0.0)
+        avg_ep_returns = self.stats.get("avg_ep_returns", 0.0)
+        avg_ep_len_ema = self.stats.get("avg_ep_len_ema", 0.0)
+        
+        avg_ep_returns_ema = self.stats.get("avg_ep_returns_ema", 0.0)
+        lr = self.lr
+        entropy_coef = self.entropy_coef
+        clip_range = self.clip_range
+
+        console.print(f"[green]Return={policy_loss:.3f}  " +
+                      f"Length={value_loss:.3f} " +
+                      f"Entropy={entropy:.3f}  " +
+                      f"KL={approx_kl:.3f}\n" +
+                      f"ClipFrac={clip_frac:.3f}  " +
+                      f"GradNorm={grad_norm:.3f}  " +
+                      f"ExplainedVar={explained_var:.3e}  " +
+                      f"Episodes={episodes:d}\n" +
+                      f"AliveEnv={alive_envs:d}  " +
+                      f"MaxEpLen={max_ep_len:.1f}  " +
+                      f"AvgEpLen={avg_ep_len:.1f}  " +
+                      f"AvgEpLenEMA={avg_ep_len_ema:.1f}\n" +
+                      f"MaxEpReturns={max_ep_returns:.1f}  " +
+                      f"AvgEpReturns={avg_ep_returns:.1f}  " +
+                      f"AvgEpReturnsEMA={avg_ep_returns_ema:.1f}  " +
+                      f"LR={lr:.2e}\n" +
+                      f"EntropyCoef={entropy_coef:.2e}  " +
+                      f"ClipRange={clip_range:.2e}")
 
     def should_save_checkpoint(self):
 
