@@ -124,10 +124,6 @@ class LSTMPPOTrainer:
 
                 self.optimize_policy()
 
-                if self.state.should_stop_early():
-                    print(f"Early stopping at update {state.update_idx}")
-                    break
-
                 if self.state.should_save_checkpoint():
                     self.save_checkpoint()
 
