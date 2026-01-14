@@ -245,13 +245,17 @@ class TrainerState:
                 0.3
             ))
 
-    def should_stop_early(self):
+    @property
+    def warmup_complete(self):
+        # Use the same warmup_updates as your LR scheduler
+        return self.update_idx >= self._lr_sch.warmup_updates
 
+    def should_stop_early(self):
         stop_early = (
             self.stats["approx_kl"] > self.early_stopping_kl
             and self.cfg.trainer.debug_mode is False
+            and self.warmup_complete  # <-- Only allow after warmup
         )
-
         return stop_early
 
     def should_save_checkpoint(self):

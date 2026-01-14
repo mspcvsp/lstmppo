@@ -125,6 +125,7 @@ class LSTMPPOTrainer:
                 self.optimize_policy()
 
                 if self.state.should_stop_early():
+                    print(f"Early stopping at update {state.update_idx}")
                     break
 
                 if self.state.should_save_checkpoint():
@@ -628,7 +629,7 @@ def explained_variance(y_pred, y_true):
     return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)
 
 
-def train_default():
+def train(total_updates=2000):
 
     cfg = Config()
 
@@ -636,7 +637,7 @@ def train_default():
 
     trainer = LSTMPPOTrainer(cfg)
 
-    trainer.train(total_updates=1000)
+    trainer.train(total_updates=total_updates)
 
 
 def validate():

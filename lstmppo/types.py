@@ -78,7 +78,7 @@ class TrainerConfig:
     """ Number of environments / minibatch"""
     updates_per_checkpoint: int = 10
     """ Number of updates / checkpoint """
-    debug_mode: bool = True
+    debug_mode: bool = False
     """ Toggles debug mode """
     seed: int = 351530767
     """seed of the experiment"""
