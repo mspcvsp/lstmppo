@@ -4,6 +4,9 @@ import json
 import torch
 from pathlib import Path
 from rich.console import Console
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.text import Text
 
 
 from torch.utils.tensorboard import SummaryWriter
@@ -248,53 +251,98 @@ class TrainerState:
     def warmup_complete(self):
         # Use the same warmup_updates as your LR scheduler
         return self.update_idx >= self._lr_sch.warmup_updates
+        
+    def render_dashboard(self):
+        s = self.stats
 
-    def console_print(self,
-                      console: Console):
+        # PPO metrics panel
+        ppo_text = Text()
+        
+        ppo_text.append(f" Return:     {s['avg_ep_returns']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" Length:     {s['avg_ep_len']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" Entropy:    {s['entropy']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" KL:         {s['approx_kl']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" ClipFrac:   {s['clip_frac']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" GradNorm:   {s['grad_norm']:.1f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" ExplainedV: {s['explained_var']:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" LR:         {self.lr:.2e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" EntCoef:    {self.entropy_coef:.2e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" ClipRange:  {self.clip_range:.2e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append("\n Return Trend: ",
+                        style="bold cyan")
+        
+        ppo_text.append(sparkline(self.ep_return_history),
+                        style="cyan")
 
-        policy_loss = self.stats.get("policy_loss", 0.0)
-        value_loss = self.stats.get("value_loss", 0.0)
-        entropy = self.stats.get("entropy", 0.0)
-        approx_kl = self.stats.get("approx_kl", 0.0)
-        
-        clip_frac = self.stats.get("clip_frac", 0.0)
-        grad_norm = self.stats.get("grad_norm", 0.0)
-        explained_var = self.stats.get("explained_var", 0.0)
-        clip_frac = self.stats.get("clip_frac", 0.0)
-        
-        grad_norm = self.stats.get("grad_norm", 0.0)
-        episodes = self.stats.get("episodes", 0.0)
-        alive_envs = self.stats.get("alive_envs", 0.0)
-        max_ep_len = self.stats.get("max_ep_len", 0.0)
-        
-        avg_ep_len = self.stats.get("avg_ep_len", 0.0)
-        max_ep_returns = self.stats.get("max_ep_returns", 0.0)
-        avg_ep_returns = self.stats.get("avg_ep_returns", 0.0)
-        avg_ep_len_ema = self.stats.get("avg_ep_len_ema", 0.0)
-        
-        avg_ep_returns_ema = self.stats.get("avg_ep_returns_ema", 0.0)
-        lr = self.lr
-        entropy_coef = self.entropy_coef
-        clip_range = self.clip_range
+        ppo_panel = Panel(ppo_text,
+                          title="PPO Metrics",
+                          border_style="bright_blue")
 
-        console.print(f"[green]Return={policy_loss:.3f}  " +
-                      f"Length={value_loss:.3f} " +
-                      f"Entropy={entropy:.3f}  " +
-                      f"KL={approx_kl:.3f}\n" +
-                      f"ClipFrac={clip_frac:.3f}  " +
-                      f"GradNorm={grad_norm:.3f}  " +
-                      f"ExplainedVar={explained_var:.3e}  " +
-                      f"Episodes={episodes:d}\n" +
-                      f"AliveEnv={alive_envs:d}  " +
-                      f"MaxEpLen={max_ep_len:.1f}  " +
-                      f"AvgEpLen={avg_ep_len:.1f}  " +
-                      f"AvgEpLenEMA={avg_ep_len_ema:.1f}\n" +
-                      f"MaxEpReturns={max_ep_returns:.1f}  " +
-                      f"AvgEpReturns={avg_ep_returns:.1f}  " +
-                      f"AvgEpReturnsEMA={avg_ep_returns_ema:.1f}  " +
-                      f"LR={lr:.2e}\n" +
-                      f"EntropyCoef={entropy_coef:.2e}  " +
-                      f"ClipRange={clip_range:.2e}")
+        # Episode stats panel
+        ep_text = Text()
+
+        ep_text.append(f" Episodes:   {s['episodes']}\n",
+                       style="bold green")
+
+        ep_text.append(f" AliveEnv:   {s['alive_envs']}\n",
+                       style="bold green")
+        
+        ep_text.append(f" MaxEpLen:   {s['max_ep_len']:.1f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" AvgEpLen:   {s['avg_ep_len']:.1f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" EMA Len:    {s['avg_ep_len_ema']:.1f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" MaxReturn:  {s['max_ep_returns']:.2f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" AvgReturn:  {s['avg_ep_returns']:.2f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" EMA Return: {s['avg_ep_returns_ema']:.2f}\n",
+                       style="bold green")
+        
+        ep_text.append("\n Length Trend: ",
+                       style="bold cyan")
+        
+        ep_text.append(sparkline(self.ep_len_history),
+                       style="cyan")
+
+        ep_panel = Panel(ep_text,
+                         title="Episode Stats",
+                         border_style="bright_green")
+
+        # Layout
+        layout = Layout()
+        layout.split_row(
+            Layout(ppo_panel, ratio=1),
+            Layout(ep_panel, ratio=1),
+        )
+
+        return layout
 
     def should_save_checkpoint(self):
 
@@ -306,3 +354,15 @@ class TrainerState:
 
 def to_float(x):
     return x.item() if isinstance(x, torch.Tensor) else float(x)
+
+
+def sparkline(data, width=20):
+    if len(data) == 0:
+        return ""
+    blocks = "▁▂▃▄▅▆▇█"
+    mn, mx = min(data), max(data)
+    if mx - mn < 1e-8:
+        return blocks[0] * min(len(data), width)
+    scaled = [(x - mn) / (mx - mn) for x in data[-width:]]
+    idx = [int(s * (len(blocks) - 1)) for s in scaled]
+    return "".join(blocks[i] for i in idx)

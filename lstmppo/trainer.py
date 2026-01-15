@@ -5,8 +5,7 @@ import torch
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
-from rich.progress import Progress, BarColumn, TimeElapsedColumn
-from rich.progress import TimeRemainingColumn, TextColumn
+from rich.live import Live
 from rich.console import Console
 
 from .env import RecurrentVecEnvWrapper
@@ -116,19 +115,8 @@ class LSTMPPOTrainer:
         console = Console()
 
         with open(self.state.jsonl_file, "w") as self.state.jsonl_fp,\
-            Progress(
-                TextColumn("[bold blue]Update {task.fields[update]:04d}"),
-                BarColumn(),
-                TextColumn("loss={task.fields[loss]:.3f}"),
-                TimeElapsedColumn(),
-                TimeRemainingColumn(),
-                console=console,
-            ) as progress:
-
-            task = progress.add_task("training",
-                                     total=total_updates,
-                                     update=0,
-                                     loss=0.0)
+            Live(console=console,
+                 refresh_per_second=4) as live:
 
             for self.state.update_idx in range(total_updates):
 
@@ -142,15 +130,7 @@ class LSTMPPOTrainer:
 
                 self.optimize_policy()
 
-                loss = float(self.state.stats.get("policy_loss", 0.0))
-
-                progress.update(task,
-                                advance=1,
-                                update=self.state.update_idx,
-                                loss=loss)
-
-                if self.state.update_idx % 10 == 0:
-                    self.state.console_print(console)
+                live.update(self.state.render_dashboard())
 
                 if self.state.should_save_checkpoint():
                     self.save_checkpoint()
