@@ -30,6 +30,7 @@ class RecurrentVecEnvWrapper:
         self.hidden_size = cfg.lstm.lstm_hidden_size
         self.device = device
         self.max_history = cfg.env.max_env_history
+        self.ep_len_reward_bonus = cfg.env.ep_len_reward_bonus
 
         self.hxs = torch.zeros(self.num_envs,
                                self.hidden_size,
@@ -141,6 +142,13 @@ class RecurrentVecEnvWrapper:
         obs = flatten_obs(obs,
                           self.venv.single_observation_space)
 
+        # Convert to Pytorch tensor to avoid no silent 
+        # NumPy → PyTorch type mismatches prior to reward
+        # shaping
+        rewards = torch.as_tensor(rewards,
+                                  device=self.device,
+                                  dtype=torch.float32)
+
         # ------ Convert flags to tensors ------
         terminated = torch.as_tensor(terminated,
                                      device=self.device,
@@ -154,9 +162,7 @@ class RecurrentVecEnvWrapper:
         self.ep_len += 1
 
         # Keep track of episode rewards
-        self.ep_return += torch.as_tensor(rewards,
-                                          device=self.device,
-                                          dtype=torch.float32)
+        self.ep_return += rewards
 
         """
         Vectorized environment wrapper is the only place that knows which
@@ -181,6 +187,14 @@ class RecurrentVecEnvWrapper:
             finished_lengths = self.ep_len[done_mask].cpu().tolist()
             self.completed_ep_lens.extend(finished_lengths)
 
+            # --- Terminal reward shaping ---
+            # Add a bonus proportional to episode length when the env 
+            # terminates
+            bonus = self.ep_len_reward_bonus * self.ep_len.float()
+
+            # Apply bonus only to terminated/truncated envs
+            rewards[done_mask] += bonus[done_mask]
+
             # Maintain rolling window of episode lengths for each 
             # environment.
             for idx, env_idx in enumerate(
@@ -204,10 +218,6 @@ class RecurrentVecEnvWrapper:
         obs = torch.as_tensor(obs,
                               device=self.device,
                               dtype=torch.float32)
-        
-        rewards = torch.as_tensor(rewards,
-                                  device=self.device,
-                                  dtype=torch.float32)
 
         self.last_terminated = done_mask.clone()
 

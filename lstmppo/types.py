@@ -18,7 +18,7 @@ class PPOHyperparams:
 
     gamma: float = 0.99
     """ Discount factor"""
-    gae_lambda: float = 0.97
+    gae_lambda: float = 0.95
     """ Generalized Advantage Estimate (GAE) lambda"""
     initial_clip_range: float = 0.15
     """ Initial clip range """
@@ -52,7 +52,7 @@ class LSTMConfig:
 @dataclass
 class ScheduleConfig:
 
-    base_lr: float = 3e-4
+    base_lr: float = 1e-4
     """ Base learning rate """
     lr_warmup_pct: float = 10.0
     """ Learning rate warmup percentage """
@@ -72,7 +72,7 @@ class TrainerConfig:
     """ Whether to use CUDA """
     torch_deterministic: bool = True
     """ Sets the value of torch.backends.cudnn.deterministic """
-    rollout_steps: int = 128
+    rollout_steps: int = 256
     """ Horizon"""
     mini_batch_envs: int = 4
     """ Number of environments / minibatch"""
@@ -82,7 +82,7 @@ class TrainerConfig:
     """ Toggles debug mode """
     seed: int = 351530767
     """seed of the experiment"""
-    tbptt_chunk_len: int = 16
+    tbptt_chunk_len: int = 64
     """ Truncated BPTT steps """
     exp_name: str = "RLWarmup"
     """ Experiment name """
@@ -107,7 +107,7 @@ class LoggingConfig:
 @dataclass
 class EnvironmentConfig:
 
-    env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
+    env_id: str = "CartPole-v1"
     """Environment identifier"""
     num_envs: int = 16
     """ Number of environments """
@@ -121,6 +121,8 @@ class EnvironmentConfig:
     """ Maximum number of steps per episode """
     max_env_history: int = 30
     """ Maximum per env history length """
+    ep_len_reward_bonus: float = 0.1
+    """ Episode length reward bonus """
 
 @dataclass
 class BufferConfig:
