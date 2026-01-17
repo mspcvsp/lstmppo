@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
-from .types import Config, PolicyInput, PolicyOutput
-from .types import PolicyEvalInput, PolicyEvalOutput
+from .types import Config, PolicyInput, PolicyOutput, LSTMCoreOutput
+from .types import PolicyEvalInput, PolicyEvalOutput, LSTMGates
 from .obs_encoder import build_obs_encoder
 
 
@@ -55,7 +55,58 @@ class WeightDrop(nn.Module):
     def forward(self, *args, **kwargs):
         self._setweights()
         return self.module(*args, **kwargs)
-    
+
+
+class GateLSTMCell(nn.Module):
+
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+
+        self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size,
+                                                   input_size))
+
+        self.weight_hh = nn.Parameter(torch.Tensor(4 * hidden_size,
+                                                   hidden_size))
+
+        self.bias_ih = nn.Parameter(torch.Tensor(4 * hidden_size))
+
+        self.bias_hh = nn.Parameter(torch.Tensor(4 * hidden_size))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.weight_ih)
+        nn.init.orthogonal_(self.weight_hh)
+        nn.init.zeros_(self.bias_ih)
+        nn.init.zeros_(self.bias_hh)
+
+        # Forget gate bias trick
+        H = self.hidden_size
+        self.bias_ih.data[H:2*H] = 1.0
+
+    def forward(self, x, hx):
+        h, c = hx  # each (B, H)
+
+        gates = (
+            x @ self.weight_ih.t()
+            + h @ self.weight_hh.t()
+            + self.bias_ih
+            + self.bias_hh
+        )
+
+        H = self.hidden_size
+        i = torch.sigmoid(gates[:, :H])
+        f = torch.sigmoid(gates[:, H:2*H])
+        g = torch.tanh(gates[:, 2*H:3*H])
+        o = torch.sigmoid(gates[:, 3*H:4*H])
+
+        new_c = f * c + i * g
+        new_h = o * torch.tanh(new_c)
+
+        return new_h, new_c, (i, f, g, o)
+
 
 class LSTMPPOPolicy(nn.Module):
 
@@ -86,37 +137,10 @@ class LSTMPPOPolicy(nn.Module):
                 nn.init.zeros_(m.bias)
 
         # --- LN-LSTM with DropConnect ---
-        base_lstm = nn.LSTM(
-            input_size=cfg.lstm.enc_hidden_size,
+        self.lstm_cell = GateLSTMCell(
+            input_size=cfg.lstm.enc_hidden_size,    
             hidden_size=cfg.lstm.lstm_hidden_size,
-            num_layers=1,
-            batch_first=True,
         )
-
-        for name, param in base_lstm.named_parameters():
-
-            # Xavier for input weights
-            if "weight_ih" in name:
-                nn.init.xavier_uniform_(param)
-
-            # Orthogonal for recurrent weights
-            elif "weight_hh" in name:
-                nn.init.orthogonal_(param)
-
-            # Bias: zero + forget gate bias trick
-            elif "bias" in name:
-                param.data.fill_(0.0)
-                H = cfg.lstm.lstm_hidden_size
-                param.data[H:2*H] = 1.0  # forget gate bias
-
-        if cfg.trainer.debug_mode:
-            self.lstm = base_lstm
-        else:
-            self.lstm = WeightDrop(
-                base_lstm,
-                weights=["weight_hh_l0"],
-                dropout=cfg.lstm.dropconnect_p,
-            )
 
         self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
 
@@ -149,12 +173,26 @@ class LSTMPPOPolicy(nn.Module):
         enc = self.encoder(obs_flat)
 
         # LSTM expects (B, T, F) with batch_first=True
-        out, (h_n, c_n) = self.lstm(
-            enc,
-            (hxs.unsqueeze(0), cxs.unsqueeze(0)),  # (1, B, H)
-        )
+        B, T, F = enc.shape
+        h = hxs
+        c = cxs
 
-        out = self.ln(out)  # (B, T, H)
+        outputs = []
+        gate_list = []
+
+        for t in range(T):
+            h, c, gates = self.lstm_cell(enc[:, t, :], (h, c))
+            outputs.append(h.unsqueeze(1))
+            gate_list.append(gates)
+
+        out = torch.cat(outputs, dim=1)  # (B, T, H)
+        i_gates, f_gates, g_gates, o_gates = zip(*gate_list)
+
+        # Stack into (B, T, H)
+        i_gates = torch.stack(i_gates, dim=1)
+        f_gates = torch.stack(f_gates, dim=1)
+        g_gates = torch.stack(g_gates, dim=1)
+        o_gates = torch.stack(o_gates, dim=1)
 
         # --- Activation Regularization (AR) ---
         ar_loss = (out.pow(2).mean()) * self.ar_coef
@@ -167,8 +205,18 @@ class LSTMPPOPolicy(nn.Module):
             )
         else:
             tar_loss = torch.tensor(0.0, device=out.device)
-
-        return out, h_n.squeeze(0), c_n.squeeze(0), ar_loss, tar_loss
+        
+        return LSTMCoreOutput(out=out,
+                              h=h,
+                              c=c,
+                              ar_loss=ar_loss,
+                              tar_loss=tar_loss,
+                              gates=LSTMGates(
+                                  i_gates=i_gates.detach(),
+                                  f_gates=f_gates.detach(),
+                                  g_gates=g_gates.detach(),
+                                  o_gates=o_gates.detach()
+                              ))
 
     # ---------------------------------------------------------
     # Dataclass-based forward
@@ -178,14 +226,11 @@ class LSTMPPOPolicy(nn.Module):
         inp.obs: (B, obs_dim) OR (B, T, obs_dim)
         inp.hxs, inp.cxs: (B, H)
         """
-
-        core_out, new_hxs, new_cxs, ar_loss, tar_loss = \
-            self._forward_core(inp.obs, inp.hxs, inp.cxs)
+        core_out = self._forward_core(inp.obs, inp.hxs, inp.cxs)
+        
         # core_out is ALWAYS (B, T, H)
-
-        B, T, H = core_out.shape
-        flat = core_out.reshape(B * T, H)
-
+        B, T, H = core_out.out.shape
+        flat = core_out.out.reshape(B * T, H)
         logits = self.actor(flat).view(B, T, -1)   # (B, T, A)
         values = self.critic(flat).view(B, T)      # (B, T)
 
@@ -199,10 +244,11 @@ class LSTMPPOPolicy(nn.Module):
         return PolicyOutput(
             logits=logits,
             values=values,
-            new_hxs=new_hxs,
-            new_cxs=new_cxs,
-            ar_loss=ar_loss,
-            tar_loss=tar_loss,
+            new_hxs=core_out.h,
+            new_cxs=core_out.c,
+            ar_loss=core_out.ar_loss,
+            tar_loss=core_out.tar_loss,
+            gates=core_out.gates
         )
 
     def act(self,
@@ -264,6 +310,17 @@ class LSTMPPOPolicy(nn.Module):
         logprobs = dist.log_prob(actions)     # (T, B)
         entropy = dist.entropy()              # (T, B)
 
+        """
+        Transpose to align gate driftwith:
+        - values (T, B)
+        - logprobs (T, B)
+        - entropy (T, B)"
+        """
+        i_gates = policy_output.gates.i_gates.transpose(0, 1) # (T, B, H)
+        f_gates = policy_output.gates.f_gates.transpose(0, 1)
+        g_gates = policy_output.gates.g_gates.transpose(0, 1)
+        o_gates = policy_output.gates.o_gates.transpose(0, 1)
+
         return PolicyEvalOutput(
             values=values,                    # (T, B)
             logprobs=logprobs,                # (T, B)
@@ -272,4 +329,8 @@ class LSTMPPOPolicy(nn.Module):
             new_cxs=policy_output.new_cxs,    # (B, H)
             ar_loss=policy_output.ar_loss,    # scalar
             tar_loss=policy_output.tar_loss,  # scalar
+            gates=LSTMGates(i_gates=i_gates,
+                            f_gates=f_gates,
+                            g_gates=g_gates,
+                            o_gates=o_gates)
         )

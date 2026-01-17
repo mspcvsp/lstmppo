@@ -282,6 +282,21 @@ class VecEnvState:
                            self.hxs.detach(),
                            self.cxs.detach())
 
+@dataclass
+class LSTMGates:
+    i_gates:torch.Tensor
+    f_gates:torch.Tensor
+    g_gates:torch.Tensor
+    o_gates:torch.Tensor
+
+    @property
+    def detached(self):
+        return LSTMGates(
+            i_gates=self.i_gates.detach(),
+            f_gates=self.f_gates.detach(),
+            g_gates=self.g_gates.detach(),
+            o_gates=self.o_gates.detach()
+        )
 
 @dataclass
 class PolicyOutput:
@@ -291,6 +306,7 @@ class PolicyOutput:
     new_cxs: torch.Tensor      # (B,H)
     ar_loss: torch.Tensor      # scalar
     tar_loss: torch.Tensor     # scalar
+    gates: LSTMGates
 
     @property
     def detached(self):
@@ -301,12 +317,22 @@ class PolicyOutput:
             new_cxs=self.new_cxs.detach(),
             ar_loss=self.ar_loss.detach(),
             tar_loss=self.tar_loss.detach(),
+            gates=self.gates.detached
         )
 
 @dataclass
 class LSTMStates:
     hxs: torch.Tensor
     cxs: torch.Tensor
+
+@dataclass
+class LSTMCoreOutput:
+    out: torch.Tensor
+    h: torch.Tensor
+    c: torch.Tensor
+    ar_loss: torch.Tensor
+    tar_loss: torch.Tensor
+    gates: LSTMGates
 
 
 @dataclass
@@ -326,6 +352,7 @@ class PolicyEvalOutput:
     new_cxs: torch.Tensor   # (B,H)
     ar_loss: torch.Tensor   # scalar
     tar_loss: torch.Tensor  # scalar
+    gates: LSTMGates
 
 
 @dataclass
