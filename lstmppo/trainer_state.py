@@ -10,7 +10,8 @@ from rich.text import Text
 
 
 from torch.utils.tensorboard import SummaryWriter
-from .types import Config, PolicyUpdateInfo, EpisodeStats
+from .types import Config, MetricsHistory, PolicyUpdateInfo
+from .types import EpisodeStats, MetricsHistory
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
 
 
@@ -27,11 +28,6 @@ class TrainerState:
     jsonl_file: str
     jsonl_fp: io.TextIOWrapper
     validation_mode: bool
-    ep_len_history: list
-    ep_return_history: list
-    kl_history: list
-    entropy_history: list
-    ev_history: list
 
     def __init__(self,
                  cfg: Config,
@@ -87,28 +83,9 @@ class TrainerState:
         self.prev_g_mean = None
         self.prev_o_mean = None
 
-        self.ep_len_history = []
-        self.ep_return_history = []
-        self.kl_history = []
-        self.entropy_history = []
-        self.ev_history = []
-        self.policy_drift_history = []
-        self.value_drift_history = []
-        self.h_norm_history = []
-        self.c_norm_history = []
-        self.h_drift_history = []
-        self.c_drift_history = []
-
-        # LSTM Gate metrics
-        self.i_mean_history = []
-        self.f_mean_history = []
-        self.g_mean_history = []
-        self.o_mean_history = []
-
-        self.i_drift_history = []
-        self.f_drift_history = []
-        self.g_drift_history = []
-        self.o_drift_history = []
+        self.history = MetricsHistory(
+            max_len=self.cfg.trainer.max_sparkline_history
+        )
 
     def reset(self,
               total_updates: int):
@@ -162,33 +139,30 @@ class TrainerState:
         self.stats["g_drift"] += upd.g_drift
         self.stats["o_drift"] += upd.o_drift
 
-        self.i_mean_history.append(upd.i_mean.item())
-        self.f_mean_history.append(upd.f_mean.item())
-        self.g_mean_history.append(upd.g_mean.item())
-        self.o_mean_history.append(upd.o_mean.item())
+        self.history.push("kl", upd.approx_kl.item())
+        self.history.push("entropy", upd.entropy.item())
 
-        self.i_drift_history.append(upd.i_drift.item())
-        self.f_drift_history.append(upd.f_drift.item())
-        self.g_drift_history.append(upd.g_drift.item())
-        self.o_drift_history.append(upd.o_drift.item())
+        self.history.push("explained_var",
+                          self.stats.get("explained_var", 0.0))
 
-        self.kl_history.append(upd.approx_kl.item())
-        self.entropy_history.append(upd.entropy.item())
-        self.ev_history.append(self.stats.get("explained_var", 0.0))
+        self.history.push("i_mean", upd.i_mean.item())
+        self.history.push("f_mean", upd.f_mean.item())
+        self.history.push("g_mean", upd.g_mean.item())
+        self.history.push("o_mean", upd.o_mean.item())
 
-        self.policy_drift_history.append(upd.policy_drift.item())
-        self.value_drift_history.append(upd.value_drift.item())
-        self.h_norm_history.append(upd.h_norm.item())
-        self.c_norm_history.append(upd.c_norm.item())
-        self.h_drift_history.append(upd.h_drift.item())
-        self.c_drift_history.append(upd.c_drift.item())
+        self.history.push("i_drift", upd.i_drift.item())
+        self.history.push("f_drift", upd.f_drift.item())
+        self.history.push("g_drift", upd.g_drift.item())
+        self.history.push("o_drift", upd.o_drift.item())
 
-        for key, value in self.__dict__.items():
-            
-            if (key.endswith("_history") and
-                len(value) > self.cfg.trainer.max_sparkline_history):
+        self.history.push("policy_drift", upd.policy_drift.item())
+        self.history.push("value_drift", upd.value_drift.item())
 
-                value.pop(0)
+        self.history.push("h_norm", upd.h_norm.item())
+        self.history.push("c_norm", upd.c_norm.item())
+
+        self.history.push("h_drift", upd.h_drift.item())
+        self.history.push("c_drift", upd.c_drift.item())
 
         self.stats["steps"] += 1
 
@@ -205,14 +179,8 @@ class TrainerState:
         self.stats["avg_ep_returns"] = ep_stats.avg_ep_returns
 
         # ---- Sparkline history tracking ----
-        self.ep_len_history.append(ep_stats.avg_ep_len)
-        self.ep_return_history.append(ep_stats.avg_ep_returns)
-
-        if len(self.ep_len_history) > self.cfg.trainer.max_sparkline_history:
-            self.ep_len_history.pop(0)
-
-        if len(self.ep_return_history) > self.cfg.trainer.max_sparkline_history:
-            self.ep_return_history.pop(0)
+        self.history.push("ep_len", ep_stats.avg_ep_len)
+        self.history.push("ep_return", ep_stats.avg_ep_returns)
 
         # ---- Exponential Moving Average ----
         ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
@@ -513,71 +481,71 @@ class TrainerState:
         ppo_text.append("\n Return Trend: ",
                         style="bold cyan")
         
-        ppo_text.append(sparkline(self.ep_return_history),
+        ppo_text.append(sparkline(self.history.ep_return),
                         style="cyan")
 
         ppo_text.append("\n KL Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.kl_history,
+        ppo_text.append(sparkline(self.history.kl,
                                   width=20),
                                   style="cyan")
 
         ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.entropy_history,
+        ppo_text.append(sparkline(self.history.entropy,
                                   width=20),
                                   style="magenta")
 
         ppo_text.append("\n EV Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.ev_history,
+        ppo_text.append(sparkline(self.history.explained_var,
                                   width=20),
                                   style="green")
 
         ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.policy_drift_history),
+        ppo_text.append(sparkline(self.history.policy_drift),
                         style="cyan")
 
         ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.value_drift_history),
+        ppo_text.append(sparkline(self.history.value_drift),
                         style="green")
 
         ppo_text.append("\n h-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.h_norm_history),
+        ppo_text.append(sparkline(self.history.h_norm),
                         style="cyan")
 
         ppo_text.append("\n c-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.c_norm_history),
+        ppo_text.append(sparkline(self.history.c_norm),
                         style="cyan")
 
         ppo_text.append("\n h-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.h_drift_history),
+        ppo_text.append(sparkline(self.history.h_drift),
                         style="green")
 
         ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.c_drift_history),
+        ppo_text.append(sparkline(self.history.c_drift),
                         style="green")
 
         ppo_text.append("\n i-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.i_mean_history), style="cyan")
+        ppo_text.append(sparkline(self.history.i_mean), style="cyan")
 
         ppo_text.append("\n f-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.f_mean_history), style="cyan")
+        ppo_text.append(sparkline(self.history.f_mean), style="cyan")
 
         ppo_text.append("\n g-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.g_mean_history), style="cyan")
+        ppo_text.append(sparkline(self.history.g_mean), style="cyan")
 
         ppo_text.append("\n o-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.o_mean_history), style="cyan")
+        ppo_text.append(sparkline(self.history.o_mean), style="cyan")
 
         ppo_text.append("\n i-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.i_drift_history), style="green")
+        ppo_text.append(sparkline(self.history.i_drift), style="green")
 
         ppo_text.append("\n f-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.f_drift_history), style="green")
+        ppo_text.append(sparkline(self.history.f_drift), style="green")
 
         ppo_text.append("\n g-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.g_drift_history), style="green")
+        ppo_text.append(sparkline(self.history.g_drift), style="green")
 
         ppo_text.append("\n o-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.o_drift_history), style="green")
+        ppo_text.append(sparkline(self.history.o_drift), style="green")
 
         ppo_panel = Panel(ppo_text,
                           title="PPO Metrics",
@@ -612,8 +580,8 @@ class TrainerState:
         
         ep_text.append("\n Length Trend: ",
                        style="bold cyan")
-        
-        ep_text.append(sparkline(self.ep_len_history),
+
+        ep_text.append(sparkline(self.history.ep_len),
                        style="cyan")
 
         ep_panel = Panel(ep_text,

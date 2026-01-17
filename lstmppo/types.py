@@ -383,6 +383,56 @@ class PolicyUpdateInfo:
     lstm_gate_metrics: LSTMGateMetrics
 
 
+@dataclass
+class EpisodeStats:
+    episodes: int
+    alive_envs: int
+    max_ep_len: int
+    avg_ep_len: float
+    max_ep_returns: float
+    avg_ep_returns: float
+
+
+@dataclass
+class MetricsHistory:
+    max_len: int
+
+    ep_len: list = field(default_factory=list)
+    ep_return: list = field(default_factory=list)
+
+    kl: list = field(default_factory=list)
+    entropy: list = field(default_factory=list)
+    explained_var: list = field(default_factory=list)
+
+    policy_drift: list = field(default_factory=list)
+    value_drift: list = field(default_factory=list)
+
+    h_norm: list = field(default_factory=list)
+    c_norm: list = field(default_factory=list)
+    h_drift: list = field(default_factory=list)
+    c_drift: list = field(default_factory=list)
+
+    i_mean: list = field(default_factory=list)
+    f_mean: list = field(default_factory=list)
+    g_mean: list = field(default_factory=list)
+    o_mean: list = field(default_factory=list)
+
+    i_drift: list = field(default_factory=list)
+    f_drift: list = field(default_factory=list)
+    g_drift: list = field(default_factory=list)
+    o_drift: list = field(default_factory=list)
+
+    def push(self,
+             name: str,
+             value: float):
+
+        hist = getattr(self, name)
+        hist.append(value)
+
+        if len(hist) > self.max_len:
+            hist.pop(0)
+
+
 def initialize_config(cfg: Config,
                       **kwargs):
 
@@ -409,11 +459,3 @@ def initialize_config(cfg: Config,
     return cfg
 
 
-@dataclass
-class EpisodeStats:
-    episodes: int
-    alive_envs: int
-    max_ep_len: int
-    avg_ep_len: float
-    max_ep_returns: float
-    avg_ep_returns: float
