@@ -395,125 +395,6 @@ class EpisodeStats:
 
 
 @dataclass
-class MetricsHistory:
-    max_len: int
-
-    ep_len: list = field(default_factory=list)
-    ep_return: list = field(default_factory=list)
-
-    kl: list = field(default_factory=list)
-    entropy: list = field(default_factory=list)
-    explained_var: list = field(default_factory=list)
-
-    policy_drift: list = field(default_factory=list)
-    value_drift: list = field(default_factory=list)
-
-    h_norm: list = field(default_factory=list)
-    c_norm: list = field(default_factory=list)
-    h_drift: list = field(default_factory=list)
-    c_drift: list = field(default_factory=list)
-
-    i_mean: list = field(default_factory=list)
-    f_mean: list = field(default_factory=list)
-    g_mean: list = field(default_factory=list)
-    o_mean: list = field(default_factory=list)
-
-    i_drift: list = field(default_factory=list)
-    f_drift: list = field(default_factory=list)
-    g_drift: list = field(default_factory=list)
-    o_drift: list = field(default_factory=list)
-
-    def push(self,
-             name: str,
-             value: float):
-
-        hist = getattr(self, name)
-        hist.append(value)
-
-        if len(hist) > self.max_len:
-            hist.pop(0)
-
-    def render_ppo_history(self,
-                           ppo_text: Text):
-
-        ppo_text.append("\n Return Trend: ",
-                        style="bold cyan")
-        
-        ppo_text.append(sparkline(self.ep_return),
-                        style="cyan")
-
-        ppo_text.append("\n KL Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.kl,
-                                  width=20),
-                                  style="cyan")
-
-        ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.entropy,
-                                  width=20),
-                                  style="magenta")
-
-        ppo_text.append("\n EV Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.explained_var,
-                                  width=20),
-                                  style="green")
-
-        ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.policy_drift),
-                        style="cyan")
-
-        ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.value_drift),
-                        style="green")
-
-        ppo_text.append("\n h-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.h_norm),
-                        style="cyan")
-
-        ppo_text.append("\n c-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.c_norm),
-                        style="cyan")
-
-        ppo_text.append("\n h-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.h_drift),
-                        style="green")
-
-        ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.c_drift),
-                        style="green")
-
-        ppo_text.append("\n i-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.i_mean), style="cyan")
-        ppo_text.append("\n f-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.f_mean), style="cyan")
-
-        ppo_text.append("\n g-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.g_mean), style="cyan")
-
-        ppo_text.append("\n o-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.o_mean), style="cyan")
-
-        ppo_text.append("\n i-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.i_drift), style="green")
-
-        ppo_text.append("\n f-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.f_drift), style="green")
-
-        ppo_text.append("\n g-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.g_drift), style="green")
-
-        ppo_text.append("\n o-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.o_drift), style="green")
-
-    def render_episode_history(self,
-                               ep_text: Text):
-
-        ep_text.append("\n Length Trend: ",
-                       style="bold cyan")
-
-        ep_text.append(sparkline(self.ep_len),
-                       style="cyan")
-
-@dataclass
 class Metrics:
     policy_loss: float = 0.0
     value_loss: float = 0.0
@@ -725,6 +606,152 @@ class Metrics:
                        style="bold green")
 
         return ep_text
+
+
+@dataclass
+class MetricsHistory:
+    max_len: int
+
+    ep_len: list = field(default_factory=list)
+    ep_return: list = field(default_factory=list)
+
+    kl: list = field(default_factory=list)
+    entropy: list = field(default_factory=list)
+    explained_var: list = field(default_factory=list)
+
+    policy_drift: list = field(default_factory=list)
+    value_drift: list = field(default_factory=list)
+
+    h_norm: list = field(default_factory=list)
+    c_norm: list = field(default_factory=list)
+    h_drift: list = field(default_factory=list)
+    c_drift: list = field(default_factory=list)
+
+    i_mean: list = field(default_factory=list)
+    f_mean: list = field(default_factory=list)
+    g_mean: list = field(default_factory=list)
+    o_mean: list = field(default_factory=list)
+
+    i_drift: list = field(default_factory=list)
+    f_drift: list = field(default_factory=list)
+    g_drift: list = field(default_factory=list)
+    o_drift: list = field(default_factory=list)
+
+    def update(self,
+               upd: PolicyUpdateInfo,
+               stats: Metrics):
+
+        self.push("kl", upd.approx_kl.item())
+        self.push("explained_var", stats.explained_var)
+
+        tracked_items = ["entropy",
+                         "i_mean",
+                         "f_mean",
+                         "g_mean",
+                         "o_mean",
+                         "i_drift",
+                         "f_drift",
+                         "g_drift",
+                         "o_drift",
+                         "policy_drift",
+                         "value_drift",
+                         "h_norm",
+                         "c_norm",
+                         "h_drift",
+                         "c_drift"]
+        
+        for attrib in tracked_items:
+            self.push(attrib, getattr(upd, attrib).item())
+
+    def push(self,
+             name: str,
+             value: float):
+
+        hist = getattr(self, name)
+        hist.append(value)
+
+        if len(hist) > self.max_len:
+            hist.pop(0)
+
+    def render_ppo_history(self,
+                           ppo_text: Text):
+
+        ppo_text.append("\n Return Trend: ",
+                        style="bold cyan")
+        
+        ppo_text.append(sparkline(self.ep_return),
+                        style="cyan")
+
+        ppo_text.append("\n KL Trend:    ", style="bold cyan")
+        ppo_text.append(sparkline(self.kl,
+                                  width=20),
+                                  style="cyan")
+
+        ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.entropy,
+                                  width=20),
+                                  style="magenta")
+
+        ppo_text.append("\n EV Trend:    ", style="bold cyan")
+        ppo_text.append(sparkline(self.explained_var,
+                                  width=20),
+                                  style="green")
+
+        ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.policy_drift),
+                        style="cyan")
+
+        ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.value_drift),
+                        style="green")
+
+        ppo_text.append("\n h-norm Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.h_norm),
+                        style="cyan")
+
+        ppo_text.append("\n c-norm Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.c_norm),
+                        style="cyan")
+
+        ppo_text.append("\n h-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.h_drift),
+                        style="green")
+
+        ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.c_drift),
+                        style="green")
+
+        ppo_text.append("\n i-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.i_mean), style="cyan")
+        ppo_text.append("\n f-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.f_mean), style="cyan")
+
+        ppo_text.append("\n g-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.g_mean), style="cyan")
+
+        ppo_text.append("\n o-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.o_mean), style="cyan")
+
+        ppo_text.append("\n i-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.i_drift), style="green")
+
+        ppo_text.append("\n f-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.f_drift), style="green")
+
+        ppo_text.append("\n g-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.g_drift), style="green")
+
+        ppo_text.append("\n o-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.o_drift), style="green")
+
+    def render_episode_history(self,
+                               ep_text: Text):
+
+        ep_text.append("\n Length Trend: ",
+                       style="bold cyan")
+
+        ep_text.append(sparkline(self.ep_len),
+                       style="cyan")
 
 def initialize_config(cfg: Config,
                       **kwargs):

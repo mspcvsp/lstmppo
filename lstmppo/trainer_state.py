@@ -121,30 +121,7 @@ class TrainerState:
         """
         self.stats.accumulate(upd)
 
-        self.history.push("kl", upd.approx_kl.item())
-        self.history.push("entropy", upd.entropy.item())
-
-        self.history.push("explained_var",
-                          self.stats.get("explained_var", 0.0))
-
-        self.history.push("i_mean", upd.i_mean.item())
-        self.history.push("f_mean", upd.f_mean.item())
-        self.history.push("g_mean", upd.g_mean.item())
-        self.history.push("o_mean", upd.o_mean.item())
-
-        self.history.push("i_drift", upd.i_drift.item())
-        self.history.push("f_drift", upd.f_drift.item())
-        self.history.push("g_drift", upd.g_drift.item())
-        self.history.push("o_drift", upd.o_drift.item())
-
-        self.history.push("policy_drift", upd.policy_drift.item())
-        self.history.push("value_drift", upd.value_drift.item())
-
-        self.history.push("h_norm", upd.h_norm.item())
-        self.history.push("c_norm", upd.c_norm.item())
-
-        self.history.push("h_drift", upd.h_drift.item())
-        self.history.push("c_drift", upd.c_drift.item())
+        self.history.update(upd)
 
     def update_episode_stats(self,
                              ep_stats: EpisodeStats):
