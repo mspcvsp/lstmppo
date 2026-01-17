@@ -23,7 +23,6 @@ class TrainerState:
     clip_range: float
     target_kl: float
     early_stopping_kl: float
-    stats: dict
     writer: SummaryWriter
     jsonl_file: str
     jsonl_fp: io.TextIOWrapper
@@ -166,7 +165,7 @@ class TrainerState:
         • 	schedules are applied
         • 	clip range adaptation is applied
         """
-        kl = float(self.metrics.get("approx_kl", 0.0))
+        kl = getattr(self.metrics, "approx_kl", 0.0)
         target = float(self.target_kl)
 
         # Only activate after warmup
@@ -177,14 +176,14 @@ class TrainerState:
         if kl > 3.0 * target:
             self.lr *= 0.9
             self.clip_range *= 0.9
-            self.metrics["kl_watchdog_triggered"] = 1
+            setattr(self.metrics, "kl_watchdog_triggered", 1)
 
         # If KL is too low, increase clip range slightly
         elif kl < 0.3 * target:
             self.clip_range *= 1.05
-            self.metrics["kl_watchdog_triggered"] = 1
+            setattr(self.metrics, "kl_watchdog_triggered", 1)
         else:
-            self.metrics["kl_watchdog_triggered"] = 0
+            setattr(self.metrics, "kl_watchdog_triggered", 0)
 
         # Clamp clip range to safe bounds
         self.clip_range = float(
