@@ -251,7 +251,64 @@ class TrainerState:
     def apply_schedules(self,
                         optimizer: torch.optim.Adam):
 
-        self.entropy_coef = self._entropy_sch(self.update_idx)
+        """
+        Instead of decaying entropy on a fixed schedule, adaptive entropy 
+        adjusts itself based on KL divergence:
+
+        • 	If KL is too low → policy isn’t changing → increase entropy
+        (more exploration)
+        
+        • 	If KL is too high → policy is changing too fast → decrease
+        entropy (more caution)
+
+        This keeps exploration self‑tuning and dramatically stabilizes POMDPs
+        like Position‑Only CartPole.
+        """
+        if self.cfg.sched.anneal_entropy_flag:
+
+            # Start with scheduled value
+            scheduled = self._entropy_sch(self.update_idx)
+            old_entropy = self.entropy_coef
+            self.entropy_coef = scheduled
+
+            # Reset logging flags
+            self.stats["entropy_adjusted"] = 0
+            self.stats["entropy_up"] = 0
+            self.stats["entropy_down"] = 0
+
+            # Adaptive adjustment based on KL
+            kl = float(self.stats.get("approx_kl", 0.0))
+            target = float(self.target_kl)
+
+            if self.update_idx > 10:  # warmup
+                
+                if kl < 0.5 * target:
+
+                    self.entropy_coef *= 1.02
+                    self.stats["entropy_adjusted"] = 1
+                    self.stats["entropy_up"] = 1
+
+                elif kl > 2.0 * target:
+    
+                    self.entropy_coef *= 0.98
+                    self.stats["entropy_adjusted"] = 1
+                    self.stats["entropy_down"] = 1
+
+            # Clamp entropy coefficient
+            self.entropy_coef = float(
+                torch.clamp(torch.tensor(self.entropy_coef),
+                            1e-4,
+                            1.0)
+            )
+
+            # Log the delta (optional but very useful)
+            self.stats["entropy_delta"] =\
+                float(self.entropy_coef - old_entropy)
+            
+            self.stats["entropy_scheduled"] = float(scheduled)
+        else:
+            self.entropy_coef = self.cfg.sched.start_entropy_coef
+
         self.lr = self._lr_sch(self.update_idx)
 
         self.writer.add_scalar("entropy_coef",
