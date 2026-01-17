@@ -241,7 +241,7 @@ class LSTMPPOTrainer:
 
                     self.optimize_chunk(mb)
 
-        self.compute_explained_variance()
+        self.state.compute_explained_variance(self.buffer)
 
         self.state.compute_average_metrics()
 
@@ -485,22 +485,6 @@ class LSTMPPOTrainer:
         self.optimizer.step()
 
         return grad_norm
-
-    def compute_explained_variance(self):
-
-        #  ----- Compute EV over the entire rollout  -----
-        all_values = self.buffer.values.view(-1)
-        all_returns = self.buffer.returns.view(-1)
-
-        valid = self.buffer.mask.view(-1) > 0.5
-
-        if valid.sum() == 0:
-            self.state.stats["explained_var"] = 0.0
-        else:
-            ev = explained_variance(all_values[valid],
-                                    all_returns[valid])
-
-            self.state.stats["explained_var"] = ev.item()
 
     def save_checkpoint(self):
 
@@ -756,10 +740,6 @@ LSTMPPOTrainer.render_policy_stability = render_policy_stability
 LSTMPPOTrainer.render_value_drift = render_value_drift
 LSTMPPOTrainer.render_histogram = render_histogram
 LSTMPPOTrainer.render_env_timelines = render_env_timelines
-
-def explained_variance(y_pred, y_true):
-    var_y = torch.var(y_true)
-    return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)
 
 
 def train(total_updates=2000):

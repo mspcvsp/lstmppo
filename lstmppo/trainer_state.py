@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from .types import Config, MetricsHistory, PolicyUpdateInfo
 from .types import EpisodeStats, Metrics, MetricsHistory
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
-
+from .buffer import RecurrentRolloutBuffer
 
 @dataclass
 class TrainerState:
@@ -148,6 +148,26 @@ class TrainerState:
 
         if self.metrics.steps > 0:
             self.metrics.normalize()
+
+    def compute_explained_variance(self,
+                                   buffer: RecurrentRolloutBuffer):
+
+        #  ----- Compute EV over the entire rollout  -----
+        all_values = buffer.values.view(-1)
+        all_returns = buffer.returns.view(-1)
+
+        valid = buffer.mask.view(-1) > 0.5
+
+        if valid.sum() == 0:
+            setattr(self.metrics, "explained_var", 0.0)
+        else:
+            ev = explained_variance(all_values[valid],
+                                    all_returns[valid])
+
+            setattr(self.metrics, "explained_var", ev.item())
+
+        self.history.push("explained_var",
+                          self.metrics.explained_var)
 
     @property
     def global_step(self) -> int:
@@ -298,11 +318,14 @@ class TrainerState:
 
         if self.cfg.trainer.debug_mode is False:
 
-            avg_kl = self.metrics["approx_kl"]
+            avg_kl = self.metrics.approx_kl
 
             if avg_kl > 2.0 * self.cfg.ppo.target_kl:
+            
                 self.clip_range *= 0.9
+            
             elif avg_kl < 0.5 * self.cfg.ppo.target_kl:
+            
                 self.clip_range *= 1.05
 
             self.clip_range = float(torch.clamp(
@@ -356,3 +379,8 @@ class TrainerState:
 
 def to_float(x):
     return x.item() if isinstance(x, torch.Tensor) else float(x)
+
+
+def explained_variance(y_pred, y_true):
+    var_y = torch.var(y_true)
+    return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)

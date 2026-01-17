@@ -429,6 +429,7 @@ class Metrics:
     o_drift: float = 0.0
 
     explained_var: float = 0.0
+    kl_watchdog_triggered: int = 0
     steps: int = 0
 
     def accumulate(self,
@@ -658,7 +659,6 @@ class MetricsHistory:
                stats: Metrics):
 
         self.push("kl", upd.approx_kl.item())
-        self.push("explained_var", stats.explained_var)
 
         gate = upd.lstm_gate_metrics
 
