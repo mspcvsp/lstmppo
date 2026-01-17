@@ -246,6 +246,8 @@ class LSTMPPOTrainer:
 
         self.state.adapt_clip_range()
 
+        self.state.kl_watchdog()
+
         self.state.log_metrics()
 
     def optimize_chunk(self,

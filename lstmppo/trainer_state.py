@@ -182,6 +182,41 @@ class TrainerState:
             self.cfg.env.num_envs
         )
 
+    def kl_watchdog(self):
+        """
+        KL is only meaningful after:
+        • 	all minibatches are processed
+        • 	stats are averaged
+        • 	schedules are applied
+        • 	clip range adaptation is applied
+        """
+        kl = float(self.stats.get("approx_kl", 0.0))
+        target = float(self.target_kl)
+
+        # Only activate after warmup
+        if self.update_idx < 10:
+            return
+
+        # If KL is too high, reduce LR and clip range
+        if kl > 3.0 * target:
+            self.lr *= 0.9
+            self.clip_range *= 0.9
+            self.stats["kl_watchdog_triggered"] = 1
+
+        # If KL is too low, increase clip range slightly
+        elif kl < 0.3 * target:
+            self.clip_range *= 1.05
+            self.stats["kl_watchdog_triggered"] = 1
+        else:
+            self.stats["kl_watchdog_triggered"] = 0
+
+        # Clamp clip range to safe bounds
+        self.clip_range = float(
+            torch.clamp(torch.tensor(self.clip_range),
+                        0.05,
+                        0.3)
+        )
+
     def log_metrics(self):
 
         for key, value in self.stats.items():
