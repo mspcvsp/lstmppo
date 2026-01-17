@@ -35,7 +35,7 @@ class TrainerState:
 
         self.cfg = cfg
         self.validation_mode = validation_mode
-        self.stats = Metrics()
+        self.metrics = Metrics()
 
         if self.validation_mode:
 
@@ -119,14 +119,14 @@ class TrainerState:
         - bad initialization
         - DropConnect issues
         """
-        self.stats.accumulate(upd)
+        self.metrics.accumulate(upd)
 
-        self.history.update(upd)
+        self.history.update(upd, self.metrics)
 
     def update_episode_stats(self,
                              ep_stats: EpisodeStats):
 
-        self.stats.update_episode_stats(ep_stats)
+        self.metrics.update_episode_stats(ep_stats)
         
         # ---- Exponential Moving Average 
         ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
@@ -145,24 +145,10 @@ class TrainerState:
         self.history.push("ep_len", ep_stats.avg_ep_len)
         self.history.push("ep_return", ep_stats.avg_ep_returns)
 
-    def compute_average_stats(self):
+    def compute_average_metrics(self):
 
-        if self.stats["steps"] > 0:
-
-            norm_factor = 1.0 / self.stats["steps"]
-
-            for key in [key for key in self.stats.keys()
-                        if key not in ["steps",
-                                       "episodes",
-                                       "alive_envs",
-                                       "max_ep_len",
-                                       "avg_ep_len",
-                                       "avg_ep_len_ema",
-                                       "max_ep_returns",
-                                       "avg_ep_returns",
-                                       "avg_ep_returns_ema"]]:
-
-                self.stats[key] *= norm_factor
+        if self.metrics.steps > 0:
+            self.metrics.normalize()
 
     @property
     def global_step(self) -> int:
@@ -180,7 +166,7 @@ class TrainerState:
         • 	schedules are applied
         • 	clip range adaptation is applied
         """
-        kl = float(self.stats.get("approx_kl", 0.0))
+        kl = float(self.metrics.get("approx_kl", 0.0))
         target = float(self.target_kl)
 
         # Only activate after warmup
@@ -191,14 +177,14 @@ class TrainerState:
         if kl > 3.0 * target:
             self.lr *= 0.9
             self.clip_range *= 0.9
-            self.stats["kl_watchdog_triggered"] = 1
+            self.metrics["kl_watchdog_triggered"] = 1
 
         # If KL is too low, increase clip range slightly
         elif kl < 0.3 * target:
             self.clip_range *= 1.05
-            self.stats["kl_watchdog_triggered"] = 1
+            self.metrics["kl_watchdog_triggered"] = 1
         else:
-            self.stats["kl_watchdog_triggered"] = 0
+            self.metrics["kl_watchdog_triggered"] = 0
 
         # Clamp clip range to safe bounds
         self.clip_range = float(
@@ -209,13 +195,13 @@ class TrainerState:
 
     def log_metrics(self):
 
-        for key, value in self.stats.items():
+        record = self.stats.to_dict()
+
+        for key, value in record.items():
 
             self.writer.add_scalar(key,
                                    value,
                                    self.global_step)
-
-        record = {k: to_float(v) for k, v in self.stats.items()}
 
         record["update"] = self.update_idx
         record["lr"] = float(self.lr)
@@ -226,7 +212,7 @@ class TrainerState:
         self.jsonl_fp.flush()
 
     def init_stats(self):
-        self.stats.initialize()
+        self.metrics.initialize()
 
     def apply_schedules(self,
                         optimizer: torch.optim.Adam):
@@ -252,12 +238,12 @@ class TrainerState:
             self.entropy_coef = scheduled
 
             # Reset logging flags
-            self.stats.entropy_adjusted = 0
-            self.stats.entropy_up = 0
-            self.stats.entropy_down = 0
+            self.metrics.entropy_adjusted = 0
+            self.metrics.entropy_up = 0
+            self.metrics.entropy_down = 0
 
             # Adaptive adjustment based on KL
-            kl = float(self.stats.get("approx_kl", 0.0))
+            kl = float(self.metrics.get("approx_kl", 0.0))
             target = float(self.target_kl)
 
             if self.update_idx > 10:  # warmup
@@ -265,14 +251,14 @@ class TrainerState:
                 if kl < 0.5 * target:
 
                     self.entropy_coef *= 1.02
-                    self.stats.entropy_adjusted = 1
-                    self.stats.entropy_up = 1
+                    self.metrics.entropy_adjusted = 1
+                    self.metrics.entropy_up = 1
 
                 elif kl > 2.0 * target:
     
                     self.entropy_coef *= 0.98
-                    self.stats.entropy_adjusted = 1
-                    self.stats.entropy_down = 1
+                    self.metrics.entropy_adjusted = 1
+                    self.metrics.entropy_down = 1
 
             # Clamp entropy coefficient
             self.entropy_coef = float(
@@ -282,13 +268,13 @@ class TrainerState:
             )
 
             # Log the delta (optional but very useful)
-            self.stats.entropy_delta =\
+            self.metrics.entropy_delta =\
                 float(self.entropy_coef - old_entropy)
 
-            self.stats.entropy_scheduled = float(scheduled)
+            self.metrics.entropy_scheduled = float(scheduled)
         else:
             self.entropy_coef = self.cfg.sched.start_entropy_coef
-            self.stats.entropy_scheduled = self.entropy_coef
+            self.metrics.entropy_scheduled = self.entropy_coef
 
         self.lr = self._lr_sch(self.update_idx)
 
@@ -307,7 +293,7 @@ class TrainerState:
 
         if self.cfg.trainer.debug_mode is False:
 
-            avg_kl = self.stats["approx_kl"]
+            avg_kl = self.metrics["approx_kl"]
 
             if avg_kl > 2.0 * self.cfg.ppo.target_kl:
                 self.clip_range *= 0.9
@@ -327,7 +313,9 @@ class TrainerState:
         
     def render_dashboard(self):
         
-        ppo_text = self.stats.render_ppo_metrics()
+        ppo_text = self.metrics.render_ppo_metrics(self.lr,
+                                                 self.entropy_coef,
+                                                 self.clip_range)
 
         self.history.render_ppo_history(ppo_text)
 
@@ -335,7 +323,7 @@ class TrainerState:
                           title="PPO Metrics",
                           border_style="bright_blue")
 
-        ep_text = self.stats.render_episode_stats()
+        ep_text = self.metrics.render_episode_stats()
 
         self.history.render_episode_history(ep_text)
 

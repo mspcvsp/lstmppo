@@ -481,9 +481,20 @@ class Metrics:
 
         factor = 1.0 / self.steps
 
+        EXCLUDE = {
+            "steps",
+            "episodes",
+            "alive_envs",
+            "max_ep_len",
+            "avg_ep_len",
+            "max_ep_returns",
+            "avg_ep_returns"
+        }
+
+        # Normalize metrics accumulated across minibatches
         for field in self.__dataclass_fields__:
 
-            if field not in ("steps",):
+            if field not in EXCLUDE:
                 setattr(self, field, getattr(self, field) * factor)
 
     def initialize(self):
@@ -498,7 +509,10 @@ class Metrics:
     def to_dict(self):
         return {k: float(getattr(self, k)) for k in self.__dataclass_fields__}
 
-    def render_ppo_metrics(self):
+    def render_ppo_metrics(self,
+                           lr: float,
+                           entropy_coef: float,
+                           clip_range: float):
 
         # PPO metrics panel
         ppo_text = Text()
@@ -524,13 +538,13 @@ class Metrics:
         ppo_text.append(f" ExplainedV: {self.explained_var:.3e}\n",
                         style="bold yellow")
         
-        ppo_text.append(f" LR:         {self.lr:.2e}\n",
+        ppo_text.append(f" LR:         {lr:.2e}\n",
                         style="bold yellow")
         
-        ppo_text.append(f" EntCoef:    {self.entropy_coef:.2e}\n",
+        ppo_text.append(f" EntCoef:    {entropy_coef:.2e}\n",
                         style="bold yellow")
         
-        ppo_text.append(f" ClipRange:  {self.clip_range:.2e}\n",
+        ppo_text.append(f" ClipRange:  {clip_range:.2e}\n",
                         style="bold yellow")
                 
         ppo_text.append(f" PolDrift:  {self.policy_drift:.3e}\n",
@@ -577,7 +591,9 @@ class Metrics:
 
         return ppo_text
     
-    def render_episode_stats(self):
+    def render_episode_stats(self,
+                             avg_ep_len_ema: float,
+                             avg_ep_returns_ema: float):
 
         ep_text = Text()
 
@@ -593,7 +609,7 @@ class Metrics:
         ep_text.append(f" AvgEpLen:   {self.avg_ep_len:.1f}\n",
                        style="bold green")
 
-        ep_text.append(f" EMA Len:    {self.avg_ep_len_ema:.1f}\n",
+        ep_text.append(f" EMA Len:    {avg_ep_len_ema:.1f}\n",
                        style="bold green")
         
         ep_text.append(f" MaxReturn:  {self.max_ep_returns:.2f}\n",
@@ -602,7 +618,7 @@ class Metrics:
         ep_text.append(f" AvgReturn:  {self.avg_ep_returns:.2f}\n",
                        style="bold green")
         
-        ep_text.append(f" EMA Return: {self.avg_ep_returns_ema:.2f}\n",
+        ep_text.append(f" EMA Return: {avg_ep_returns_ema:.2f}\n",
                        style="bold green")
 
         return ep_text
@@ -644,24 +660,28 @@ class MetricsHistory:
         self.push("kl", upd.approx_kl.item())
         self.push("explained_var", stats.explained_var)
 
-        tracked_items = ["entropy",
-                         "i_mean",
-                         "f_mean",
-                         "g_mean",
-                         "o_mean",
-                         "i_drift",
-                         "f_drift",
-                         "g_drift",
-                         "o_drift",
-                         "policy_drift",
-                         "value_drift",
-                         "h_norm",
-                         "c_norm",
-                         "h_drift",
-                         "c_drift"]
+        gate = upd.lstm_gate_metrics
+
+        mapping = {
+            "i_mean": gate.i_mean,
+            "f_mean": gate.f_mean,
+            "g_mean": gate.g_mean,
+            "o_mean": gate.o_mean,
+            "i_drift": gate.i_drift,
+            "f_drift": gate.f_drift,
+            "g_drift": gate.g_drift,
+            "o_drift": gate.o_drift,
+            "entropy": upd.entropy,
+            "policy_drift": upd.policy_drift,
+            "value_drift": upd.value_drift,
+            "h_norm": upd.h_norm,
+            "c_norm": upd.c_norm,
+            "h_drift": upd.h_drift,
+            "c_drift": upd.c_drift,
+        }
         
-        for attrib in tracked_items:
-            self.push(attrib, getattr(upd, attrib).item())
+        for name, tensor in mapping.items():
+            self.push(name, tensor.item())
 
     def push(self,
              name: str,

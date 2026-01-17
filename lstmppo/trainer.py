@@ -243,7 +243,7 @@ class LSTMPPOTrainer:
 
         self.compute_explained_variance()
 
-        self.state.compute_average_stats()
+        self.state.compute_average_metrics()
 
         self.state.adapt_clip_range()
 
