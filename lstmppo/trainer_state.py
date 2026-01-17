@@ -195,7 +195,7 @@ class TrainerState:
 
     def log_metrics(self):
 
-        record = self.stats.to_dict()
+        record = self.metrics.to_dict()
 
         for key, value in record.items():
 
@@ -243,7 +243,7 @@ class TrainerState:
             self.metrics.entropy_down = 0
 
             # Adaptive adjustment based on KL
-            kl = float(self.metrics.get("approx_kl", 0.0))
+            kl = getattr(self.metrics, "approx_kl", 0.0)
             target = float(self.target_kl)
 
             if self.update_idx > 10:  # warmup
@@ -251,14 +251,14 @@ class TrainerState:
                 if kl < 0.5 * target:
 
                     self.entropy_coef *= 1.02
-                    self.metrics.entropy_adjusted = 1
-                    self.metrics.entropy_up = 1
+                    setattr(self.metrics, "entropy_adjusted", 1)
+                    setattr(self.metrics, "entropy_up", 1)
 
                 elif kl > 2.0 * target:
     
                     self.entropy_coef *= 0.98
-                    self.metrics.entropy_adjusted = 1
-                    self.metrics.entropy_down = 1
+                    setattr(self.metrics, "entropy_adjusted", 1)
+                    setattr(self.metrics, "entropy_down", 1)
 
             # Clamp entropy coefficient
             self.entropy_coef = float(
@@ -268,13 +268,19 @@ class TrainerState:
             )
 
             # Log the delta (optional but very useful)
-            self.metrics.entropy_delta =\
-                float(self.entropy_coef - old_entropy)
+            setattr(self.metrics,
+                    "entropy_delta",
+                    float(self.entropy_coef - old_entropy))
 
-            self.metrics.entropy_scheduled = float(scheduled)
+            setattr(self.metrics,
+                    "entropy_scheduled",
+                    float(scheduled))
         else:
             self.entropy_coef = self.cfg.sched.start_entropy_coef
-            self.metrics.entropy_scheduled = self.entropy_coef
+            
+            setattr(self.metrics,
+                    "entropy_scheduled",
+                    self.entropy_coef)
 
         self.lr = self._lr_sch(self.update_idx)
 
@@ -323,7 +329,8 @@ class TrainerState:
                           title="PPO Metrics",
                           border_style="bright_blue")
 
-        ep_text = self.metrics.render_episode_stats()
+        ep_text = self.metrics.render_episode_stats(self.avg_ep_len_ema,
+                                                    self.avg_ep_returns_ema)
 
         self.history.render_episode_history(ep_text)
 
