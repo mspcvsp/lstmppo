@@ -338,6 +338,10 @@ class PolicyUpdateInfo:
     grad_norm: float
     policy_drift: torch.Tensor
     value_drift: torch.Tensor
+    h_norm: torch.Tensor
+    c_norm: torch.Tensor
+    h_drift: torch.Tensor
+    c_drift: torch.Tensor
 
 
 def initialize_config(cfg: Config,

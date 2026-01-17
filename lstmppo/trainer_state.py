@@ -87,6 +87,12 @@ class TrainerState:
         self.ev_history = []
         self.policy_drift_history = []
         self.value_drift_history = []
+        self.prev_h_norm = None
+        self.prev_c_norm = None
+        self.h_norm_history = []
+        self.c_norm_history = []
+        self.h_drift_history = []
+        self.c_drift_history = []
 
     def reset(self,
               total_updates: int):
@@ -106,6 +112,29 @@ class TrainerState:
         self.stats["grad_norm"] += upd.grad_norm
         self.stats["policy_drift"] += upd.policy_drift.detach()
         self.stats["value_drift"] += upd.value_drift.detach()
+        
+        """
+        LSTM hidden‑state norm drift is one of the most powerful
+        diagnostics for recurrent PPO. It tells you whether your LSTM is:
+        • 	exploding
+        • 	collapsing
+        • 	saturating
+        • 	drifting across updates
+        • 	or behaving consistently
+
+        This is incredibly useful for diagnosing:
+        - exploding LSTMs
+        - vanishing LSTMs
+        - unstable TBPTT
+        - bad reward scaling
+        - bad normalization
+        - bad initialization
+        - DropConnect issues
+        """
+        self.stats["h_norm"] += upd.h_norm.detach()
+        self.stats["c_norm"] += upd.c_norm.detach()
+        self.stats["h_drift"] += upd.h_drift.detach()
+        self.stats["c_drift"] += upd.c_drift.detach()
 
         self.kl_history.append(upd.approx_kl.item())
         self.entropy_history.append(upd.entropy.item())
@@ -113,6 +142,10 @@ class TrainerState:
 
         self.policy_drift_history.append(upd.policy_drift.item())
         self.value_drift_history.append(upd.value_drift.item())
+        self.h_norm_history.append(upd.h_norm.item())
+        self.c_norm_history.append(upd.c_norm.item())
+        self.h_drift_history.append(upd.h_drift.item())
+        self.c_drift_history.append(upd.c_drift.item())
 
         if (len(self.policy_drift_history) >
             self.cfg.trainer.max_sparkline_history):
@@ -123,6 +156,18 @@ class TrainerState:
             self.cfg.trainer.max_sparkline_history):
             
             self.value_drift_history.pop(0)
+
+        if len(self.h_norm_history) > self.cfg.trainer.max_sparkline_history:
+            self.h_norm_history.pop(0)
+
+        if len(self.c_norm_history) > self.cfg.trainer.max_sparkline_history:
+            self.c_norm_history.pop(0)
+
+        if len(self.h_drift_history) > self.cfg.trainer.max_sparkline_history:
+            self.h_drift_history.pop(0)
+
+        if len(self.c_drift_history) > self.cfg.trainer.max_sparkline_history:
+            self.c_drift_history.pop(0)
 
         if len(self.kl_history) > self.cfg.trainer.max_sparkline_history:
             self.kl_history.pop(0)
@@ -263,6 +308,10 @@ class TrainerState:
             "grad_norm": 0.0,
             "policy_drift": 0.0,
             "value_drift": 0.0,
+            "h_norm": 0.0,
+            "c_norm": 0.0,
+            "h_drift": 0.0,
+            "c_drift": 0.0,
             "explained_var": 0.0,
             "steps": 0,
         }
@@ -405,38 +454,61 @@ class TrainerState:
         ppo_text.append(f" ValDrift:  {s['value_drift']:.3e}\n",
                         style="bold yellow")
 
+        ppo_text.append(f" h-norm:     {s['h_norm']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" c-norm:     {s['c_norm']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" h-drift:    {s['h_drift']:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" c-drift:    {s['c_drift']:.3e}\n",
+                        style="bold yellow")
+
         ppo_text.append("\n Return Trend: ",
                         style="bold cyan")
         
         ppo_text.append(sparkline(self.ep_return_history),
                         style="cyan")
 
-        # KL Trend
         ppo_text.append("\n KL Trend:    ", style="bold cyan")
         ppo_text.append(sparkline(self.kl_history,
                                   width=20),
                                   style="cyan")
 
-        # Entropy Trend
         ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
         ppo_text.append(sparkline(self.entropy_history,
                                   width=20),
                                   style="magenta")
 
-        # Explained Variance Trend
         ppo_text.append("\n EV Trend:    ", style="bold cyan")
         ppo_text.append(sparkline(self.ev_history,
                                   width=20),
                                   style="green")
 
-        # Policy Drift Trend
         ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
         ppo_text.append(sparkline(self.policy_drift_history),
                         style="cyan")
 
-        # Value Drift Trend
         ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
         ppo_text.append(sparkline(self.value_drift_history),
+                        style="green")
+
+        ppo_text.append("\n h-norm Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.h_norm_history),
+                        style="cyan")
+
+        ppo_text.append("\n c-norm Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.c_norm_history),
+                        style="cyan")
+
+        ppo_text.append("\n h-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.h_drift_history),
+                        style="green")
+
+        ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.c_drift_history),
                         style="green")
 
         ppo_panel = Panel(ppo_text,

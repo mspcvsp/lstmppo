@@ -306,6 +306,10 @@ class LSTMPPOTrainer:
         policy_drift = (new_logp - old_logp).abs().mean()
         value_drift = (values - old_values).abs().mean()
 
+        # Hidden-state norms
+        h_norm, c_norm, h_drift, c_drift =\
+            self.compute_lstm_diagnostics(mb)
+
         loss = (
             policy_loss
             + self.state.cfg.ppo.vf_coef * value_loss
@@ -330,7 +334,11 @@ class LSTMPPOTrainer:
                              clip_frac=clip_frac,
                              grad_norm=grad_norm,
                              policy_drift=policy_drift,
-                             value_drift=value_drift)
+                             value_drift=value_drift,
+                             h_norm=h_norm,
+                             c_norm=c_norm,
+                             h_drift=h_drift,
+                             c_drift=c_drift)
         )
 
     def compute_losses(self,
@@ -373,6 +381,42 @@ class LSTMPPOTrainer:
         value_loss = (value_loss * mask).sum() / mask.sum()
 
         return policy_loss, value_loss, approx_kl, clip_frac
+
+    def compute_lstm_diagnostics(self,
+                                 mb: RecurrentMiniBatch):
+
+        h_norm = mb.hxs0.norm(dim=1).mean().detach()
+        c_norm = mb.cxs0.norm(dim=1).mean().detach()
+
+        if self.state.prev_h_norm is None:
+            h_drift = torch.tensor(0.0)
+            c_drift = torch.tensor(0.0)
+        else:
+            """
+            Detaching h_norm and c_norm breaks their connection to the LSTM
+            graph, but the subtraction operation itself creates a new tensor.
+            Even if both operands are detached, PyTorch still treats the
+            result as a fresh tensor that could be part of a graph unless you 
+            detach it too.
+
+            LSTM hiddent state Drift is computed for every minibatch, every
+            chunk, every update.
+
+            Consquences of not detacthing drift calculations:
+            ------------------------------------------------
+            • 	PyTorch keeps tiny graphs alive
+            • 	They accumulate across updates
+            • 	Memory usage slowly creeps upward
+            • 	Eventually you get fragmentation or slowdowns
+            Detaching keeps drift metrics as pure numbers.
+            """
+            h_drift = (h_norm - self.state.prev_h_norm).abs().detach()
+            c_drift = (c_norm - self.state.prev_c_norm).abs().detach()
+
+        self.state.prev_h_norm = h_norm.detach()
+        self.state.prev_c_norm = c_norm.detach()
+
+        return h_norm, c_norm, h_drift, c_drift
     
     def backward_and_clip(self,
                           loss):
