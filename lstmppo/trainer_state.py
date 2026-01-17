@@ -17,16 +17,16 @@ from .buffer import RecurrentRolloutBuffer
 
 @dataclass
 class TrainerState:
-    update_idx: int
-    lr: float
-    entropy_coef: float
-    clip_range: float
-    target_kl: float
-    early_stopping_kl: float
-    writer: SummaryWriter
-    jsonl_file: str
-    jsonl_fp: io.TextIOWrapper
-    validation_mode: bool
+    update_idx: int = 0
+    lr: float = 0.0
+    entropy_coef: float = 0.0
+    clip_range: float = 0.0
+    target_kl: float = 0.0
+    early_stopping_kl: float = 0.0
+    writer: SummaryWriter | None = None
+    jsonl_file: str = ""
+    jsonl_fp: io.TextIOWrapper | None = None
+    validation_mode: bool = False
 
     def __init__(self,
                  cfg: Config,
