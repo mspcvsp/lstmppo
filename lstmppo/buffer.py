@@ -139,9 +139,62 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     # GAE-Lambda
     # ---------------------------------------------------------
-    def compute_returns_and_advantages(self, last_value):
+    def compute_returns_and_advantages(self,
+                                       last_value):
+        """
+        Reward & Return normalization operate at  different stages and
+        solve different stability problems.
 
-        last_gae = torch.zeros(self.cfg.num_envs, device=self.device)
+        Reward normalization
+        ---------------------
+        stabilizes the advantage calculation because GAE uses rewards 
+        directly
+
+        Return normalization
+        --------------------
+        stabilizes the critic’s regression target because the value loss
+        uses returns directly. 
+
+        ####################
+        Reward Normalization
+        ####################
+        
+        What it normalizes:
+        ------------------
+            The raw rewards coming from the environment (after shaping).
+        
+        Where it happens:
+        -----------------
+            Inside the rollout buffer, before computing GAE.
+        
+        Why it exists:
+        --------------
+            Reward normalization stabilizes the critic’s TD error by ensuring
+            that the reward scale is consistent across rollouts.
+        
+        Why it matters:
+        --------------
+        • 	Shaping increases reward variance
+        • 	Sparse rewards cause huge variance
+        • 	Dense rewards can explode the critic
+        • 	PPO’s GAE is sensitive to reward scale
+        • 	LSTMs amplify variance over long horizons
+        
+        Effect:
+        ------
+        Reward normalization makes the advantage signal smoother, which makes
+        the critic learn faster and prevents value explosion.
+        
+        Analogy:
+        -------
+        Reward normalization is like normalizing your input features before 
+        training a neural network.
+        """
+        r = self.rewards
+        self.rewards = (r - r.mean()) / (r.std(unbiased=False) + 1e-8)
+
+        last_gae = torch.zeros(self.cfg.num_envs,
+                               device=self.device)
 
         for t in reversed(range(self.cfg.rollout_steps)):
 
@@ -170,8 +223,44 @@ class RecurrentRolloutBuffer:
 
         self.returns = self.values + self.advantages
 
-        # ---- Return Normalization ----
-        # Normalize across all timesteps and environments
+        """
+        #############################################
+        Return Normalization (Value-target Whitening)
+        #############################################
+
+        What it normalizes:
+        ------------------
+        The discounted returns (value targets) after GAE.
+
+        Where it happens:
+        ----------------
+        Inside the rollout buffer, after computing returns.
+
+        Why it exists:
+        --------------
+        Return normalization stabilizes the value function regression
+        by ensuring the critic always predicts targets with roughly zero mean
+        and unit variance.
+
+        Why it matters:
+        --------------
+        • 	PPO’s value loss is a regression problem
+        • 	If returns are small early and large later, the critic becomes
+            unstable
+        • 	In CartPole‑PO, returns are extremely low early on
+        • 	Without normalization, the critic collapses or learns extremely
+        slowly
+
+        Effect:
+        ------
+        Return normalization makes the critic’s regression target stable, 
+        which improves explained variance and prevents critic drift.
+
+        Analogy:
+        -------
+        Return normalization is like whitening your labels in a regression 
+        problem.
+        """
         ret = self.returns
         self.returns = (ret - ret.mean()) / (ret.std(unbiased=False) + 1e-8)
 

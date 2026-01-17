@@ -1,4 +1,36 @@
-# trainer.py
+"""
+Environment wrapper
+• 	raw reward
+• 	shaping bonus (terminal only)
+• 	return shaped reward
+
+Rollout buffer
+• 	store shaped reward
+• 	normalize rewards
+• 	compute returns
+• 	compute advantages
+
+Trainer
+• 	normalize advantages
+• 	compute PPO losses
+• 	update policy
+
+LSTM-PPO pipeline
+-----------------
+Env → shaped reward
+      ↓
+Buffer stores rewards
+      ↓
+Reward normalization
+      ↓
+GAE computes advantages
+      ↓
+Value-target whitening (normalize returns)
+      ↓
+Advantage normalization (trainer)
+      ↓
+PPO loss
+"""
 from pathlib import Path
 import numpy as np
 import torch
