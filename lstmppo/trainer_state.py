@@ -11,7 +11,7 @@ from rich.text import Text
 
 from torch.utils.tensorboard import SummaryWriter
 from .types import Config, MetricsHistory, PolicyUpdateInfo
-from .types import EpisodeStats, MetricsHistory
+from .types import EpisodeStats, Metrics, MetricsHistory
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
 
 
@@ -35,6 +35,7 @@ class TrainerState:
 
         self.cfg = cfg
         self.validation_mode = validation_mode
+        self.stats = Metrics()
 
         if self.validation_mode:
 
@@ -124,20 +125,7 @@ class TrainerState:
         - bad initialization
         - DropConnect issues
         """
-        self.stats["h_norm"] += upd.h_norm.detach()
-        self.stats["c_norm"] += upd.c_norm.detach()
-        self.stats["h_drift"] += upd.h_drift.detach()
-        self.stats["c_drift"] += upd.c_drift.detach()
-
-        self.stats["i_mean"] += upd.i_mean
-        self.stats["f_mean"] += upd.f_mean
-        self.stats["g_mean"] += upd.g_mean
-        self.stats["o_mean"] += upd.o_mean
-
-        self.stats["i_drift"] += upd.i_drift
-        self.stats["f_drift"] += upd.f_drift
-        self.stats["g_drift"] += upd.g_drift
-        self.stats["o_drift"] += upd.o_drift
+        self.stats.accumulate(upd)
 
         self.history.push("kl", upd.approx_kl.item())
         self.history.push("entropy", upd.entropy.item())
@@ -276,33 +264,9 @@ class TrainerState:
 
         self.jsonl_fp.write(json.dumps(record) + "\n")
         self.jsonl_fp.flush()
-    
-    def init_stats(self):
 
-        self.stats = {
-            "policy_loss": 0.0,
-            "value_loss": 0.0,
-            "entropy": 0.0,
-            "approx_kl": 0.0,
-            "clip_frac": 0.0,
-            "grad_norm": 0.0,
-            "policy_drift": 0.0,
-            "value_drift": 0.0,
-            "h_norm": 0.0,
-            "c_norm": 0.0,
-            "h_drift": 0.0,
-            "c_drift": 0.0,
-            "i_mean": 0.0,
-            "f_mean": 0.0,
-            "g_mean": 0.0,
-            "o_mean": 0.0,
-            "i_drift": 0.0,
-            "f_drift": 0.0,
-            "g_drift": 0.0,
-            "o_drift": 0.0,
-            "explained_var": 0.0,
-            "steps": 0,
-        }
+    def init_stats(self):
+        self.stats.initialize()
 
     def apply_schedules(self,
                         optimizer: torch.optim.Adam):

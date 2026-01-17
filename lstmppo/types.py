@@ -433,6 +433,92 @@ class MetricsHistory:
             hist.pop(0)
 
 
+@dataclass
+class Metrics:
+    policy_loss: float = 0.0
+    value_loss: float = 0.0
+    entropy: float = 0.0
+    approx_kl: float = 0.0
+    clip_frac: float = 0.0
+    grad_norm: float = 0.0
+
+    policy_drift: float = 0.0
+    value_drift: float = 0.0
+
+    h_norm: float = 0.0
+    c_norm: float = 0.0
+    h_drift: float = 0.0
+    c_drift: float = 0.0
+
+    i_mean: float = 0.0
+    f_mean: float = 0.0
+    g_mean: float = 0.0
+    o_mean: float = 0.0
+
+    i_drift: float = 0.0
+    f_drift: float = 0.0
+    g_drift: float = 0.0
+    o_drift: float = 0.0
+
+    explained_var: float = 0.0
+    steps: int = 0
+
+    def accumulate(self,
+                   upd: PolicyUpdateInfo):
+        
+        self.policy_loss += upd.policy_loss.item()
+        self.value_loss += upd.value_loss.item()
+        self.entropy += upd.entropy.item()
+        self.approx_kl += upd.approx_kl.item()
+        self.clip_frac += upd.clip_frac.item()
+        self.grad_norm += upd.grad_norm
+
+        self.policy_drift += upd.policy_drift.item()
+        self.value_drift += upd.value_drift.item()
+
+        self.h_norm += upd.h_norm.item()
+        self.c_norm += upd.c_norm.item()
+        self.h_drift += upd.h_drift.item()
+        self.c_drift += upd.c_drift.item()
+
+        gm = upd.lstm_gate_metrics
+        self.i_mean += gm.i_mean.item()
+        self.f_mean += gm.f_mean.item()
+        self.g_mean += gm.g_mean.item()
+        self.o_mean += gm.o_mean.item()
+
+        self.i_drift += gm.i_drift.item()
+        self.f_drift += gm.f_drift.item()
+        self.g_drift += gm.g_drift.item()
+        self.o_drift += gm.o_drift.item()
+
+        self.steps += 1
+
+    def normalize(self):
+
+        if self.steps == 0:
+            return
+
+        factor = 1.0 / self.steps
+
+        for field in self.__dataclass_fields__:
+
+            if field not in ("steps",):
+                setattr(self, field, getattr(self, field) * factor)
+
+    def initialize(self):
+
+        for field in self.__dataclass_fields__:
+
+            if field  in ("steps",):
+                setattr(self, field, 0)
+            else:
+                setattr(self, field, 0.0)
+
+    def to_dict(self):
+        return {k: float(getattr(self, k)) for k in self.__dataclass_fields__}
+
+
 def initialize_config(cfg: Config,
                       **kwargs):
 
