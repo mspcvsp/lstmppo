@@ -85,6 +85,8 @@ class TrainerState:
         self.kl_history = []
         self.entropy_history = []
         self.ev_history = []
+        self.policy_drift_history = []
+        self.value_drift_history = []
 
     def reset(self,
               total_updates: int):
@@ -102,10 +104,25 @@ class TrainerState:
         self.stats["approx_kl"] += upd.approx_kl.detach()
         self.stats["clip_frac"] += upd.clip_frac.detach()
         self.stats["grad_norm"] += upd.grad_norm
+        self.stats["policy_drift"] += upd.policy_drift.detach()
+        self.stats["value_drift"] += upd.value_drift.detach()
 
         self.kl_history.append(upd.approx_kl.item())
         self.entropy_history.append(upd.entropy.item())
         self.ev_history.append(self.stats.get("explained_var", 0.0))
+
+        self.policy_drift_history.append(upd.policy_drift.item())
+        self.value_drift_history.append(upd.value_drift.item())
+
+        if (len(self.policy_drift_history) >
+            self.cfg.trainer.max_sparkline_history):
+            
+            self.policy_drift_history.pop(0)
+
+        if (len(self.value_drift_history) >
+            self.cfg.trainer.max_sparkline_history):
+            
+            self.value_drift_history.pop(0)
 
         if len(self.kl_history) > self.cfg.trainer.max_sparkline_history:
             self.kl_history.pop(0)
@@ -244,6 +261,8 @@ class TrainerState:
             "approx_kl": 0.0,
             "clip_frac": 0.0,
             "grad_norm": 0.0,
+            "policy_drift": 0.0,
+            "value_drift": 0.0,
             "explained_var": 0.0,
             "steps": 0,
         }
@@ -379,12 +398,46 @@ class TrainerState:
         
         ppo_text.append(f" ClipRange:  {self.clip_range:.2e}\n",
                         style="bold yellow")
-        
+                
+        ppo_text.append(f" PolDrift:  {s['policy_drift']:.3e}\n",
+                        style="bold yellow")
+
+        ppo_text.append(f" ValDrift:  {s['value_drift']:.3e}\n",
+                        style="bold yellow")
+
         ppo_text.append("\n Return Trend: ",
                         style="bold cyan")
         
         ppo_text.append(sparkline(self.ep_return_history),
                         style="cyan")
+
+        # KL Trend
+        ppo_text.append("\n KL Trend:    ", style="bold cyan")
+        ppo_text.append(sparkline(self.kl_history,
+                                  width=20),
+                                  style="cyan")
+
+        # Entropy Trend
+        ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.entropy_history,
+                                  width=20),
+                                  style="magenta")
+
+        # Explained Variance Trend
+        ppo_text.append("\n EV Trend:    ", style="bold cyan")
+        ppo_text.append(sparkline(self.ev_history,
+                                  width=20),
+                                  style="green")
+
+        # Policy Drift Trend
+        ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.policy_drift_history),
+                        style="cyan")
+
+        # Value Drift Trend
+        ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.value_drift_history),
+                        style="green")
 
         ppo_panel = Panel(ppo_text,
                           title="PPO Metrics",

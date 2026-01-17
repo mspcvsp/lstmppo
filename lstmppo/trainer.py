@@ -303,6 +303,9 @@ class LSTMPPOTrainer:
         entropy = eval_output.entropy.reshape(-1)
         entropy = (entropy * mask).sum() / mask.sum()
 
+        policy_drift = (new_logp - old_logp).abs().mean()
+        value_drift = (values - old_values).abs().mean()
+
         loss = (
             policy_loss
             + self.state.cfg.ppo.vf_coef * value_loss
@@ -325,7 +328,9 @@ class LSTMPPOTrainer:
                              entropy=entropy,
                              approx_kl=approx_kl,
                              clip_frac=clip_frac,
-                             grad_norm=grad_norm)
+                             grad_norm=grad_norm,
+                             policy_drift=policy_drift,
+                             value_drift=value_drift)
         )
 
     def compute_losses(self,
