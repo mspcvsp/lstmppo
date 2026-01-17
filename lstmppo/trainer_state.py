@@ -84,6 +84,9 @@ class TrainerState:
         self.prev_g_mean = None
         self.prev_o_mean = None
 
+        self.avg_ep_len_ema: float = 0.0
+        self.avg_ep_returns_ema: float = 0.0
+
         self.history = MetricsHistory(
             max_len=self.cfg.trainer.max_sparkline_history
         )
@@ -98,15 +101,6 @@ class TrainerState:
     def update_stats(self,
                      upd: PolicyUpdateInfo):
 
-        self.stats["policy_loss"] += upd.policy_loss.detach()
-        self.stats["value_loss"] += upd.value_loss.detach()
-        self.stats["entropy"] += upd.entropy.detach()
-        self.stats["approx_kl"] += upd.approx_kl.detach()
-        self.stats["clip_frac"] += upd.clip_frac.detach()
-        self.stats["grad_norm"] += upd.grad_norm
-        self.stats["policy_drift"] += upd.policy_drift.detach()
-        self.stats["value_drift"] += upd.value_drift.detach()
-        
         """
         LSTM hidden‑state norm drift is one of the most powerful
         diagnostics for recurrent PPO. It tells you whether your LSTM is:
@@ -152,38 +146,27 @@ class TrainerState:
         self.history.push("h_drift", upd.h_drift.item())
         self.history.push("c_drift", upd.c_drift.item())
 
-        self.stats["steps"] += 1
-
     def update_episode_stats(self,
                              ep_stats: EpisodeStats):
 
-        self.stats["episodes"] = ep_stats.episodes
-        self.stats["alive_envs"] = ep_stats.alive_envs
+        self.stats.update_episode_stats(ep_stats)
         
-        self.stats["max_ep_len"] = ep_stats.max_ep_len
-        self.stats["avg_ep_len"] = ep_stats.avg_ep_len
+        # ---- Exponential Moving Average 
+        ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
 
-        self.stats["max_ep_returns"] = ep_stats.max_ep_returns
-        self.stats["avg_ep_returns"] = ep_stats.avg_ep_returns
+        self.avg_ep_len_ema = (
+            ema_alpha * self.avg_ep_len_ema +
+            (1.0 - ema_alpha) * ep_stats.avg_ep_len
+        )
+
+        self.avg_ep_returns_ema = (
+            ema_alpha * self.avg_ep_returns_ema +
+            (1.0 - ema_alpha) * ep_stats.avg_ep_returns
+        )
 
         # ---- Sparkline history tracking ----
         self.history.push("ep_len", ep_stats.avg_ep_len)
         self.history.push("ep_return", ep_stats.avg_ep_returns)
-
-        # ---- Exponential Moving Average ----
-        ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
-
-        self.stats["avg_ep_len_ema"] = (
-            ema_alpha * self.stats.get("avg_ep_len_ema",
-                                       ep_stats.avg_ep_len) +
-            (1.0 - ema_alpha) * ep_stats.avg_ep_len
-        )
-
-        self.stats["avg_ep_returns_ema"] = (
-            ema_alpha * self.stats.get("avg_ep_returns_ema",
-                                       ep_stats.avg_ep_returns) +
-            (1.0 - ema_alpha) * ep_stats.avg_ep_returns
-        )
 
     def compute_average_stats(self):
 
@@ -292,9 +275,9 @@ class TrainerState:
             self.entropy_coef = scheduled
 
             # Reset logging flags
-            self.stats["entropy_adjusted"] = 0
-            self.stats["entropy_up"] = 0
-            self.stats["entropy_down"] = 0
+            self.stats.entropy_adjusted = 0
+            self.stats.entropy_up = 0
+            self.stats.entropy_down = 0
 
             # Adaptive adjustment based on KL
             kl = float(self.stats.get("approx_kl", 0.0))
@@ -305,14 +288,14 @@ class TrainerState:
                 if kl < 0.5 * target:
 
                     self.entropy_coef *= 1.02
-                    self.stats["entropy_adjusted"] = 1
-                    self.stats["entropy_up"] = 1
+                    self.stats.entropy_adjusted = 1
+                    self.stats.entropy_up = 1
 
                 elif kl > 2.0 * target:
     
                     self.entropy_coef *= 0.98
-                    self.stats["entropy_adjusted"] = 1
-                    self.stats["entropy_down"] = 1
+                    self.stats.entropy_adjusted = 1
+                    self.stats.entropy_down = 1
 
             # Clamp entropy coefficient
             self.entropy_coef = float(
@@ -322,12 +305,13 @@ class TrainerState:
             )
 
             # Log the delta (optional but very useful)
-            self.stats["entropy_delta"] =\
+            self.stats.entropy_delta =\
                 float(self.entropy_coef - old_entropy)
-            
-            self.stats["entropy_scheduled"] = float(scheduled)
+
+            self.stats.entropy_scheduled = float(scheduled)
         else:
             self.entropy_coef = self.cfg.sched.start_entropy_coef
+            self.stats.entropy_scheduled = self.entropy_coef
 
         self.lr = self._lr_sch(self.update_idx)
 
@@ -365,188 +349,18 @@ class TrainerState:
         return self.update_idx >= self._lr_sch.warmup_updates
         
     def render_dashboard(self):
-        s = self.stats
-
-        # PPO metrics panel
-        ppo_text = Text()
         
-        ppo_text.append(f" Return:     {s['avg_ep_returns']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" Length:     {s['avg_ep_len']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" Entropy:    {s['entropy']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" KL:         {s['approx_kl']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" ClipFrac:   {s['clip_frac']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" GradNorm:   {s['grad_norm']:.1f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" ExplainedV: {s['explained_var']:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" LR:         {self.lr:.2e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" EntCoef:    {self.entropy_coef:.2e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" ClipRange:  {self.clip_range:.2e}\n",
-                        style="bold yellow")
-                
-        ppo_text.append(f" PolDrift:  {s['policy_drift']:.3e}\n",
-                        style="bold yellow")
+        ppo_text = self.stats.render_ppo_metrics()
 
-        ppo_text.append(f" ValDrift:  {s['value_drift']:.3e}\n",
-                        style="bold yellow")
-
-        ppo_text.append(f" h-norm:     {s['h_norm']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" c-norm:     {s['c_norm']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" h-drift:    {s['h_drift']:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" c-drift:    {s['c_drift']:.3e}\n",
-                        style="bold yellow")
-
-        ppo_text.append(f" i-mean:     {s['i_mean']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" f-mean:     {s['f_mean']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" g-mean:     {s['g_mean']:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" o-mean:     {s['o_mean']:.3f}\n",
-                        style="bold yellow")
-
-        ppo_text.append(f" i-drift:    {s['i_drift']:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" f-drift:    {s['f_drift']:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" g-drift:    {s['g_drift']:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" o-drift:    {s['o_drift']:.3e}\n",
-                        style="bold yellow")
-
-        ppo_text.append("\n Return Trend: ",
-                        style="bold cyan")
-        
-        ppo_text.append(sparkline(self.history.ep_return),
-                        style="cyan")
-
-        ppo_text.append("\n KL Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.kl,
-                                  width=20),
-                                  style="cyan")
-
-        ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.entropy,
-                                  width=20),
-                                  style="magenta")
-
-        ppo_text.append("\n EV Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.explained_var,
-                                  width=20),
-                                  style="green")
-
-        ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.policy_drift),
-                        style="cyan")
-
-        ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.value_drift),
-                        style="green")
-
-        ppo_text.append("\n h-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.h_norm),
-                        style="cyan")
-
-        ppo_text.append("\n c-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.c_norm),
-                        style="cyan")
-
-        ppo_text.append("\n h-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.h_drift),
-                        style="green")
-
-        ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.c_drift),
-                        style="green")
-
-        ppo_text.append("\n i-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.i_mean), style="cyan")
-
-        ppo_text.append("\n f-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.f_mean), style="cyan")
-
-        ppo_text.append("\n g-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.g_mean), style="cyan")
-
-        ppo_text.append("\n o-mean Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.o_mean), style="cyan")
-
-        ppo_text.append("\n i-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.i_drift), style="green")
-
-        ppo_text.append("\n f-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.f_drift), style="green")
-
-        ppo_text.append("\n g-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.g_drift), style="green")
-
-        ppo_text.append("\n o-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.history.o_drift), style="green")
+        self.history.render_ppo_history(ppo_text)
 
         ppo_panel = Panel(ppo_text,
                           title="PPO Metrics",
                           border_style="bright_blue")
 
-        # Episode stats panel
-        ep_text = Text()
+        ep_text = self.stats.render_episode_stats()
 
-        ep_text.append(f" Episodes:   {s['episodes']}\n",
-                       style="bold green")
-
-        ep_text.append(f" AliveEnv:   {s['alive_envs']}\n",
-                       style="bold green")
-        
-        ep_text.append(f" MaxEpLen:   {s['max_ep_len']:.1f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" AvgEpLen:   {s['avg_ep_len']:.1f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" EMA Len:    {s['avg_ep_len_ema']:.1f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" MaxReturn:  {s['max_ep_returns']:.2f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" AvgReturn:  {s['avg_ep_returns']:.2f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" EMA Return: {s['avg_ep_returns_ema']:.2f}\n",
-                       style="bold green")
-        
-        ep_text.append("\n Length Trend: ",
-                       style="bold cyan")
-
-        ep_text.append(sparkline(self.history.ep_len),
-                       style="cyan")
+        self.history.render_episode_history(ep_text)
 
         ep_panel = Panel(ep_text,
                          title="Episode Stats",
@@ -571,15 +385,3 @@ class TrainerState:
 
 def to_float(x):
     return x.item() if isinstance(x, torch.Tensor) else float(x)
-
-
-def sparkline(data, width=20):
-    if len(data) == 0:
-        return ""
-    blocks = "▁▂▃▄▅▆▇█"
-    mn, mx = min(data), max(data)
-    if mx - mn < 1e-8:
-        return blocks[0] * min(len(data), width)
-    scaled = [(x - mn) / (mx - mn) for x in data[-width:]]
-    idx = [int(s * (len(blocks) - 1)) for s in scaled]
-    return "".join(blocks[i] for i in idx)

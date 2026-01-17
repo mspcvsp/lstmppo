@@ -10,6 +10,7 @@ from typing import Any, List
 import torch
 import gymnasium as gym
 import popgym
+from rich.text import Text
 from .obs_encoder import get_flat_obs_dim
 
 
@@ -432,6 +433,85 @@ class MetricsHistory:
         if len(hist) > self.max_len:
             hist.pop(0)
 
+    def render_ppo_history(self,
+                           ppo_text: Text):
+
+        ppo_text.append("\n Return Trend: ",
+                        style="bold cyan")
+        
+        ppo_text.append(sparkline(self.ep_return),
+                        style="cyan")
+
+        ppo_text.append("\n KL Trend:    ", style="bold cyan")
+        ppo_text.append(sparkline(self.kl,
+                                  width=20),
+                                  style="cyan")
+
+        ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.entropy,
+                                  width=20),
+                                  style="magenta")
+
+        ppo_text.append("\n EV Trend:    ", style="bold cyan")
+        ppo_text.append(sparkline(self.explained_var,
+                                  width=20),
+                                  style="green")
+
+        ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.policy_drift),
+                        style="cyan")
+
+        ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.value_drift),
+                        style="green")
+
+        ppo_text.append("\n h-norm Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.h_norm),
+                        style="cyan")
+
+        ppo_text.append("\n c-norm Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.c_norm),
+                        style="cyan")
+
+        ppo_text.append("\n h-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.h_drift),
+                        style="green")
+
+        ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.c_drift),
+                        style="green")
+
+        ppo_text.append("\n i-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.i_mean), style="cyan")
+        ppo_text.append("\n f-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.f_mean), style="cyan")
+
+        ppo_text.append("\n g-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.g_mean), style="cyan")
+
+        ppo_text.append("\n o-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.o_mean), style="cyan")
+
+        ppo_text.append("\n i-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.i_drift), style="green")
+
+        ppo_text.append("\n f-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.f_drift), style="green")
+
+        ppo_text.append("\n g-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.g_drift), style="green")
+
+        ppo_text.append("\n o-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.o_drift), style="green")
+
+    def render_episode_history(self,
+                               ep_text: Text):
+
+        ep_text.append("\n Length Trend: ",
+                       style="bold cyan")
+
+        ep_text.append(sparkline(self.ep_len),
+                       style="cyan")
 
 @dataclass
 class Metrics:
@@ -441,6 +521,13 @@ class Metrics:
     approx_kl: float = 0.0
     clip_frac: float = 0.0
     grad_norm: float = 0.0
+
+    episodes: int = 0
+    alive_envs: int = 0
+    max_ep_len: int = 0
+    avg_ep_len: float = 0.0
+    max_ep_returns: float = 0.0
+    avg_ep_returns: float = 0.0
 
     policy_drift: float = 0.0
     value_drift: float = 0.0
@@ -494,6 +581,18 @@ class Metrics:
 
         self.steps += 1
 
+    def update_episode_stats(self,
+                             ep_stats: EpisodeStats):
+
+        self.episodes = ep_stats.episodes
+        self.alive_envs = ep_stats.alive_envs
+        
+        self.max_ep_len = ep_stats.max_ep_len
+        self.avg_ep_len = ep_stats.avg_ep_len
+
+        self.max_ep_returns = ep_stats.max_ep_returns
+        self.avg_ep_returns = ep_stats.avg_ep_returns
+
     def normalize(self):
 
         if self.steps == 0:
@@ -518,6 +617,114 @@ class Metrics:
     def to_dict(self):
         return {k: float(getattr(self, k)) for k in self.__dataclass_fields__}
 
+    def render_ppo_metrics(self):
+
+        # PPO metrics panel
+        ppo_text = Text()
+        
+        ppo_text.append(f" Return:     {self.avg_ep_returns:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" Length:     {self.avg_ep_len:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" Entropy:    {self.entropy:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" KL:         {self.approx_kl:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" ClipFrac:   {self.clip_frac:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" GradNorm:   {self.grad_norm:.1f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" ExplainedV: {self.explained_var:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" LR:         {self.lr:.2e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" EntCoef:    {self.entropy_coef:.2e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" ClipRange:  {self.clip_range:.2e}\n",
+                        style="bold yellow")
+                
+        ppo_text.append(f" PolDrift:  {self.policy_drift:.3e}\n",
+                        style="bold yellow")
+
+        ppo_text.append(f" ValDrift:  {self.value_drift:.3e}\n",
+                        style="bold yellow")
+
+        ppo_text.append(f" h-norm:     {self.h_norm:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" c-norm:     {self.c_norm:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" h-drift:    {self.h_drift:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" c-drift:    {self.c_drift:.3e}\n",
+                        style="bold yellow")
+
+        ppo_text.append(f" i-mean:     {self.i_mean:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" f-mean:     {self.f_mean:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" g-mean:     {self.g_mean:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" o-mean:     {self.o_mean:.3f}\n",
+                        style="bold yellow")
+
+        ppo_text.append(f" i-drift:    {self.i_drift:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" f-drift:    {self.f_drift:.3e}\n",
+                        style="bold yellow")
+
+        ppo_text.append(f" g-drift:    {self.g_drift:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" o-drift:    {self.o_drift:.3e}\n",
+                        style="bold yellow")
+
+        return ppo_text
+    
+    def render_episode_stats(self):
+
+        ep_text = Text()
+
+        ep_text.append(f" Episodes:   {self.episodes}\n",
+                       style="bold green")
+
+        ep_text.append(f" AliveEnv:   {self.alive_envs}\n",
+                       style="bold green")
+        
+        ep_text.append(f" MaxEpLen:   {self.max_ep_len:.1f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" AvgEpLen:   {self.avg_ep_len:.1f}\n",
+                       style="bold green")
+
+        ep_text.append(f" EMA Len:    {self.avg_ep_len_ema:.1f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" MaxReturn:  {self.max_ep_returns:.2f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" AvgReturn:  {self.avg_ep_returns:.2f}\n",
+                       style="bold green")
+        
+        ep_text.append(f" EMA Return: {self.avg_ep_returns_ema:.2f}\n",
+                       style="bold green")
+
+        return ep_text
 
 def initialize_config(cfg: Config,
                       **kwargs):
@@ -545,3 +752,13 @@ def initialize_config(cfg: Config,
     return cfg
 
 
+def sparkline(data, width=20):
+    if len(data) == 0:
+        return ""
+    blocks = "▁▂▃▄▅▆▇█"
+    mn, mx = min(data), max(data)
+    if mx - mn < 1e-8:
+        return blocks[0] * min(len(data), width)
+    scaled = [(x - mn) / (mx - mn) for x in data[-width:]]
+    idx = [int(s * (len(blocks) - 1)) for s in scaled]
+    return "".join(blocks[i] for i in idx)
