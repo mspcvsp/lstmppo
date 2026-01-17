@@ -79,7 +79,14 @@ class TrainerState:
 
         self.jsonl_file =\
             jsonl_path.joinpath(self.cfg.log.run_name + ".json")
-        
+
+        self.prev_h_norm = None
+        self.prev_c_norm = None
+        self.prev_i_mean = None
+        self.prev_f_mean = None
+        self.prev_g_mean = None
+        self.prev_o_mean = None
+
         self.ep_len_history = []
         self.ep_return_history = []
         self.kl_history = []
@@ -87,12 +94,21 @@ class TrainerState:
         self.ev_history = []
         self.policy_drift_history = []
         self.value_drift_history = []
-        self.prev_h_norm = None
-        self.prev_c_norm = None
         self.h_norm_history = []
         self.c_norm_history = []
         self.h_drift_history = []
         self.c_drift_history = []
+
+        # LSTM Gate metrics
+        self.i_mean_history = []
+        self.f_mean_history = []
+        self.g_mean_history = []
+        self.o_mean_history = []
+
+        self.i_drift_history = []
+        self.f_drift_history = []
+        self.g_drift_history = []
+        self.o_drift_history = []
 
     def reset(self,
               total_updates: int):
@@ -136,6 +152,26 @@ class TrainerState:
         self.stats["h_drift"] += upd.h_drift.detach()
         self.stats["c_drift"] += upd.c_drift.detach()
 
+        self.stats["i_mean"] += upd.i_mean
+        self.stats["f_mean"] += upd.f_mean
+        self.stats["g_mean"] += upd.g_mean
+        self.stats["o_mean"] += upd.o_mean
+
+        self.stats["i_drift"] += upd.i_drift
+        self.stats["f_drift"] += upd.f_drift
+        self.stats["g_drift"] += upd.g_drift
+        self.stats["o_drift"] += upd.o_drift
+
+        self.i_mean_history.append(upd.i_mean.item())
+        self.f_mean_history.append(upd.f_mean.item())
+        self.g_mean_history.append(upd.g_mean.item())
+        self.o_mean_history.append(upd.o_mean.item())
+
+        self.i_drift_history.append(upd.i_drift.item())
+        self.f_drift_history.append(upd.f_drift.item())
+        self.g_drift_history.append(upd.g_drift.item())
+        self.o_drift_history.append(upd.o_drift.item())
+
         self.kl_history.append(upd.approx_kl.item())
         self.entropy_history.append(upd.entropy.item())
         self.ev_history.append(self.stats.get("explained_var", 0.0))
@@ -147,36 +183,12 @@ class TrainerState:
         self.h_drift_history.append(upd.h_drift.item())
         self.c_drift_history.append(upd.c_drift.item())
 
-        if (len(self.policy_drift_history) >
-            self.cfg.trainer.max_sparkline_history):
+        for key, value in self.__dict__.items():
             
-            self.policy_drift_history.pop(0)
+            if (key.endswith("_history") and
+                len(value) > self.cfg.trainer.max_sparkline_history):
 
-        if (len(self.value_drift_history) >
-            self.cfg.trainer.max_sparkline_history):
-            
-            self.value_drift_history.pop(0)
-
-        if len(self.h_norm_history) > self.cfg.trainer.max_sparkline_history:
-            self.h_norm_history.pop(0)
-
-        if len(self.c_norm_history) > self.cfg.trainer.max_sparkline_history:
-            self.c_norm_history.pop(0)
-
-        if len(self.h_drift_history) > self.cfg.trainer.max_sparkline_history:
-            self.h_drift_history.pop(0)
-
-        if len(self.c_drift_history) > self.cfg.trainer.max_sparkline_history:
-            self.c_drift_history.pop(0)
-
-        if len(self.kl_history) > self.cfg.trainer.max_sparkline_history:
-            self.kl_history.pop(0)
-        
-        if len(self.entropy_history) > self.cfg.trainer.max_sparkline_history:
-            self.entropy_history.pop(0)
-        
-        if len(self.ev_history) > self.cfg.trainer.max_sparkline_history:
-            self.ev_history.pop(0)
+                value.pop(0)
 
         self.stats["steps"] += 1
 
@@ -312,6 +324,14 @@ class TrainerState:
             "c_norm": 0.0,
             "h_drift": 0.0,
             "c_drift": 0.0,
+            "i_mean": 0.0,
+            "f_mean": 0.0,
+            "g_mean": 0.0,
+            "o_mean": 0.0,
+            "i_drift": 0.0,
+            "f_drift": 0.0,
+            "g_drift": 0.0,
+            "o_drift": 0.0,
             "explained_var": 0.0,
             "steps": 0,
         }
@@ -466,6 +486,30 @@ class TrainerState:
         ppo_text.append(f" c-drift:    {s['c_drift']:.3e}\n",
                         style="bold yellow")
 
+        ppo_text.append(f" i-mean:     {s['i_mean']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" f-mean:     {s['f_mean']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" g-mean:     {s['g_mean']:.3f}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" o-mean:     {s['o_mean']:.3f}\n",
+                        style="bold yellow")
+
+        ppo_text.append(f" i-drift:    {s['i_drift']:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" f-drift:    {s['f_drift']:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" g-drift:    {s['g_drift']:.3e}\n",
+                        style="bold yellow")
+        
+        ppo_text.append(f" o-drift:    {s['o_drift']:.3e}\n",
+                        style="bold yellow")
+
         ppo_text.append("\n Return Trend: ",
                         style="bold cyan")
         
@@ -510,6 +554,30 @@ class TrainerState:
         ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
         ppo_text.append(sparkline(self.c_drift_history),
                         style="green")
+
+        ppo_text.append("\n i-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.i_mean_history), style="cyan")
+
+        ppo_text.append("\n f-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.f_mean_history), style="cyan")
+
+        ppo_text.append("\n g-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.g_mean_history), style="cyan")
+
+        ppo_text.append("\n o-mean Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.o_mean_history), style="cyan")
+
+        ppo_text.append("\n i-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.i_drift_history), style="green")
+
+        ppo_text.append("\n f-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.f_drift_history), style="green")
+
+        ppo_text.append("\n g-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.g_drift_history), style="green")
+
+        ppo_text.append("\n o-drift Tr.: ", style="bold cyan")
+        ppo_text.append(sparkline(self.o_drift_history), style="green")
 
         ppo_panel = Panel(ppo_text,
                           title="PPO Metrics",

@@ -7,68 +7,27 @@ from .types import PolicyEvalInput, PolicyEvalOutput, LSTMGates
 from .obs_encoder import build_obs_encoder
 
 
-class WeightDrop(nn.Module):
-    """
-    Applies DropConnect to the recurrent weights of an RNN module.
-    Respects .training so DropConnect is OFF in eval() mode.
-    """
-    def __init__(self,
-                 module,
-                 weights,
-                 dropout):
-
-        super().__init__()
-
-        self.module = module
-        self.weights = weights
-        self.dropout = dropout
-
-        # Save raw parameters
-        for w in weights:
-            
-            param = getattr(module, w)
-
-            self.register_parameter(f"{w}_raw",
-                                    nn.Parameter(param.data))
-            
-            del module._parameters[w]
-
-    def _setweights(self):
-        """
-        Inject dropped or raw weights depending on self.training.
-        """
-        for w in self.weights:
-
-            raw = getattr(self, f"{w}_raw")
-
-            if self.training:
-                # DropConnect active
-                dropped = F.dropout(raw,
-                                    p=self.dropout,
-                                    training=True)
-            else:
-                # Deterministic: use raw weights
-                dropped = raw
-
-            setattr(self.module, w, dropped)
-
-    def forward(self, *args, **kwargs):
-        self._setweights()
-        return self.module(*args, **kwargs)
-
-
 class GateLSTMCell(nn.Module):
 
-    def __init__(self, input_size, hidden_size):
+    def __init__(self,
+                 input_size,
+                 hidden_size,
+                 dropconnect_p):
+        
         super().__init__()
+
         self.input_size = input_size
         self.hidden_size = hidden_size
+        self.dropconnect_p = dropconnect_p
 
         self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size,
                                                    input_size))
 
-        self.weight_hh = nn.Parameter(torch.Tensor(4 * hidden_size,
-                                                   hidden_size))
+        self.weight_hh_raw =\
+            nn.Parameter(torch.Tensor(4 * hidden_size, hidden_size))
+        
+        self.register_parameter("weight_hh_raw", self.weight_hh_raw)
+        self.weight_hh = None  # will be set dynamically
 
         self.bias_ih = nn.Parameter(torch.Tensor(4 * hidden_size))
 
@@ -77,6 +36,7 @@ class GateLSTMCell(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
+
         nn.init.xavier_uniform_(self.weight_ih)
         nn.init.orthogonal_(self.weight_hh)
         nn.init.zeros_(self.bias_ih)
@@ -86,8 +46,25 @@ class GateLSTMCell(nn.Module):
         H = self.hidden_size
         self.bias_ih.data[H:2*H] = 1.0
 
+    def _apply_dropconnect(self):
+
+        if self.training:
+    
+            mask = torch.ones_like(self.weight_hh_raw)
+    
+            mask = F.dropout(mask,
+                             p=self.dropconnect_p,
+                             training=True)
+            self.weight_hh = self.weight_hh_raw * mask
+
+        else:
+            self.weight_hh = self.weight_hh_raw
+
     def forward(self, x, hx):
+
         h, c = hx  # each (B, H)
+
+        self._apply_dropconnect()
 
         gates = (
             x @ self.weight_ih.t()
@@ -140,6 +117,7 @@ class LSTMPPOPolicy(nn.Module):
         self.lstm_cell = GateLSTMCell(
             input_size=cfg.lstm.enc_hidden_size,    
             hidden_size=cfg.lstm.lstm_hidden_size,
+            dropconnect_p=cfg.lstm.dropconnect_p
         )
 
         self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)

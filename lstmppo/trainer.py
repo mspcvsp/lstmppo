@@ -44,7 +44,8 @@ from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
-from .types import RecurrentMiniBatch, PolicyUpdateInfo
+from .types import RecurrentMiniBatch, PolicyUpdateInfo, PolicyEvalOutput
+from .types import LSTMGateMetrics
 from .trainer_state import TrainerState
 
 
@@ -310,6 +311,9 @@ class LSTMPPOTrainer:
         h_norm, c_norm, h_drift, c_drift =\
             self.compute_lstm_diagnostics(mb)
 
+        lstm_gate_metrics =\
+            self.compute_lstm_cell_diagnostics(eval_output)
+
         loss = (
             policy_loss
             + self.state.cfg.ppo.vf_coef * value_loss
@@ -338,7 +342,8 @@ class LSTMPPOTrainer:
                              h_norm=h_norm,
                              c_norm=c_norm,
                              h_drift=h_drift,
-                             c_drift=c_drift)
+                             c_drift=c_drift,
+                             lstm_gate_metrics=lstm_gate_metrics)
         )
 
     def compute_losses(self,
@@ -418,6 +423,47 @@ class LSTMPPOTrainer:
 
         return h_norm, c_norm, h_drift, c_drift
     
+    def compute_lstm_cell_diagnostics(self,
+                                      eval_output: PolicyEvalOutput):
+
+        # Gate activations (T, B, H)
+        i_g = eval_output.gates.i_gates
+        f_g = eval_output.gates.f_gates
+        g_g = eval_output.gates.g_gates
+        o_g = eval_output.gates.o_gates
+
+        # Mean gate activations (scalar)
+        i_mean = i_g.mean().detach()
+        f_mean = f_g.mean().detach()
+        g_mean = g_g.mean().detach()
+        o_mean = o_g.mean().detach()
+
+        # Drift vs previous update
+        if self.state.prev_i_mean is None:
+            i_drift = f_drift = g_drift = o_drift = torch.tensor(0.0)
+        else:
+            i_drift = (i_mean - self.state.prev_i_mean).abs().detach()
+            f_drift = (f_mean - self.state.prev_f_mean).abs().detach()
+            g_drift = (g_mean - self.state.prev_g_mean).abs().detach()
+            o_drift = (o_mean - self.state.prev_o_mean).abs().detach()
+
+        # Store for next update
+        self.state.prev_i_mean = i_mean
+        self.state.prev_f_mean = f_mean
+        self.state.prev_g_mean = g_mean
+        self.state.prev_o_mean = o_mean
+
+        return LSTMGateMetrics(
+            i_mean=i_mean,
+            f_mean=f_mean,
+            g_mean=g_mean,
+            o_mean=o_mean,
+            i_drift=i_drift,
+            f_drift=f_drift,
+            g_drift=g_drift,
+            o_drift=o_drift
+        )
+
     def backward_and_clip(self,
                           loss):
 

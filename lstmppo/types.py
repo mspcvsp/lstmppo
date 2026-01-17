@@ -356,6 +356,17 @@ class PolicyEvalOutput:
 
 
 @dataclass
+class LSTMGateMetrics:
+    i_mean: torch.Tensor
+    f_mean: torch.Tensor
+    g_mean: torch.Tensor
+    o_mean: torch.Tensor
+    i_drift: torch.Tensor
+    f_drift: torch.Tensor
+    g_drift: torch.Tensor
+    o_drift: torch.Tensor
+
+@dataclass
 class PolicyUpdateInfo:
     policy_loss: torch.Tensor
     value_loss: torch.Tensor
@@ -369,6 +380,7 @@ class PolicyUpdateInfo:
     c_norm: torch.Tensor
     h_drift: torch.Tensor
     c_drift: torch.Tensor
+    lstm_gate_metrics: LSTMGateMetrics
 
 
 def initialize_config(cfg: Config,
