@@ -291,6 +291,8 @@ class LSTMGates:
     f_gates:torch.Tensor
     g_gates:torch.Tensor
     o_gates:torch.Tensor
+    c_gates: torch.Tensor
+    h_gates: torch.Tensor
 
     @property
     def detached(self):
@@ -298,7 +300,9 @@ class LSTMGates:
             i_gates=self.i_gates.detach(),
             f_gates=self.f_gates.detach(),
             g_gates=self.g_gates.detach(),
-            o_gates=self.o_gates.detach()
+            o_gates=self.o_gates.detach(),
+            c_gates=self.c_gates.detach(),
+            h_gates=self.h_gates.detach()
         )
 
 @dataclass

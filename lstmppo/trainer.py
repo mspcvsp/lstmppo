@@ -535,15 +535,24 @@ class LSTMPPOTrainer:
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
-        c_g = eval_output.new_cxs
-        h_g = eval_output.new_hxs
+        c_g = eval_output.gates.c_gates
+        h_g = eval_output.gates.h_gates
+
+        # Fix mask shape once
+        if mask is not None and mask.numel() == i_g.numel() // i_g.shape[-1]:
+            # mask is [T*B] or [T*B,1]
+            T, B, H = i_g.shape
+
+            # Creates a new tensor and reassigns the local name.
+            mask = mask.view(T, B)
 
         # Helper: flatten with optional mask
         def flatten(t):
+            # t: [T,B,H]
             if mask is not None:
-                # mask: [T,B] -> [T,B,1] -> broadcast to [T,B,H]
-                m = mask.unsqueeze(-1).expand_as(t)
-                t = t[m.bool()]
+                # mask: [T,B]
+                m = mask.unsqueeze(-1).expand_as(t)   # [T,B,H]
+                t = t[m.bool()]                       # masked flatten
             else:
                 t = t.reshape(-1)
             return t.detach()

@@ -168,19 +168,33 @@ class LSTMPPOPolicy(nn.Module):
         outputs = []
         gate_list = []
 
+        """
+        The full [T,B,H] sequences need to be recorded in order to compute
+        saturation metrics over the entire sequence
+        """
+        c_list = []
+        h_list = []
+
         for t in range(T):
             h, c, gates = self.lstm_cell(enc[:, t, :], (h, c))
             outputs.append(h.unsqueeze(1))
             gate_list.append(gates)
 
+            # store per‑timestep hidden and cell states [B, H]
+            h_list.append(h) 
+            c_list.append(c)
+
         out = torch.cat(outputs, dim=1)  # (B, T, H)
         i_gates, f_gates, g_gates, o_gates = zip(*gate_list)
 
         # Stack into (B, T, H)
-        i_gates = torch.stack(i_gates, dim=1)
-        f_gates = torch.stack(f_gates, dim=1)
-        g_gates = torch.stack(g_gates, dim=1)
-        o_gates = torch.stack(o_gates, dim=1)
+        # Detaching inside the loop creates many small detached tensors
+        i_gates = torch.stack(i_gates, dim=1).detach()
+        f_gates = torch.stack(f_gates, dim=1).detach()
+        g_gates = torch.stack(g_gates, dim=1).detach()
+        o_gates = torch.stack(o_gates, dim=1).detach()
+        h_gates = torch.stack(h_list, dim=1).detach()
+        c_gates = torch.stack(c_list, dim=1).detach()
 
         # --- Activation Regularization (AR) ---
         ar_loss = (out.pow(2).mean()) * self.ar_coef
@@ -200,10 +214,12 @@ class LSTMPPOPolicy(nn.Module):
                               ar_loss=ar_loss,
                               tar_loss=tar_loss,
                               gates=LSTMGates(
-                                  i_gates=i_gates.detach(),
-                                  f_gates=f_gates.detach(),
-                                  g_gates=g_gates.detach(),
-                                  o_gates=o_gates.detach()
+                                  i_gates=i_gates,
+                                  f_gates=f_gates,
+                                  g_gates=g_gates,
+                                  o_gates=o_gates,
+                                  c_gates=c_gates,
+                                  h_gates=h_gates,
                               ))
 
     # ---------------------------------------------------------
