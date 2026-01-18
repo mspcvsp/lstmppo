@@ -601,6 +601,14 @@ class LSTMPPOTrainer:
             Convert x ∈ [-1,1] to probability p = (x+1)/2
             Then compute binary entropy H(p)
         """
+        # --- Fix mask shape once ---
+        # gates.i_gates is (T, B, H)
+        if (mask is not None and
+            mask.numel() == gates.i_gates.numel() //
+            gates.i_gates.shape[-1]):
+    
+            T, B, H = gates.i_gates.shape
+            mask = mask.view(T, B)
 
         # -------------------------
         # Helper: flatten with mask
