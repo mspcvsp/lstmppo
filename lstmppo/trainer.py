@@ -535,12 +535,8 @@ class LSTMPPOTrainer:
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
-        
-        c_g = eval_output.new_cxs if hasattr(eval_output.gates,
-                                             "new_cxs") else None
-
-        h_g = eval_output.new_hxs if hasattr(eval_output.gates,
-                                             "new_hxs") else None
+        c_g = eval_output.new_cxs
+        h_g = eval_output.new_hxs
 
         # Helper: flatten with optional mask
         def flatten(t):
