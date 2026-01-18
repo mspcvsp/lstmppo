@@ -314,7 +314,8 @@ class LSTMPPOTrainer:
             self.compute_lstm_diagnostics(mb)
 
         lstm_gate_metrics =\
-            self.compute_lstm_cell_diagnostics(eval_output)
+            self.compute_lstm_cell_diagnostics(eval_output,
+                                               mask)
 
         loss = (
             policy_loss
@@ -426,7 +427,8 @@ class LSTMPPOTrainer:
         return h_norm, c_norm, h_drift, c_drift
     
     def compute_lstm_cell_diagnostics(self,
-                                      eval_output: PolicyEvalOutput):
+                                      eval_output: PolicyEvalOutput,
+                                      mask: torch.tensor):
 
         # Gate activations (T, B, H)
         i_g = eval_output.gates.i_gates
@@ -455,7 +457,8 @@ class LSTMPPOTrainer:
         self.state.prev_g_mean = g_mean
         self.state.prev_o_mean = o_mean
 
-        sat = self.compute_gate_saturation(eval_output)
+        sat = self.compute_gate_saturation(eval_output,
+                                           mask=mask)
 
         return LSTMGateMetrics(
             i_mean=i_mean,
@@ -471,7 +474,6 @@ class LSTMPPOTrainer:
 
     def compute_gate_saturation(self,
                                 eval_output: PolicyEvalOutput,
-                                eps: float = 0.05,
                                 mask: Optional[torch.Tensor] = None):
         """
         Computes gate saturation fractions for LSTM gates.
@@ -504,6 +506,8 @@ class LSTMPPOTrainer:
         # -------------------------
         # Sigmoid gates: i, f, o
         # -------------------------
+        eps = self.state.cfg.trainer.gate_sat_eps
+
         for name, g in [("i", i_g), ("f", f_g), ("o", o_g)]:
             g_flat = flatten(g)
             

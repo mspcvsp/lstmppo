@@ -91,6 +91,8 @@ class TrainerConfig:
     """ Average episode statistics EMA alpha """
     max_sparkline_history: int = 100
     """ Maximum number of sparkline history points to keep """
+    gate_sat_eps: float = 0.05
+    """ LSTM gate saturation epsilon """
 
 @dataclass
 class LoggingConfig:
