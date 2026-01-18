@@ -31,7 +31,6 @@ Advantage normalization (trainer)
       ↓
 PPO loss
 """
-from attrs import asdict
 from pathlib import Path
 import numpy as np
 import torch
@@ -472,8 +471,8 @@ class LSTMPPOTrainer:
             f_drift=f_drift,
             g_drift=g_drift,
             o_drift=o_drift,
-            **asdict(sat),
-            **asdict(ent)
+            **sat,
+            **ent
         )
 
     def compute_gate_saturation(self,
