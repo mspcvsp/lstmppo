@@ -12,7 +12,8 @@ class GateLSTMCell(nn.Module):
     def __init__(self,
                  input_size,
                  hidden_size,
-                 dropconnect_p):
+                 dropconnect_p,
+                 bias=True):
         
         super().__init__()
 
@@ -20,25 +21,34 @@ class GateLSTMCell(nn.Module):
         self.hidden_size = hidden_size
         self.dropconnect_p = dropconnect_p
 
+        # Input weights
         self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size,
                                                    input_size))
 
-        self.weight_hh_raw =\
-            nn.Parameter(torch.Tensor(4 * hidden_size, hidden_size))
-        
-        self.register_parameter("weight_hh_raw", self.weight_hh_raw)
-        self.weight_hh = None  # will be set dynamically
+        # Recurrent weights (raw)
+        self.weight_hh_raw = nn.Parameter(torch.Tensor(4 * hidden_size,
+                                                       hidden_size))
 
-        self.bias_ih = nn.Parameter(torch.Tensor(4 * hidden_size))
+        # Biases
+        if bias:
+            self.bias_ih = nn.Parameter(torch.Tensor(4 * hidden_size))
+            self.bias_hh = nn.Parameter(torch.Tensor(4 * hidden_size))
+        else:
+            self.register_parameter("bias_ih", None)
+            self.register_parameter("bias_hh", None)
 
-        self.bias_hh = nn.Parameter(torch.Tensor(4 * hidden_size))
-
+        # Initialize everything
         self.reset_parameters()
+
+        self.register_parameter("weight_hh_raw", self.weight_hh_raw)
+        
+         # Temporary tensor, NOT a parameter
+        self.weight_hh = None
 
     def reset_parameters(self):
 
         nn.init.xavier_uniform_(self.weight_ih)
-        nn.init.orthogonal_(self.weight_hh)
+        nn.init.orthogonal_(self.weight_hh_raw)
         nn.init.zeros_(self.bias_ih)
         nn.init.zeros_(self.bias_hh)
 
