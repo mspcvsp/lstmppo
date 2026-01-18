@@ -47,7 +47,7 @@ from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
 from .types import RecurrentMiniBatch, PolicyUpdateInfo, PolicyEvalOutput
-from .types import LSTMGateMetrics
+from .types import LSTMGateMetrics, LSTMGates
 from .trainer_state import TrainerState
 
 
@@ -460,6 +460,9 @@ class LSTMPPOTrainer:
         sat = self.compute_gate_saturation(eval_output,
                                            mask=mask)
 
+        ent = self.compute_gate_entropy(eval_output.gates,
+                                        mask=mask)
+
         return LSTMGateMetrics(
             i_mean=i_mean,
             f_mean=f_mean,
@@ -469,7 +472,8 @@ class LSTMPPOTrainer:
             f_drift=f_drift,
             g_drift=g_drift,
             o_drift=o_drift,
-            **asdict(sat)
+            **asdict(sat),
+            **asdict(ent)
         )
 
     def compute_gate_saturation(self,
@@ -578,6 +582,70 @@ class LSTMPPOTrainer:
 
             out[f"{name}_sat"] =\
                 (g_flat.abs() > 1 - eps).float().mean().item()
+
+        return out
+
+    def compute_gate_entropy(self,
+                             gates: LSTMGates,
+                             mask: Optional[torch.Tensor] = None):
+        """
+        Computes NaN‑safe entropy metrics for LSTM gates.
+
+        Expected gate shapes: (T, B, H)
+        Mask shape: (T, B) or None
+
+        Sigmoid gates (i, f, o):
+            H(g) = -g log g - (1-g) log (1-g)
+
+        Tanh gates (g, c, h):
+            Convert x ∈ [-1,1] to probability p = (x+1)/2
+            Then compute binary entropy H(p)
+        """
+
+        # -------------------------
+        # Helper: flatten with mask
+        # -------------------------
+        def flatten(t):
+            # t: (T, B, H)
+            if mask is not None:
+                m = mask.unsqueeze(-1).expand_as(t)   # (T, B, H)
+                t = t[m.bool()]                       # masked flatten
+            else:
+                t = t.reshape(-1)
+            return t.detach()
+
+        out = {}
+        eps = self.state.cfg.trainer.gate_ent_eps
+
+        # -------------------------
+        # Sigmoid gates: i, f, o
+        # -------------------------
+        for name in ["i_gates", "f_gates", "o_gates"]:
+            g = getattr(gates, name) # (T, B, H)
+            g = flatten(g)
+
+            # Clamp to avoid log(0)
+            g = torch.clamp(g, eps, 1 - eps)
+
+            entropy = -(g * torch.log(g) + (1 - g) * torch.log(1 - g))
+            out[f"{name[0]}_entropy"] = entropy.mean().item()
+
+        # -------------------------
+        # Tanh gates: g, c, h
+        # -------------------------
+        for name in ["g_gates",
+                     "c_gates",
+                     "h_gates"]:
+
+            g = getattr(gates, name)
+            g = flatten(g)
+
+            # Convert tanh output to probability
+            p = (g + 1) * 0.5
+            p = torch.clamp(p, eps, 1 - eps)
+
+            entropy = -(p * torch.log(p) + (1 - p) * torch.log(1 - p))
+            out[f"{name[0]}_entropy"] = entropy.mean().item()
 
         return out
 

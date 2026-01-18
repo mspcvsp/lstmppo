@@ -93,6 +93,8 @@ class TrainerConfig:
     """ Maximum number of sparkline history points to keep """
     gate_sat_eps: float = 0.05
     """ LSTM gate saturation epsilon """
+    gate_ent_eps: float = 1E-6
+    """ LSTM gate entropy epsilon """
 
 @dataclass
 class LoggingConfig:
@@ -389,6 +391,12 @@ class LSTMGateMetrics:
     c_sat: torch.Tensor
     h_sat: torch.Tensor
 
+    i_entropy: torch.Tensor
+    f_entropy: torch.Tensor
+    o_entropy: torch.Tensor
+    g_entropy: torch.Tensor
+    c_entropy: torch.Tensor
+    h_entropy: torch.Tensor
 
 @dataclass
 class PolicyUpdateInfo:
