@@ -31,9 +31,11 @@ Advantage normalization (trainer)
       ↓
 PPO loss
 """
+from attrs import asdict
 from pathlib import Path
 import numpy as np
 import torch
+from typing import Optional
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
@@ -453,6 +455,8 @@ class LSTMPPOTrainer:
         self.state.prev_g_mean = g_mean
         self.state.prev_o_mean = o_mean
 
+        sat = self.compute_gate_saturation(eval_output)
+
         return LSTMGateMetrics(
             i_mean=i_mean,
             f_mean=f_mean,
@@ -461,8 +465,68 @@ class LSTMPPOTrainer:
             i_drift=i_drift,
             f_drift=f_drift,
             g_drift=g_drift,
-            o_drift=o_drift
+            o_drift=o_drift,
+            **asdict(sat)
         )
+
+    def compute_gate_saturation(self,
+                                eval_output: PolicyEvalOutput,
+                                eps: float = 0.05,
+                                mask: Optional[torch.Tensor] = None):
+        """
+        Computes gate saturation fractions for LSTM gates.
+        Returns a dict compatible with LSTMGateMetrics fields.
+        """
+        # Extract gate activations (T, B, H)
+        i_g = eval_output.gates.i_gates
+        f_g = eval_output.gates.f_gates
+        g_g = eval_output.gates.g_gates
+        o_g = eval_output.gates.o_gates
+        
+        c_g = eval_output.new_cxs if hasattr(eval_output.gates,
+                                             "new_cxs") else None
+
+        h_g = eval_output.new_hxs if hasattr(eval_output.gates,
+                                             "new_hxs") else None
+
+        # Helper: flatten with optional mask
+        def flatten(t):
+            if mask is not None:
+                # mask: [T,B] -> [T,B,1] -> broadcast to [T,B,H]
+                m = mask.unsqueeze(-1).expand_as(t)
+                t = t[m.bool()]
+            else:
+                t = t.reshape(-1)
+            return t.detach()
+
+        out = {}
+
+        # -------------------------
+        # Sigmoid gates: i, f, o
+        # -------------------------
+        for name, g in [("i", i_g), ("f", f_g), ("o", o_g)]:
+            g_flat = flatten(g)
+            
+            out[f"{name}_sat_low"]  =\
+                (g_flat < eps).float().mean().item()
+            
+            out[f"{name}_sat_high"] =\
+                (g_flat > 1 - eps).float().mean().item()
+
+        # -------------------------
+        # Tanh-like gates: g, c, h
+        # -------------------------
+        for name, g in [("g", g_g), ("c", c_g), ("h", h_g)]:
+            
+            if g is None:
+                out[f"{name}_sat"] = 0.0
+                continue
+            g_flat = flatten(g)
+
+            out[f"{name}_sat"] =\
+                (g_flat.abs() > 1 - eps).float().mean().item()
+
+        return out
 
     def backward_and_clip(self,
                           loss):
