@@ -149,9 +149,30 @@ class LSTMPPOPolicy(nn.Module):
     # ---------------------------------------------------------
     def _forward_core(self, x, hxs, cxs):
         """
-        x: (B, obs_dim)       for single-step
-        or (B, T, obs_dim)    for sequence
-        hxs, cxs: (B, H) initial hidden state per sequence
+        _forward_core performs the actual LSTM unroll and therefore produces
+        batch‑first tensors shaped (B, T, H). This is the natural format for:
+
+        - the encoder (batch-first)
+        - the LSTM cell (batch-first)
+        - the policy/value heads (batch-first)
+
+        During the unroll we also record the full per‑timestep sequences of:
+
+        - gate activations  (i, f, g, o)
+        - hidden states     (h_t)
+        - cell states       (c_t)
+
+        These sequences are required for LSTM diagnostics such as:
+
+        - gate drift
+        - gate saturation
+        - gate entropy
+        - hidden/cell state drift
+        - hidden/cell saturation
+
+        All tensors returned here remain batch‑first (B, T, H). They will be
+        transposed later in evaluate_actions_sequence to match PPO’s
+        time‑major (T, B, ...) rollout format.
         """
         obs_flat = self.obs_encoder(x)  # x may be dict/tuple/box
 
@@ -315,15 +336,29 @@ class LSTMPPOPolicy(nn.Module):
         entropy = dist.entropy()              # (T, B)
 
         """
-        Transpose to align gate driftwith:
-        - values (T, B)
-        - logprobs (T, B)
-        - entropy (T, B)"
+        _forward_core returns batch‑first tensors shaped (B, T, H).
+
+        However, the PPO training pipeline stores and processes all rollout
+        data in time‑major format (T, B, ...). This includes:
+
+        - logprobs
+        - entropy
+        - values
+        - advantages
+        - masks
+        - gate drift
+        - gate saturation
+        - gate entropy
+
+        To keep all diagnostics and losses aligned with rollout storage and
+        minibatch slicing, gate tensors must be transposed to (T, B, H).
         """
         i_gates = policy_output.gates.i_gates.transpose(0, 1) # (T, B, H)
         f_gates = policy_output.gates.f_gates.transpose(0, 1)
         g_gates = policy_output.gates.g_gates.transpose(0, 1)
         o_gates = policy_output.gates.o_gates.transpose(0, 1)
+        c_gates = policy_output.gates.c_gates.transpose(0, 1)
+        h_gates = policy_output.gates.h_gates.transpose(0, 1)
 
         return PolicyEvalOutput(
             values=values,                    # (T, B)
@@ -336,5 +371,7 @@ class LSTMPPOPolicy(nn.Module):
             gates=LSTMGates(i_gates=i_gates,
                             f_gates=f_gates,
                             g_gates=g_gates,
-                            o_gates=o_gates)
+                            o_gates=o_gates,
+                            c_gates=c_gates,
+                            h_gates=h_gates)
         )

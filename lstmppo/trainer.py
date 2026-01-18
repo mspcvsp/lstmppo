@@ -475,61 +475,54 @@ class LSTMPPOTrainer:
     def compute_gate_saturation(self,
                                 eval_output: PolicyEvalOutput,
                                 mask: Optional[torch.Tensor] = None):
-        """'
-        #######################
-        Forget gate saturation
-        #######################
-        
-        If f_t ≈ 1 all the time, the LSTM never forgets. Memory accumulates
-        stale information.
-        
-        You get:
-        • 	drifting hidden states
-        • 	long‑term dependencies that shouldn’t exist
-        • 	instability in PPO updates
-        • 	value function collapse
-
-        If f_t ≈ 0 all the time, the LSTM forgets everything. It behaves like
-        a feedforward network.
-        
-        You lose:
-        - temporal credit assignment
-        - memory of partial observability
-        - recurrent advantages
-
-        #####################
-        Input Gate Saturation
-        #####################
-
-        If i_t ≈ 0, the LSTM never writes new information. It becomes
-        memory‑locked.
-
-        If i_t ≈ 1, the LSTM overwrites memory constantly. It becomes
-        memory‑chaotic.
-
-        ######################
-        Output Gate Saturation
-        ######################
-
-        If o_t ≈ 0, the LSTM hides its memory from the policy. The policy
-        becomes blind.
-
-        If o_t ≈ 1, the LSTM exposes everything, even noise. Hidden state
-        becomes unstable.
-
-        #######################################
-        Candidate / cell / hidden saturation
-        #######################################
-        If g_t, c_t, or h_t saturate tanh
-
-        You get:
-        - vanishing gradients
-        - representational collapse
-        - inability to encode nuanced information
-        - stuck policies
-        
-        This is one of the earliest signs of LSTM failure.
         """
+        compute_gate_saturation expects gate tensors in time‑major format
+        (T, B, H), aligned with PPO rollout storage and minibatch slicing.
+
+        Masking also operates in (T, B) format, so saturation statistics must
+        be computed only over alive timesteps. This avoids contamination from
+        terminal states and ensures that:
+
+            - forget/input/output gate saturation
+            - candidate/cell/hidden tanh saturation
+
+        reflect the true recurrent dynamics seen during training.
+
+        Gate tensors may arrive flattened from minibatch sampling (T*B), so
+        the mask is reshaped back to (T, B) when necessary. Each gate tensor
+        is then flattened with the mask applied, producing clean per‑gate
+        saturation fractions.
+
+        -------------------------
+        Forget gate saturation
+        -------------------------
+        If f_t ≈ 1, the LSTM never forgets → stale memory, drifting hidden
+        states, long‑term dependencies that shouldn’t exist, PPO instability,
+        value collapse.
+
+        If f_t ≈ 0, the LSTM forgets everything → behaves like a feedforward
+        network, losing temporal credit assignment and recurrent advantages.
+
+        -------------------------
+        Input gate saturation
+        -------------------------
+        If i_t ≈ 0, the LSTM never writes new information → memory‑locked.
+        If i_t ≈ 1, it overwrites constantly → memory‑chaotic.
+
+        -------------------------
+        Output gate saturation
+        -------------------------
+        If o_t ≈ 0, memory is hidden from the policy → blind policy.
+        If o_t ≈ 1, everything is exposed → unstable hidden state.
+
+        -------------------------
+        Candidate / cell / hidden saturation
+        -------------------------
+        If g_t, c_t, or h_t saturate tanh (|x| ≈ 1), gradients vanish and the
+        model collapses into low‑expressivity representations. This is often
+        an early sign of LSTM failure.
+        """
+
         # Extract gate activations (T, B, H)
         i_g = eval_output.gates.i_gates
         f_g = eval_output.gates.f_gates
