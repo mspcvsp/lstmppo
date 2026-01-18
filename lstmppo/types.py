@@ -379,12 +379,10 @@ class LSTMGateMetrics:
 
     i_sat_low: torch.Tensor
     f_sat_low: torch.Tensor
-    g_sat_low: torch.Tensor
     o_sat_low: torch.Tensor
 
     i_sat_high: torch.Tensor
     f_sat_high: torch.Tensor
-    g_sat_high: torch.Tensor
     o_sat_high: torch.Tensor
 
     g_sat: torch.Tensor
@@ -506,16 +504,16 @@ class Metrics:
         self.o_drift += gm.o_drift.item()
 
         # NEW: gate saturation
-        self.i_sat_low  += gm.i_sat_low.item()
-        self.i_sat_high += gm.i_sat_high.item()
-        self.f_sat_low  += gm.f_sat_low.item()
-        self.f_sat_high += gm.f_sat_high.item()
-        self.o_sat_low  += gm.o_sat_low.item()
-        self.o_sat_high += gm.o_sat_high.item()
+        self.i_sat_low  += gm.i_sat_low
+        self.i_sat_high += gm.i_sat_high
+        self.f_sat_low  += gm.f_sat_low
+        self.f_sat_high += gm.f_sat_high
+        self.o_sat_low  += gm.o_sat_low
+        self.o_sat_high += gm.o_sat_high
 
-        self.g_sat += gm.g_sat.item()
-        self.c_sat += gm.c_sat.item()
-        self.h_sat += gm.h_sat.item()
+        self.g_sat += gm.g_sat
+        self.c_sat += gm.c_sat
+        self.h_sat += gm.h_sat
 
         self.steps += 1
 
