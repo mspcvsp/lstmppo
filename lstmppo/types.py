@@ -358,14 +358,31 @@ class PolicyEvalOutput:
 
 @dataclass
 class LSTMGateMetrics:
+
     i_mean: torch.Tensor
     f_mean: torch.Tensor
     g_mean: torch.Tensor
     o_mean: torch.Tensor
+
     i_drift: torch.Tensor
     f_drift: torch.Tensor
     g_drift: torch.Tensor
     o_drift: torch.Tensor
+
+    i_sat_low: torch.Tensor
+    f_sat_low: torch.Tensor
+    g_sat_low: torch.Tensor
+    o_sat_low: torch.Tensor
+
+    i_sat_high: torch.Tensor
+    f_sat_high: torch.Tensor
+    g_sat_high: torch.Tensor
+    o_sat_high: torch.Tensor
+
+    g_sat: torch.Tensor
+    c_sat: torch.Tensor
+    h_sat: torch.Tensor
+
 
 @dataclass
 class PolicyUpdateInfo:
@@ -428,6 +445,18 @@ class Metrics:
     g_drift: float = 0.0
     o_drift: float = 0.0
 
+    # LSTM Gate saturation metrics
+    i_sat_low: float = 0.0
+    i_sat_high: float = 0.0
+    f_sat_low: float = 0.0
+    f_sat_high: float = 0.0
+    o_sat_low: float = 0.0
+    o_sat_high: float = 0.0
+
+    g_sat: float = 0.0
+    c_sat: float = 0.0
+    h_sat: float = 0.0
+
     explained_var: float = 0.0
     kl_watchdog_triggered: int = 0
     steps: int = 0
@@ -451,6 +480,7 @@ class Metrics:
         self.c_drift += upd.c_drift.item()
 
         gm = upd.lstm_gate_metrics
+
         self.i_mean += gm.i_mean.item()
         self.f_mean += gm.f_mean.item()
         self.g_mean += gm.g_mean.item()
@@ -460,6 +490,18 @@ class Metrics:
         self.f_drift += gm.f_drift.item()
         self.g_drift += gm.g_drift.item()
         self.o_drift += gm.o_drift.item()
+
+        # NEW: gate saturation
+        self.i_sat_low  += gm.i_sat_low.item()
+        self.i_sat_high += gm.i_sat_high.item()
+        self.f_sat_low  += gm.f_sat_low.item()
+        self.f_sat_high += gm.f_sat_high.item()
+        self.o_sat_low  += gm.o_sat_low.item()
+        self.o_sat_high += gm.o_sat_high.item()
+
+        self.g_sat += gm.g_sat.item()
+        self.c_sat += gm.c_sat.item()
+        self.h_sat += gm.h_sat.item()
 
         self.steps += 1
 
