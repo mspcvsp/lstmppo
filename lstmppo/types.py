@@ -469,6 +469,13 @@ class Metrics:
     c_sat: float = 0.0
     h_sat: float = 0.0
 
+    i_entropy: float = 0.0
+    f_entropy: float = 0.0
+    o_entropy: float = 0.0
+    g_entropy: float = 0.0
+    c_entropy: float = 0.0
+    h_entropy: float = 0.0
+
     explained_var: float = 0.0
     kl_watchdog_triggered: int = 0
     steps: int = 0
@@ -516,6 +523,13 @@ class Metrics:
         self.h_sat += gm.h_sat
 
         self.steps += 1
+
+        self.i_entropy += gm.i_entropy.item()
+        self.f_entropy += gm.f_entropy.item()
+        self.o_entropy += gm.o_entropy.item()
+        self.g_entropy += gm.g_entropy.item()
+        self.c_entropy += gm.c_entropy.item()
+        self.h_entropy += gm.h_entropy.item()
 
     def update_episode_stats(self,
                              ep_stats: EpisodeStats):
@@ -708,6 +722,13 @@ class MetricsHistory:
     g_drift: list = field(default_factory=list)
     o_drift: list = field(default_factory=list)
 
+    i_entropy: list = field(default_factory=list)
+    f_entropy: list = field(default_factory=list)
+    g_entropy: list = field(default_factory=list)
+    o_entropy: list = field(default_factory=list)
+    c_entropy: list = field(default_factory=list)
+    h_entropy: list = field(default_factory=list)
+
     def update(self,
                upd: PolicyUpdateInfo,
                stats: Metrics):
@@ -732,6 +753,15 @@ class MetricsHistory:
             "c_norm": upd.c_norm,
             "h_drift": upd.h_drift,
             "c_drift": upd.c_drift,
+            "i_entropy": upd.lstm_gate_metrics.i_entropy,
+            "f_entropy": upd.lstm_gate_metrics.f_entropy,
+            "g_entropy": upd.lstm_gate_metrics.g_entropy,
+            "o_entropy": upd.lstm_gate_metrics.o_entropy,
+            "c_entropy": upd.lstm_gate_metrics.c_entropy,
+            "h_entropy": upd.lstm_gate_metrics.h_entropy,
+            "explained_var": stats.explained_var,
+            "ep_return": stats.avg_ep_returns,
+            "ep_len": stats.avg_ep_len
         }
         
         for name, tensor in mapping.items():
