@@ -178,6 +178,37 @@ class Config:
 
 
 @dataclass
+class LSTMGates:
+    i_gates:torch.Tensor
+    f_gates:torch.Tensor
+    g_gates:torch.Tensor
+    o_gates:torch.Tensor
+    c_gates: torch.Tensor
+    h_gates: torch.Tensor
+
+    @property
+    def detached(self):
+        return LSTMGates(
+            i_gates=self.i_gates.detach(),
+            f_gates=self.f_gates.detach(),
+            g_gates=self.g_gates.detach(),
+            o_gates=self.o_gates.detach(),
+            c_gates=self.c_gates.detach(),
+            h_gates=self.h_gates.detach()
+        )
+
+    def to(self, device):
+        return LSTMGates(
+            i_gates=self.i_gates.to(device),
+            f_gates=self.f_gates.to(device),
+            g_gates=self.g_gates.to(device),
+            o_gates=self.o_gates.to(device),
+            c_gates=self.c_gates.to(device),
+            h_gates=self.h_gates.to(device),
+        )
+
+
+@dataclass
 class RolloutStep:
     obs: torch.Tensor
     actions: torch.Tensor
@@ -188,6 +219,7 @@ class RolloutStep:
     truncated: torch.Tensor
     hxs: torch.Tensor
     cxs: torch.Tensor
+    gates: LSTMGates
 
 
 @dataclass
@@ -286,38 +318,6 @@ class VecEnvState:
         return PolicyInput(self.obs,
                            self.hxs.detach(),
                            self.cxs.detach())
-
-
-@dataclass
-class LSTMGates:
-    i_gates:torch.Tensor
-    f_gates:torch.Tensor
-    g_gates:torch.Tensor
-    o_gates:torch.Tensor
-    c_gates: torch.Tensor
-    h_gates: torch.Tensor
-
-    @property
-    def detached(self):
-        return LSTMGates(
-            i_gates=self.i_gates.detach(),
-            f_gates=self.f_gates.detach(),
-            g_gates=self.g_gates.detach(),
-            o_gates=self.o_gates.detach(),
-            c_gates=self.c_gates.detach(),
-            h_gates=self.h_gates.detach()
-        )
-
-    def to(self, device):
-        return LSTMGates(
-            i_gates=self.i_gates.to(device),
-            f_gates=self.f_gates.to(device),
-            g_gates=self.g_gates.to(device),
-            o_gates=self.o_gates.to(device),
-            c_gates=self.c_gates.to(device),
-            h_gates=self.h_gates.to(device),
-        )
-
 
 @dataclass
 class PolicyOutput:

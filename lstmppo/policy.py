@@ -288,7 +288,7 @@ class LSTMPPOPolicy(nn.Module):
         return actions, logprobs, policy_output
 
     def evaluate_actions_sequence(self,
-                                inp: PolicyEvalInput) -> PolicyEvalOutput:
+                                  inp: PolicyEvalInput) -> PolicyEvalOutput:
         """
         Fully sequence-aware PPO evaluation.
 

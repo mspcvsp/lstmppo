@@ -199,17 +199,24 @@ class LSTMPPOTrainer:
             correctly. The LSTM diagnostics pipeline (drift, norms, entropy,
             saturation) uses (T, B, H) hidden/cell sequences. Using the input 
             states breaks the temporal alignment
+
+            policy forward pass returns (B, T, H) hidden states.
+            rollout buffer expects (T, B, H)
             """
+            hxs = policy_out.new_hxs.transpose(0, 1).detach()
+            cxs = policy_out.new_cxs.transpose(0, 1).detach()
+
             self.buffer.add(RolloutStep(
                 obs=env_state.obs,
-                actions=actions,
+                actions=actions.detach(),
                 rewards=next_state.rewards,
-                values=policy_out.values,
-                logprobs=logprobs,
+                values=policy_out.values.detach(),
+                logprobs=logprobs.detach(),
                 terminated=next_state.terminated,
                 truncated=next_state.truncated,
-                hxs=policy_out.hxs,
-                cxs=policy_out.cxs,
+                hxs=hxs,
+                cxs=cxs,
+                gates=policy_out.gates.detached
             ))
 
             """
@@ -220,10 +227,8 @@ class LSTMPPOTrainer:
             - PPO becoming unstable
             - gradients flowing across episode boundarie
             """
-            self.env.update_hidden_states(
-                policy_out.new_hxs.detach(),
-                policy_out.new_cxs.detach(),
-            )
+            self.env.update_hidden_states(hxs,
+                                          cxs)
 
             env_state = next_state
 
