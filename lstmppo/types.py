@@ -207,6 +207,21 @@ class LSTMGates:
             h_gates=self.h_gates.to(device),
         )
 
+    def transposed(self):
+        """
+        Returns a new LSTMGates object with all gate tensors
+        transposed along the first two dimensions.
+        Useful for converting between (B, T, H) and (T, B, H).
+        """
+        return LSTMGates(
+            i_gates=self.i_gates.transpose(0, 1),
+            f_gates=self.f_gates.transpose(0, 1),
+            g_gates=self.g_gates.transpose(0, 1),
+            o_gates=self.o_gates.transpose(0, 1),
+            c_gates=self.c_gates.transpose(0, 1),
+            h_gates=self.h_gates.transpose(0, 1),
+        )
+
 
 @dataclass
 class RolloutStep:

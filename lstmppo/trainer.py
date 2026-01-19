@@ -216,7 +216,7 @@ class LSTMPPOTrainer:
                 truncated=next_state.truncated,
                 hxs=hxs,
                 cxs=cxs,
-                gates=policy_out.gates.detached
+                gates=policy_out.gates.transposed().detached
             ))
 
             """

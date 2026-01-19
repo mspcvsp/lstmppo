@@ -353,12 +353,14 @@ class LSTMPPOPolicy(nn.Module):
         To keep all diagnostics and losses aligned with rollout storage and
         minibatch slicing, gate tensors must be transposed to (T, B, H).
         """
-        i_gates = policy_output.gates.i_gates.transpose(0, 1) # (T, B, H)
-        f_gates = policy_output.gates.f_gates.transpose(0, 1)
-        g_gates = policy_output.gates.g_gates.transpose(0, 1)
-        o_gates = policy_output.gates.o_gates.transpose(0, 1)
-        c_gates = policy_output.gates.c_gates.transpose(0, 1)
-        h_gates = policy_output.gates.h_gates.transpose(0, 1)
+        gates_t = policy_output.gates.transposed()
+
+        i_gates = gates_t.i_gates
+        f_gates = gates_t.f_gates
+        g_gates = gates_t.g_gates
+        o_gates = gates_t.o_gates
+        c_gates = gates_t.c_gates
+        h_gates = gates_t.h_gates
 
         """
         hxs and cxs are recurrent state outputs from the LSTM that are fed
