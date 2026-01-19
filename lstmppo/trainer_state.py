@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import io
 import json
 import torch
+from types import SimpleNamespace
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
@@ -23,7 +24,7 @@ class TrainerState:
     clip_range: float = 0.0
     target_kl: float = 0.0
     early_stopping_kl: float = 0.0
-    prev_lstm_unit_metrics: None
+    prev_lstm_unit_metrics: SimpleNamespace
     writer: SummaryWriter | None = None
     jsonl_file: str = ""
     jsonl_fp: io.TextIOWrapper | None = None

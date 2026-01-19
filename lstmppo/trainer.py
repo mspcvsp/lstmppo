@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from typing import Optional
+from types import SimpleNamespace
 import random
 from torch import nn
 from torch.distributions.categorical import Categorical
@@ -46,7 +47,8 @@ from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
 from .types import RecurrentMiniBatch, PolicyUpdateInfo, PolicyEvalOutput
-from .types import LSTMUnitMetrics, LSTMGates, LSTMGateSaturation
+from .types import LSTMUnitMetrics, LSTMGateEntropy, LSTMGateSaturation
+from .types import LSTMGates
 from .trainer_state import TrainerState
 
 
@@ -472,7 +474,7 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         # Store for next iteration
         # ----------------------------------------------------
-        self.state.prev_lstm_unit_metrics = LSTMUnitMetrics(
+        self.state.prev_lstm_unit_metrics = SimpleNamespace(
             i_mean=i_mean,
             f_mean=f_mean,
             g_mean=g_mean,
@@ -500,8 +502,8 @@ class LSTMPPOTrainer:
             f_drift=f_drift,
             g_drift=g_drift,
             o_drift=o_drift,
-            sat=sat,
-            ent=ent,
+            saturation=sat,
+            entropy=ent,
             hidden_size=H
         )
 
@@ -600,9 +602,11 @@ class LSTMPPOTrainer:
             hidden_size=H
         )
 
-    def compute_gate_entropy_vectorized(self,
-                                        gates,
-                                        mask: Optional[torch.Tensor]):
+    def compute_gate_entropy_vectorized(
+        self,
+        gates: LSTMGates,
+        mask: Optional[torch.Tensor]
+        ) -> LSTMGateEntropy:
         """
         Computes per-unit entropy for all LSTM gates.
         Returns LSTMGateEntropy dataclass with 1-D tensors [H].
