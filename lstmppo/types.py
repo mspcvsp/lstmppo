@@ -6,7 +6,7 @@
 """
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any, List, Optional
 import torch
 import gymnasium as gym
 import popgym
@@ -365,36 +365,101 @@ class PolicyEvalOutput:
 
 
 @dataclass
-class LSTMGateMetrics:
+class EpisodeStats:
+    episodes: int
+    alive_envs: int
+    max_ep_len: int
+    avg_ep_len: float
+    max_ep_returns: float
+    avg_ep_returns: float
 
-    i_mean: torch.Tensor
-    f_mean: torch.Tensor
-    g_mean: torch.Tensor
-    o_mean: torch.Tensor
 
-    i_drift: torch.Tensor
-    f_drift: torch.Tensor
-    g_drift: torch.Tensor
-    o_drift: torch.Tensor
-
+@dataclass
+class LSTMGateSaturation:
     i_sat_low: torch.Tensor
-    f_sat_low: torch.Tensor
-    o_sat_low: torch.Tensor
-
     i_sat_high: torch.Tensor
+    f_sat_low: torch.Tensor
     f_sat_high: torch.Tensor
+    o_sat_low: torch.Tensor
     o_sat_high: torch.Tensor
 
     g_sat: torch.Tensor
     c_sat: torch.Tensor
     h_sat: torch.Tensor
 
+    hidden_size: Optional[int] = None
+
+    def detach(self):
+        for k, v in self.__dict__.items():
+            if isinstance(v, torch.Tensor):
+                setattr(self, k, v.detach())
+        return self
+
+
+@dataclass
+class LSTMGateEntropy:
     i_entropy: torch.Tensor
     f_entropy: torch.Tensor
     o_entropy: torch.Tensor
     g_entropy: torch.Tensor
     c_entropy: torch.Tensor
     h_entropy: torch.Tensor
+
+    hidden_size: Optional[int] = None
+
+    def detach(self):
+        for k, v in self.__dict__.items():
+            if isinstance(v, torch.Tensor):
+                setattr(self, k, v.detach())
+        return self
+
+
+@dataclass
+class LSTMUnitMetrics:
+    """
+    Per-unit LSTM diagnostics for research-grade interpretability.
+    These metrics remain 2-D (hidden_size) and are intentionally
+    kept separate from the scalar Metrics class.
+
+    All tensors are 1-D: shape [hidden_size].
+    """
+
+    # Gate means (sigmoid gates in [0,1], g_t in [-1,1])
+    i_mean: Optional[torch.Tensor] = None
+    f_mean: Optional[torch.Tensor] = None
+    g_mean: Optional[torch.Tensor] = None
+    o_mean: Optional[torch.Tensor] = None
+
+    # Per-unit drift (difference from previous iteration)
+    i_drift: Optional[torch.Tensor] = None
+    f_drift: Optional[torch.Tensor] = None
+    g_drift: Optional[torch.Tensor] = None
+    o_drift: Optional[torch.Tensor] = None
+
+    saturation: Optional[LSTMGateSaturation] = None
+    entropy: Optional[LSTMGateEntropy] = None
+
+    # Hidden and cell norms per unit
+    h_norm: Optional[torch.Tensor] = None
+    c_norm: Optional[torch.Tensor] = None
+
+    # Optional: store raw hidden_size for validation
+    hidden_size: Optional[int] = None
+
+    def to(self, device):
+        """Move all tensors to a device."""
+        for k, v in self.__dict__.items():
+            if isinstance(v, torch.Tensor):
+                setattr(self, k, v.to(device))
+        return self
+
+    def detach(self):
+        """Detach all tensors from the graph."""
+        for k, v in self.__dict__.items():
+            if isinstance(v, torch.Tensor):
+                setattr(self, k, v.detach())
+        return self
+
 
 @dataclass
 class PolicyUpdateInfo:
@@ -403,24 +468,14 @@ class PolicyUpdateInfo:
     entropy: torch.Tensor
     approx_kl: torch.Tensor
     clip_frac: torch.Tensor
-    grad_norm: float
+    grad_norm: torch.Tensor
     policy_drift: torch.Tensor
     value_drift: torch.Tensor
     h_norm: torch.Tensor
     c_norm: torch.Tensor
     h_drift: torch.Tensor
     c_drift: torch.Tensor
-    lstm_gate_metrics: LSTMGateMetrics
-
-
-@dataclass
-class EpisodeStats:
-    episodes: int
-    alive_envs: int
-    max_ep_len: int
-    avg_ep_len: float
-    max_ep_returns: float
-    avg_ep_returns: float
+    lstm_unit_metrics: LSTMUnitMetrics
 
 
 @dataclass

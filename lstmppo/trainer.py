@@ -46,7 +46,7 @@ from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
 from .types import RecurrentMiniBatch, PolicyUpdateInfo, PolicyEvalOutput
-from .types import LSTMGateMetrics, LSTMGates
+from .types import LSTMUnitMetrics, LSTMGates, LSTMGateSaturation
 from .trainer_state import TrainerState
 
 
@@ -389,80 +389,109 @@ class LSTMPPOTrainer:
 
         return policy_loss, value_loss, approx_kl, clip_frac
 
-    def compute_lstm_diagnostics(self,
-                                 mb: RecurrentMiniBatch):
+    def compute_lstm_unit_diagnostics(
+        self,
+        eval_output: PolicyEvalOutput,
+        mask: Optional[torch.Tensor]
+        ) -> LSTMUnitMetrics:
+        """
+        Computes per-unit LSTM diagnostics (shape [H]) instead of scalars.
+        """
 
-        h_norm = mb.hxs0.norm(dim=1).mean().detach()
-        c_norm = mb.cxs0.norm(dim=1).mean().detach()
-
-        if self.state.prev_h_norm is None:
-            h_drift = torch.tensor(0.0)
-            c_drift = torch.tensor(0.0)
-        else:
-            """
-            Detaching h_norm and c_norm breaks their connection to the LSTM
-            graph, but the subtraction operation itself creates a new tensor.
-            Even if both operands are detached, PyTorch still treats the
-            result as a fresh tensor that could be part of a graph unless you 
-            detach it too.
-
-            LSTM hiddent state Drift is computed for every minibatch, every
-            chunk, every update.
-
-            Consquences of not detacthing drift calculations:
-            ------------------------------------------------
-            • 	PyTorch keeps tiny graphs alive
-            • 	They accumulate across updates
-            • 	Memory usage slowly creeps upward
-            • 	Eventually you get fragmentation or slowdowns
-            Detaching keeps drift metrics as pure numbers.
-            """
-            h_drift = (h_norm - self.state.prev_h_norm).abs().detach()
-            c_drift = (c_norm - self.state.prev_c_norm).abs().detach()
-
-        self.state.prev_h_norm = h_norm.detach()
-        self.state.prev_c_norm = c_norm.detach()
-
-        return h_norm, c_norm, h_drift, c_drift
-    
-    def compute_lstm_cell_diagnostics(self,
-                                      eval_output: PolicyEvalOutput,
-                                      mask: torch.tensor):
-
-        # Gate activations (T, B, H)
+        # (T, B, H)
         i_g = eval_output.gates.i_gates
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
 
-        # Mean gate activations (scalar)
-        i_mean = i_g.mean().detach()
-        f_mean = f_g.mean().detach()
-        g_mean = g_g.mean().detach()
-        o_mean = o_g.mean().detach()
+        T, B, H = i_g.shape
 
-        # Drift vs previous update
-        if self.state.prev_i_mean is None:
-            i_drift = f_drift = g_drift = o_drift = torch.tensor(0.0)
+        # ----------------------------------------------------
+        # Normalize mask shape to (T, B)
+        # ----------------------------------------------------
+        if mask is None:
+            mask_tb = None
         else:
-            i_drift = (i_mean - self.state.prev_i_mean).abs().detach()
-            f_drift = (f_mean - self.state.prev_f_mean).abs().detach()
-            g_drift = (g_mean - self.state.prev_g_mean).abs().detach()
-            o_drift = (o_mean - self.state.prev_o_mean).abs().detach()
+            if mask.dim() == 1:
+                # (T,) or (B,)
+                if mask.shape[0] == T:
+                    mask_tb = mask[:, None].expand(T, B)
+                elif mask.shape[0] == B:
+                    mask_tb = mask[None, :].expand(T, B)
+                else:
+                    raise ValueError("Mask length does not match T or B")
+            elif mask.dim() == 2:
+                if mask.shape == (B, T):
+                    mask_tb = mask.transpose(0, 1)
+                elif mask.shape == (T, B):
+                    mask_tb = mask
+                else:
+                    raise ValueError("Mask must be (T,B) or (B,T)")
+            else:
+                raise ValueError("Mask must be 1D or 2D")
 
-        # Store for next update
-        self.state.prev_i_mean = i_mean
-        self.state.prev_f_mean = f_mean
-        self.state.prev_g_mean = g_mean
-        self.state.prev_o_mean = o_mean
+        # ----------------------------------------------------
+        # Masked mean helper
+        # ----------------------------------------------------
+        def masked_mean(x):
+            # x: (T, B, H)
+            if mask_tb is None:
+                return x.mean(dim=(0, 1)).detach()
 
-        sat = self.compute_gate_saturation(eval_output,
-                                           mask=mask)
+            m = mask_tb.unsqueeze(-1)  # (T, B, 1)
+            x = x * m
+            denom = m.sum(dim=(0, 1)).clamp(min=1)
+            return (x.sum(dim=(0, 1)) / denom).detach()
 
-        ent = self.compute_gate_entropy(eval_output.gates,
-                                        mask=mask)
+        # ----------------------------------------------------
+        # Per-unit means (shape [H])
+        # ----------------------------------------------------
+        i_mean = masked_mean(i_g)
+        f_mean = masked_mean(f_g)
+        g_mean = masked_mean(g_g)
+        o_mean = masked_mean(o_g)
 
-        return LSTMGateMetrics(
+        # ----------------------------------------------------
+        # Per-unit drift
+        # ----------------------------------------------------
+        prev = getattr(self.state,
+                       "prev_lstm_unit_metrics",
+                       None)
+
+        if prev is None:
+            i_drift = torch.zeros_like(i_mean)
+            f_drift = torch.zeros_like(f_mean)
+            g_drift = torch.zeros_like(g_mean)
+            o_drift = torch.zeros_like(o_mean)
+        else:
+            i_drift = (i_mean - prev.i_mean).detach()
+            f_drift = (f_mean - prev.f_mean).detach()
+            g_drift = (g_mean - prev.g_mean).detach()
+            o_drift = (o_mean - prev.o_mean).detach()
+
+        # ----------------------------------------------------
+        # Store for next iteration
+        # ----------------------------------------------------
+        self.state.prev_lstm_unit_metrics = LSTMUnitMetrics(
+            i_mean=i_mean,
+            f_mean=f_mean,
+            g_mean=g_mean,
+            o_mean=o_mean
+        )
+
+        # ----------------------------------------------------
+        # Saturation + entropy (vectorized)
+        # ----------------------------------------------------
+        sat = self.compute_gate_saturation_vectorized(eval_output,
+                                                      mask_tb)
+
+        ent = self.compute_gate_entropy_vectorized(eval_output.gates,
+                                                   mask_tb)
+
+        # ----------------------------------------------------
+        # Return full per-unit metrics
+        # ----------------------------------------------------
+        return LSTMUnitMetrics(
             i_mean=i_mean,
             f_mean=f_mean,
             g_mean=g_mean,
@@ -471,190 +500,195 @@ class LSTMPPOTrainer:
             f_drift=f_drift,
             g_drift=g_drift,
             o_drift=o_drift,
-            **sat,
-            **ent
+            sat=sat,
+            ent=ent,
+            hidden_size=H
         )
 
-    def compute_gate_saturation(self,
-                                eval_output: PolicyEvalOutput,
-                                mask: Optional[torch.Tensor] = None):
+    def compute_gate_saturation_vectorized(
+        self,
+        eval_output: PolicyEvalOutput,
+        mask: Optional[torch.Tensor]
+        ) -> LSTMGateSaturation:
         """
-        compute_gate_saturation expects gate tensors in time‑major format
-        (T, B, H), aligned with PPO rollout storage and minibatch slicing.
-
-        Masking also operates in (T, B) format, so saturation statistics must
-        be computed only over alive timesteps. This avoids contamination from
-        terminal states and ensures that:
-
-            - forget/input/output gate saturation
-            - candidate/cell/hidden tanh saturation
-
-        reflect the true recurrent dynamics seen during training.
-
-        Gate tensors may arrive flattened from minibatch sampling (T*B), so
-        the mask is reshaped back to (T, B) when necessary. Each gate tensor
-        is then flattened with the mask applied, producing clean per‑gate
-        saturation fractions.
-
-        -------------------------
-        Forget gate saturation
-        -------------------------
-        If f_t ≈ 1, the LSTM never forgets → stale memory, drifting hidden
-        states, long‑term dependencies that shouldn’t exist, PPO instability,
-        value collapse.
-
-        If f_t ≈ 0, the LSTM forgets everything → behaves like a feedforward
-        network, losing temporal credit assignment and recurrent advantages.
-
-        -------------------------
-        Input gate saturation
-        -------------------------
-        If i_t ≈ 0, the LSTM never writes new information → memory‑locked.
-        If i_t ≈ 1, it overwrites constantly → memory‑chaotic.
-
-        -------------------------
-        Output gate saturation
-        -------------------------
-        If o_t ≈ 0, memory is hidden from the policy → blind policy.
-        If o_t ≈ 1, everything is exposed → unstable hidden state.
-
-        -------------------------
-        Candidate / cell / hidden saturation
-        -------------------------
-        If g_t, c_t, or h_t saturate tanh (|x| ≈ 1), gradients vanish and the
-        model collapses into low‑expressivity representations. This is often
-        an early sign of LSTM failure.
+        Computes per-unit saturation metrics for all LSTM gates.
+        Returns dict of 1-D tensors of shape [H].
         """
 
-        # Extract gate activations (T, B, H)
+        # -------------------------
+        # Extract gates (T, B, H)
+        # -------------------------
         i_g = eval_output.gates.i_gates
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
-        c_g = eval_output.gates.c_gates
-        h_g = eval_output.gates.h_gates
+        c_g = eval_output.new_cxs      # (T, B, H)
+        h_g = eval_output.new_hxs      # (T, B, H)
 
-        # Fix mask shape once
-        if mask is not None and mask.numel() == i_g.numel() // i_g.shape[-1]:
-            # mask is [T*B] or [T*B,1]
-            T, B, H = i_g.shape
-
-            # Creates a new tensor and reassigns the local name.
-            mask = mask.view(T, B)
-
-        # Helper: flatten with optional mask
-        def flatten(t):
-            # t: [T,B,H]
-            if mask is not None:
-                # mask: [T,B]
-                m = mask.unsqueeze(-1).expand_as(t)   # [T,B,H]
-                t = t[m.bool()]                       # masked flatten
-            else:
-                t = t.reshape(-1)
-            return t.detach()
-
-        out = {}
+        T, B, H = i_g.shape
 
         # -------------------------
-        # Sigmoid gates: i, f, o
+        # Normalize mask to (T, B)
+        # -------------------------
+        if mask is None:
+            mask_tb = None
+        else:
+            if mask.dim() == 1:
+                if mask.shape[0] == T:
+                    mask_tb = mask[:, None].expand(T, B)
+                elif mask.shape[0] == B:
+                    mask_tb = mask[None, :].expand(T, B)
+                else:
+                    raise ValueError("Mask length does not match T or B")
+            elif mask.dim() == 2:
+                if mask.shape == (B, T):
+                    mask_tb = mask.transpose(0, 1)
+                elif mask.shape == (T, B):
+                    mask_tb = mask
+                else:
+                    raise ValueError("Mask must be (T,B) or (B,T)")
+            else:
+                raise ValueError("Mask must be 1D or 2D")
+
+        # -------------------------
+        # Helper: masked fraction
+        # -------------------------
+        def masked_fraction(x_bool):
+            # x_bool: (T, B, H) boolean
+            if mask_tb is None:
+                return x_bool.float().mean(dim=(0, 1)).detach()
+
+            m = mask_tb.unsqueeze(-1)  # (T, B, 1)
+            x = x_bool.float() * m
+            denom = m.sum(dim=(0, 1)).clamp(min=1)
+            return (x.sum(dim=(0, 1)) / denom).detach()
+
+        # -------------------------
+        # Sigmoid gates: low/high saturation
         # -------------------------
         eps = self.state.cfg.trainer.gate_sat_eps
 
-        for name, g in [("i", i_g), ("f", f_g), ("o", o_g)]:
-            g_flat = flatten(g)
-            
-            out[f"{name}_sat_low"]  =\
-                (g_flat < eps).float().mean().item()
-            
-            out[f"{name}_sat_high"] =\
-                (g_flat > 1 - eps).float().mean().item()
+        i_sat_low  = masked_fraction(i_g < eps)
+        i_sat_high = masked_fraction(i_g > 1 - eps)
+
+        f_sat_low  = masked_fraction(f_g < eps)
+        f_sat_high = masked_fraction(f_g > 1 - eps)
+
+        o_sat_low  = masked_fraction(o_g < eps)
+        o_sat_high = masked_fraction(o_g > 1 - eps)
 
         # -------------------------
-        # Tanh-like gates: g, c, h
+        # Tanh-like gates: |x| > 1 - eps
         # -------------------------
-        for name, g in [("g", g_g), ("c", c_g), ("h", h_g)]:
-            
-            if g is None:
-                out[f"{name}_sat"] = 0.0
-                continue
-            g_flat = flatten(g)
+        g_sat = masked_fraction(g_g.abs() > 1 - eps)
+        c_sat = masked_fraction(c_g.abs() > 1 - eps)
+        h_sat = masked_fraction(h_g.abs() > 1 - eps)
 
-            out[f"{name}_sat"] =\
-                (g_flat.abs() > 1 - eps).float().mean().item()
+        # -------------------------
+        # Return dictionary for LSTMUnitMetrics
+        # -------------------------
+        return LSTMGateSaturation(
+            i_sat_low=i_sat_low,
+            i_sat_high=i_sat_high,
+            f_sat_low=f_sat_low,
+            f_sat_high=f_sat_high,
+            o_sat_low=o_sat_low,
+            o_sat_high=o_sat_high,
+            g_sat=g_sat,
+            c_sat=c_sat,
+            h_sat=h_sat,
+            hidden_size=H
+        )
 
-        return out
-
-    def compute_gate_entropy(self,
-                             gates: LSTMGates,
-                             mask: Optional[torch.Tensor] = None):
+    def compute_gate_entropy_vectorized(self,
+                                        gates,
+                                        mask: Optional[torch.Tensor]):
         """
-        Computes NaN‑safe entropy metrics for LSTM gates.
-
-        Expected gate shapes: (T, B, H)
-        Mask shape: (T, B) or None
-
-        Sigmoid gates (i, f, o):
-            H(g) = -g log g - (1-g) log (1-g)
-
-        Tanh gates (g, c, h):
-            Convert x ∈ [-1,1] to probability p = (x+1)/2
-            Then compute binary entropy H(p)
+        Computes per-unit entropy for all LSTM gates.
+        Returns LSTMGateEntropy dataclass with 1-D tensors [H].
         """
-        # --- Fix mask shape once ---
-        # gates.i_gates is (T, B, H)
-        if (mask is not None and
-            mask.numel() == gates.i_gates.numel() //
-            gates.i_gates.shape[-1]):
-    
-            T, B, H = gates.i_gates.shape
-            mask = mask.view(T, B)
 
-        # -------------------------
-        # Helper: flatten with mask
-        # -------------------------
-        def flatten(t):
-            # t: (T, B, H)
-            if mask is not None:
-                m = mask.unsqueeze(-1).expand_as(t)   # (T, B, H)
-                t = t[m.bool()]                       # masked flatten
+        # (T, B, H)
+        i_g = gates.i_gates
+        f_g = gates.f_gates
+        g_g = gates.g_gates
+        o_g = gates.o_gates
+
+        # cell/hidden states (T, B, H)
+        c_g = gates.c_gates if hasattr(gates, "c_gates") else None
+        h_g = gates.h_gates if hasattr(gates, "h_gates") else None
+
+        T, B, H = i_g.shape
+
+        # ----------------------------------------------------
+        # Normalize mask to (T, B)
+        # ----------------------------------------------------
+        if mask is None:
+            mask_tb = None
+        else:
+            if mask.dim() == 1:
+                if mask.shape[0] == T:
+                    mask_tb = mask[:, None].expand(T, B)
+                elif mask.shape[0] == B:
+                    mask_tb = mask[None, :].expand(T, B)
+                else:
+                    raise ValueError("Mask length mismatch")
+            elif mask.dim() == 2:
+                if mask.shape == (B, T):
+                    mask_tb = mask.transpose(0, 1)
+                elif mask.shape == (T, B):
+                    mask_tb = mask
+                else:
+                    raise ValueError("Mask must be (T,B) or (B,T)")
             else:
-                t = t.reshape(-1)
-            return t.detach()
+                raise ValueError("Mask must be 1D or 2D")
 
-        out = {}
+        # ----------------------------------------------------
+        # Helper: masked mean over T,B
+        # ----------------------------------------------------
+        def masked_mean(x):
+            if mask_tb is None:
+                return x.mean(dim=(0, 1)).detach()
+
+            m = mask_tb.unsqueeze(-1)  # (T, B, 1)
+            x = x * m
+            denom = m.sum(dim=(0, 1)).clamp(min=1)
+            return (x.sum(dim=(0, 1)) / denom).detach()
+
+        # ----------------------------------------------------
+        # Sigmoid gate entropy: H(g) = -g log g - (1-g) log (1-g)
+        # ----------------------------------------------------
         eps = self.state.cfg.trainer.gate_ent_eps
 
-        # -------------------------
-        # Sigmoid gates: i, f, o
-        # -------------------------
-        for name in ["i_gates", "f_gates", "o_gates"]:
-            g = getattr(gates, name) # (T, B, H)
-            g = flatten(g)
+        def sigmoid_entropy(g):
+            g = g.clamp(eps, 1 - eps)
+            return -(g * torch.log(g) + (1 - g) * torch.log(1 - g))
 
-            # Clamp to avoid log(0)
-            g = torch.clamp(g, eps, 1 - eps)
+        i_entropy = masked_mean(sigmoid_entropy(i_g))
+        f_entropy = masked_mean(sigmoid_entropy(f_g))
+        o_entropy = masked_mean(sigmoid_entropy(o_g))
 
-            entropy = -(g * torch.log(g) + (1 - g) * torch.log(1 - g))
-            out[f"{name[0]}_entropy"] = entropy.mean().item()
+        # ----------------------------------------------------
+        # Tanh gate entropy: convert x ∈ [-1,1] → p ∈ [0,1]
+        # ----------------------------------------------------
+        def tanh_entropy(x):
+            p = ((x + 1) * 0.5).clamp(eps, 1 - eps)
+            return -(p * torch.log(p) + (1 - p) * torch.log(1 - p))
 
-        # -------------------------
-        # Tanh gates: g, c, h
-        # -------------------------
-        for name in ["g_gates",
-                     "c_gates",
-                     "h_gates"]:
+        g_entropy = masked_mean(tanh_entropy(g_g))
 
-            g = getattr(gates, name)
-            g = flatten(g)
+        c_entropy = masked_mean(tanh_entropy(c_g)) if c_g is not None else torch.zeros(H)
+        h_entropy = masked_mean(tanh_entropy(h_g)) if h_g is not None else torch.zeros(H)
 
-            # Convert tanh output to probability
-            p = (g + 1) * 0.5
-            p = torch.clamp(p, eps, 1 - eps)
-
-            entropy = -(p * torch.log(p) + (1 - p) * torch.log(1 - p))
-            out[f"{name[0]}_entropy"] = entropy.mean().item()
-
-        return out
+        return LSTMGateEntropy(
+            i_entropy=i_entropy,
+            f_entropy=f_entropy,
+            o_entropy=o_entropy,
+            g_entropy=g_entropy,
+            c_entropy=c_entropy,
+            h_entropy=h_entropy,
+            hidden_size=H
+        )
 
     def backward_and_clip(self,
                           loss):

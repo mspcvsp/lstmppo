@@ -23,6 +23,7 @@ class TrainerState:
     clip_range: float = 0.0
     target_kl: float = 0.0
     early_stopping_kl: float = 0.0
+    prev_lstm_unit_metrics: None
     writer: SummaryWriter | None = None
     jsonl_file: str = ""
     jsonl_fp: io.TextIOWrapper | None = None
