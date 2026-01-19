@@ -287,6 +287,7 @@ class VecEnvState:
                            self.hxs.detach(),
                            self.cxs.detach())
 
+
 @dataclass
 class LSTMGates:
     i_gates:torch.Tensor
@@ -306,6 +307,17 @@ class LSTMGates:
             c_gates=self.c_gates.detach(),
             h_gates=self.h_gates.detach()
         )
+
+    def to(self, device):
+        return LSTMGates(
+            i_gates=self.i_gates.to(device),
+            f_gates=self.f_gates.to(device),
+            g_gates=self.g_gates.to(device),
+            o_gates=self.o_gates.to(device),
+            c_gates=self.c_gates.to(device),
+            h_gates=self.h_gates.to(device),
+        )
+
 
 @dataclass
 class PolicyOutput:
@@ -354,14 +366,53 @@ class PolicyEvalInput:
 
 @dataclass
 class PolicyEvalOutput:
-    values: torch.Tensor    # (T, B)
-    logprobs: torch.Tensor  # (T, B)
-    entropy: torch.Tensor   # (T, B)
-    new_hxs: torch.Tensor   # (B,H)
-    new_cxs: torch.Tensor   # (B,H)
-    ar_loss: torch.Tensor   # scalar
-    tar_loss: torch.Tensor  # scalar
-    gates: LSTMGates
+    """
+    Output of the policy evaluation step for a full sequence (T, B).
+    All tensors are (T, B, ...) except new_hxs/new_cxs which are (T, B, H).
+    """
+
+    values: torch.Tensor          # (T, B)
+    logprobs: torch.Tensor        # (T, B)
+    entropy: torch.Tensor         # (T, B)
+
+    new_hxs: torch.Tensor         # (T, B, H)
+    new_cxs: torch.Tensor         # (T, B, H)
+
+    gates: LSTMGates              # i,f,g,o,c,h gates (T, B, H)
+
+    ar_loss: Optional[torch.Tensor] = None
+    tar_loss: Optional[torch.Tensor] = None
+
+    def to(self, device):
+        return PolicyEvalOutput(
+            values=self.values.to(device),
+            logprobs=self.logprobs.to(device),
+            entropy=self.entropy.to(device),
+            new_hxs=self.new_hxs.to(device),
+            new_cxs=self.new_cxs.to(device),
+            gates=self.gates.to(device),
+            ar_loss=(
+                None if self.ar_loss is None
+                else self.ar_loss.to(device)),
+            tar_loss=(
+                None if self.tar_loss is None
+                else self.tar_loss.to(device)),
+        )
+
+    @property
+    def detached(self):
+        return PolicyEvalOutput(
+            values=self.values.detach(),
+            logprobs=self.logprobs.detach(),
+            entropy=self.entropy.detach(),
+            new_hxs=self.new_hxs.detach(),
+            new_cxs=self.new_cxs.detach(),
+            gates=self.gates.detached,
+            ar_loss=(None if self.ar_loss is None
+                     else self.ar_loss.detach()),
+            tar_loss=(None if self.tar_loss is None
+                      else self.tar_loss.detach()),
+        )
 
 
 @dataclass

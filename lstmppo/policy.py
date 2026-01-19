@@ -360,18 +360,39 @@ class LSTMPPOPolicy(nn.Module):
         c_gates = policy_output.gates.c_gates.transpose(0, 1)
         h_gates = policy_output.gates.h_gates.transpose(0, 1)
 
+        """
+        hxs and cxs are recurrent state outputs from the LSTM that are fed
+        into the next rollout step. Detach to prevent gradients flowing
+        across rollout boundaries. PPO treats each rollout as a truncated
+        BPTT segment
+        """
+        new_hxs = policy_output.new_hxs.transpose(0, 1).detach()  # (T, B, H)
+        new_cxs = policy_output.new_cxs.transpose(0, 1).detach()  # (T, B, H)
+
+        """
+        logprobs, values, and entropy must not be detached because PPO uses
+        them in the loss:
+
+        - logprobs → policy gradient
+        - values → value loss
+        - entropy → entropy bonus
+        - ar_loss - LSTM activation regularization
+        - tar_loss - LSTM temporal activation regularization
+        """
         return PolicyEvalOutput(
-            values=values,                    # (T, B)
-            logprobs=logprobs,                # (T, B)
-            entropy=entropy,                  # (T, B)
-            new_hxs=policy_output.new_hxs,    # (B, H)
-            new_cxs=policy_output.new_cxs,    # (B, H)
-            ar_loss=policy_output.ar_loss,    # scalar
-            tar_loss=policy_output.tar_loss,  # scalar
-            gates=LSTMGates(i_gates=i_gates,
-                            f_gates=f_gates,
-                            g_gates=g_gates,
-                            o_gates=o_gates,
-                            c_gates=c_gates,
-                            h_gates=h_gates)
+            values=values,          # (T, B)
+            logprobs=logprobs,      # (T, B)
+            entropy=entropy,        # (T, B)
+            new_hxs=new_hxs,        # (T, B, H)
+            new_cxs=new_cxs,        # (T, B, H)
+            gates=LSTMGates(
+                i_gates=i_gates,    # (T, B, H)
+                f_gates=f_gates,
+                g_gates=g_gates,
+                o_gates=o_gates,
+                c_gates=c_gates,
+                h_gates=h_gates,
+            ).detached,
+            ar_loss=policy_output.ar_loss,
+            tar_loss=policy_output.tar_loss,
         )

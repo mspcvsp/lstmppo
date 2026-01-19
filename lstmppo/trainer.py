@@ -514,7 +514,7 @@ class LSTMPPOTrainer:
         ) -> LSTMGateSaturation:
         """
         Computes per-unit saturation metrics for all LSTM gates.
-        Returns dict of 1-D tensors of shape [H].
+        Returns LSTMGateSaturation dataclass
         """
 
         # -------------------------
