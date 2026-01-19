@@ -203,8 +203,8 @@ class LSTMPPOTrainer:
             policy forward pass returns (B, T, H) hidden states.
             rollout buffer expects (T, B, H)
             """
-            hxs = policy_out.new_hxs.transpose(0, 1).detach()
-            cxs = policy_out.new_cxs.transpose(0, 1).detach()
+            hxs = policy_out.new_hxs.detach().transpose(0, 1)
+            cxs = policy_out.new_cxs.detach().transpose(0, 1)
 
             self.buffer.add(RolloutStep(
                 obs=env_state.obs,
@@ -216,7 +216,7 @@ class LSTMPPOTrainer:
                 truncated=next_state.truncated,
                 hxs=hxs,
                 cxs=cxs,
-                gates=policy_out.gates.transposed().detached
+                gates=policy_out.gates.detached.transposed()
             ))
 
             """
@@ -241,7 +241,11 @@ class LSTMPPOTrainer:
 
             _, _, last_policy_out = self.policy.act(policy_in)
 
-            last_value = last_policy_out.values
+            """
+            Avoids GAE shape mismatches if policy returns (B,1) instead of
+            (B,)
+            """
+            last_value = last_policy_out.values.squeeze(0).detach()
 
             self.buffer.store_last_lstm_states(last_policy_out)
 
