@@ -353,14 +353,7 @@ class LSTMPPOPolicy(nn.Module):
         To keep all diagnostics and losses aligned with rollout storage and
         minibatch slicing, gate tensors must be transposed to (T, B, H).
         """
-        gates_t = policy_output.gates.transposed()
-
-        i_gates = gates_t.i_gates
-        f_gates = gates_t.f_gates
-        g_gates = gates_t.g_gates
-        o_gates = gates_t.o_gates
-        c_gates = gates_t.c_gates
-        h_gates = gates_t.h_gates
+        gates = policy_output.gates.detached.transposed()
 
         """
         hxs and cxs are recurrent state outputs from the LSTM that are fed
@@ -368,8 +361,8 @@ class LSTMPPOPolicy(nn.Module):
         across rollout boundaries. PPO treats each rollout as a truncated
         BPTT segment
         """
-        new_hxs = policy_output.new_hxs.transpose(0, 1).detach()  # (T, B, H)
-        new_cxs = policy_output.new_cxs.transpose(0, 1).detach()  # (T, B, H)
+        new_hxs = policy_output.new_hxs.detach().transpose(0, 1)  # (T, B, H)
+        new_cxs = policy_output.new_cxs.detach().transpose(0, 1)  # (T, B, H)
 
         """
         logprobs, values, and entropy must not be detached because PPO uses
@@ -387,14 +380,7 @@ class LSTMPPOPolicy(nn.Module):
             entropy=entropy,        # (T, B)
             new_hxs=new_hxs,        # (T, B, H)
             new_cxs=new_cxs,        # (T, B, H)
-            gates=LSTMGates(
-                i_gates=i_gates,    # (T, B, H)
-                f_gates=f_gates,
-                g_gates=g_gates,
-                o_gates=o_gates,
-                c_gates=c_gates,
-                h_gates=h_gates,
-            ).detached,
+            gates=gates,
             ar_loss=policy_output.ar_loss,
             tar_loss=policy_output.tar_loss,
         )
