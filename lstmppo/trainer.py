@@ -194,6 +194,12 @@ class LSTMPPOTrainer:
 
             next_state = self.env.step(actions)
 
+            """
+            PPO needs the hidden state at each timestep to compute advantages
+            correctly. The LSTM diagnostics pipeline (drift, norms, entropy,
+            saturation) uses (T, B, H) hidden/cell sequences. Using the input 
+            states breaks the temporal alignment
+            """
             self.buffer.add(RolloutStep(
                 obs=env_state.obs,
                 actions=actions,
@@ -202,13 +208,21 @@ class LSTMPPOTrainer:
                 logprobs=logprobs,
                 terminated=next_state.terminated,
                 truncated=next_state.truncated,
-                hxs=policy_in.hxs,
-                cxs=policy_in.cxs,
+                hxs=policy_out.hxs,
+                cxs=policy_out.cxs,
             ))
 
+            """
+            Detach to prevent
+            -----------------
+            - the autograd graph spans the entire rollout
+            - memory exploding
+            - PPO becoming unstable
+            - gradients flowing across episode boundarie
+            """
             self.env.update_hidden_states(
-                policy_out.new_hxs,
-                policy_out.new_cxs,
+                policy_out.new_hxs.detach(),
+                policy_out.new_cxs.detach(),
             )
 
             env_state = next_state
