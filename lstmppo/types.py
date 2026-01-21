@@ -509,6 +509,10 @@ class LSTMUnitMetrics:
     h_norm: Optional[torch.Tensor] = None
     c_norm: Optional[torch.Tensor] = None
 
+    # Hidden and cell drift per unit
+    h_drift: Optional[torch.Tensor] = None
+    c_drift: Optional[torch.Tensor] = None
+
     # Optional: store raw hidden_size for validation
     hidden_size: Optional[int] = None
 
@@ -610,43 +614,46 @@ class Metrics:
         self.policy_drift += upd.policy_drift.item()
         self.value_drift += upd.value_drift.item()
 
-        self.h_norm += upd.h_norm.item()
-        self.c_norm += upd.c_norm.item()
-        self.h_drift += upd.h_drift.item()
-        self.c_drift += upd.c_drift.item()
+        um = upd.lstm_unit_metrics
 
-        gm = upd.lstm_gate_metrics
+         # Hidden-state norms + drift
+        self.h_norm += um.h_norm.item()
+        self.c_norm += um.c_norm.item()
+        self.h_drift += um.h_drift.item()
+        self.c_drift += um.c_drift.item()
 
-        self.i_mean += gm.i_mean.item()
-        self.f_mean += gm.f_mean.item()
-        self.g_mean += gm.g_mean.item()
-        self.o_mean += gm.o_mean.item()
+        # Gate means
+        self.i_mean += um.i_mean.item()
+        self.f_mean += um.f_mean.item()
+        self.g_mean += um.g_mean.item()
+        self.o_mean += um.o_mean.item()
 
-        self.i_drift += gm.i_drift.item()
-        self.f_drift += gm.f_drift.item()
-        self.g_drift += gm.g_drift.item()
-        self.o_drift += gm.o_drift.item()
+        # Gate drift
+        self.i_drift += um.i_drift.item()
+        self.f_drift += um.f_drift.item()
+        self.g_drift += um.g_drift.item()
+        self.o_drift += um.o_drift.item()
 
-        # NEW: gate saturation
-        self.i_sat_low  += gm.i_sat_low
-        self.i_sat_high += gm.i_sat_high
-        self.f_sat_low  += gm.f_sat_low
-        self.f_sat_high += gm.f_sat_high
-        self.o_sat_low  += gm.o_sat_low
-        self.o_sat_high += gm.o_sat_high
+        # Gate saturation (nested)
+        sat = um.saturation
+        self.i_sat_low  += sat.i_sat_low.item()
+        self.i_sat_high += sat.i_sat_high.item()
+        self.f_sat_low  += sat.f_sat_low.item()
+        self.f_sat_high += sat.f_sat_high.item()
+        self.o_sat_low  += sat.o_sat_low.item()
+        self.o_sat_high += sat.o_sat_high.item()
+        self.g_sat      += sat.g_sat.item()
+        self.c_sat      += sat.c_sat.item()
+        self.h_sat      += sat.h_sat.item()
 
-        self.g_sat += gm.g_sat
-        self.c_sat += gm.c_sat
-        self.h_sat += gm.h_sat
-
-        self.steps += 1
-
-        self.i_entropy += gm.i_entropy.item()
-        self.f_entropy += gm.f_entropy.item()
-        self.o_entropy += gm.o_entropy.item()
-        self.g_entropy += gm.g_entropy.item()
-        self.c_entropy += gm.c_entropy.item()
-        self.h_entropy += gm.h_entropy.item()
+        # Gate entropy (nested)
+        ent = um.entropy
+        self.i_entropy += ent.i_entropy.item()
+        self.f_entropy += ent.f_entropy.item()
+        self.o_entropy += ent.o_entropy.item()
+        self.g_entropy += ent.g_entropy.item()
+        self.c_entropy += ent.c_entropy.item()
+        self.h_entropy += ent.h_entropy.item()
 
     def update_episode_stats(self,
                              ep_stats: EpisodeStats):
@@ -852,33 +859,46 @@ class MetricsHistory:
 
         self.push("kl", upd.approx_kl.item())
 
-        gate = upd.lstm_gate_metrics
+        um = upd.lstm_unit_metrics
+        sat = um.saturation
+        ent = um.entropy
 
         mapping = {
-            "i_mean": gate.i_mean,
-            "f_mean": gate.f_mean,
-            "g_mean": gate.g_mean,
-            "o_mean": gate.o_mean,
-            "i_drift": gate.i_drift,
-            "f_drift": gate.f_drift,
-            "g_drift": gate.g_drift,
-            "o_drift": gate.o_drift,
-            "entropy": upd.entropy,
-            "policy_drift": upd.policy_drift,
-            "value_drift": upd.value_drift,
-            "h_norm": upd.h_norm,
-            "c_norm": upd.c_norm,
-            "h_drift": upd.h_drift,
-            "c_drift": upd.c_drift,
-            "i_entropy": upd.lstm_gate_metrics.i_entropy,
-            "f_entropy": upd.lstm_gate_metrics.f_entropy,
-            "g_entropy": upd.lstm_gate_metrics.g_entropy,
-            "o_entropy": upd.lstm_gate_metrics.o_entropy,
-            "c_entropy": upd.lstm_gate_metrics.c_entropy,
-            "h_entropy": upd.lstm_gate_metrics.h_entropy,
+            "i_mean": um.i_mean,
+            "f_mean": um.f_mean,
+            "g_mean": um.g_mean,
+            "o_mean": um.o_mean,
+
+            "i_drift": um.i_drift,
+            "f_drift": um.f_drift,
+            "g_drift": um.g_drift,
+            "o_drift": um.o_drift,
+
+            "h_norm": um.h_norm,
+            "c_norm": um.c_norm,
+            "h_drift": um.h_drift,
+            "c_drift": um.c_drift,
+
+            "i_entropy": ent.i_entropy,
+            "f_entropy": ent.f_entropy,
+            "g_entropy": ent.g_entropy,
+            "o_entropy": ent.o_entropy,
+            "c_entropy": ent.c_entropy,
+            "h_entropy": ent.h_entropy,
+
+            "i_sat_low":  sat.i_sat_low,
+            "i_sat_high": sat.i_sat_high,
+            "f_sat_low":  sat.f_sat_low,
+            "f_sat_high": sat.f_sat_high,
+            "o_sat_low":  sat.o_sat_low,
+            "o_sat_high": sat.o_sat_high,
+            "g_sat":      sat.g_sat,
+            "c_sat":      sat.c_sat,
+            "h_sat":      sat.h_sat,
+
             "explained_var": stats.explained_var,
             "ep_return": stats.avg_ep_returns,
-            "ep_len": stats.avg_ep_len
+            "ep_len": stats.avg_ep_len,
         }
         
         for name, tensor in mapping.items():
