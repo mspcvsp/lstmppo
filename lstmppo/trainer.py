@@ -195,16 +195,12 @@ class LSTMPPOTrainer:
             next_state = self.env.step(actions)
 
             """
-            PPO needs the hidden state at each timestep to compute advantages
-            correctly. The LSTM diagnostics pipeline (drift, norms, entropy,
-            saturation) uses (T, B, H) hidden/cell sequences. Using the input 
-            states breaks the temporal alignment
-
-            policy forward pass returns (B, T, H) hidden states.
-            rollout buffer expects (T, B, H)
+            During rollout, policy.act() is single‑step, so:
+            - policy_out.new_hxs is (B, H)
+            - NOT (B, T, H)
             """
-            hxs = policy_out.new_hxs.detach().transpose(0, 1)
-            cxs = policy_out.new_cxs.detach().transpose(0, 1)
+            hxs = policy_out.new_hxs.detach()
+            cxs = policy_out.new_cxs.detach()
 
             self.buffer.add(RolloutStep(
                 obs=env_state.obs,
@@ -333,12 +329,8 @@ class LSTMPPOTrainer:
         policy_drift = (new_logp - old_logp).abs().mean()
         value_drift = (values - old_values).abs().mean()
 
-        # Hidden-state norms
-        h_norm, c_norm, h_drift, c_drift =\
-            self.compute_lstm_diagnostics(mb)
-
-        lstm_gate_metrics =\
-            self.compute_lstm_cell_diagnostics(eval_output,
+        lstm_unit_metrics =\
+            self.compute_lstm_unit_diagnostics(eval_output,
                                                mask)
 
         loss = (
@@ -366,11 +358,7 @@ class LSTMPPOTrainer:
                              grad_norm=grad_norm,
                              policy_drift=policy_drift,
                              value_drift=value_drift,
-                             h_norm=h_norm,
-                             c_norm=c_norm,
-                             h_drift=h_drift,
-                             c_drift=c_drift,
-                             lstm_gate_metrics=lstm_gate_metrics)
+                             lstm_unit_metrics=lstm_unit_metrics)
         )
 
     def compute_losses(self,
