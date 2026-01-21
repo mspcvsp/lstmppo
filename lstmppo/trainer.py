@@ -300,14 +300,22 @@ class LSTMPPOTrainer:
         adv = mb.advantages.reshape(-1)
         returns = mb.returns.reshape(-1)
         old_values = mb.old_values.reshape(-1)
-        mask = mb.mask.reshape(-1)
+    
+        """
+        Need two views of the mask:
 
-        if mask.sum() == 0:
+        - Flattened mask for scalar losses: shape (K * B,)
+        - Time–batch mask for diagnostics: shape (K, B)
+        """
+        mask_tb = mb.mask # (K, B)
+        mask_flat = mask_tb.reshape(-1)
+
+        if mask_flat.sum() == 0:
             # All envs terminated/truncated at this chunk.
             # No valid timesteps → skip this chunk entirely.
             return
 
-        valid_adv = adv[mask > 0.5]
+        valid_adv = adv[mask_flat > 0.5]
         
         adv =\
             (adv - valid_adv.mean()) /\
@@ -320,18 +328,18 @@ class LSTMPPOTrainer:
                                 old_values,
                                 returns,
                                 adv,
-                                mask)
+                                mask_flat)
 
         # --- Masked entropy from eval_output ---
         entropy = eval_output.entropy.reshape(-1)
-        entropy = (entropy * mask).sum() / mask.sum()
+        entropy = (entropy * mask_flat).sum() / mask_flat.sum()
 
         policy_drift = (new_logp - old_logp).abs().mean()
         value_drift = (values - old_values).abs().mean()
 
         lstm_unit_metrics =\
             self.compute_lstm_unit_diagnostics(eval_output,
-                                               mask)
+                                               mask_tb)
 
         loss = (
             policy_loss
@@ -535,8 +543,8 @@ class LSTMPPOTrainer:
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
-        c_g = eval_output.new_cxs      # (T, B, H)
-        h_g = eval_output.new_hxs      # (T, B, H)
+        c_g = eval_output.gates.c_gates  # (T, B, H)
+        h_g = eval_output.gates.h_gates  # (T, B, H)
 
         T, B, H = i_g.shape
 
