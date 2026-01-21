@@ -471,6 +471,8 @@ class LSTMPPOTrainer:
         f_mean = masked_mean(f_g)
         g_mean = masked_mean(g_g)
         o_mean = masked_mean(o_g)
+        h_norm = masked_mean(eval_output.new_hxs)  # (H,)
+        c_norm = masked_mean(eval_output.new_cxs)  # (H,)
 
         # ----------------------------------------------------
         # Per-unit drift
@@ -484,11 +486,15 @@ class LSTMPPOTrainer:
             f_drift = torch.zeros_like(f_mean)
             g_drift = torch.zeros_like(g_mean)
             o_drift = torch.zeros_like(o_mean)
+            h_drift = torch.zeros_like(h_norm)
+            c_drift = torch.zeros_like(c_norm)
         else:
             i_drift = (i_mean - prev.i_mean).detach()
             f_drift = (f_mean - prev.f_mean).detach()
             g_drift = (g_mean - prev.g_mean).detach()
             o_drift = (o_mean - prev.o_mean).detach()
+            h_drift = (h_norm - prev.h_norm).detach()
+            c_drift = (c_norm - prev.c_norm).detach()
 
         # ----------------------------------------------------
         # Store for next iteration
@@ -497,7 +503,9 @@ class LSTMPPOTrainer:
             i_mean=i_mean,
             f_mean=f_mean,
             g_mean=g_mean,
-            o_mean=o_mean
+            o_mean=o_mean,
+            h_norm=h_norm,
+            c_norm=c_norm
         )
 
         # ----------------------------------------------------
@@ -523,6 +531,10 @@ class LSTMPPOTrainer:
             o_drift=o_drift,
             saturation=sat,
             entropy=ent,
+            h_norm=h_norm,
+            c_norm=c_norm,
+            h_drift=h_drift,
+            c_drift=c_drift,
             hidden_size=H
         )
 
