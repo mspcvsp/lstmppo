@@ -24,7 +24,6 @@ class TrainerState:
     clip_range: float = 0.0
     target_kl: float = 0.0
     early_stopping_kl: float = 0.0
-    prev_lstm_unit_metrics: SimpleNamespace | None = None
     writer: SummaryWriter | None = None
     jsonl_file: str = ""
     jsonl_fp: io.TextIOWrapper | None = None
@@ -37,6 +36,11 @@ class TrainerState:
         self.cfg = cfg
         self.validation_mode = validation_mode
         self.metrics = Metrics()
+
+        # Can’t have a non‑default field after default fields. Easiest
+        # solution is don’t make prev_lstm_unit_metrics a dataclass field
+        # at all — treat it as a plain attribute
+        self.prev_lstm_unit_metrics = None
 
         if self.validation_mode:
 
