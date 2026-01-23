@@ -618,11 +618,18 @@ class Metrics:
         sat = diag.saturation
         ent = diag.entropy
 
-        # Hidden / cell norms + drift (mean over units)
-        self.h_norm += diag.h_norm.mean().item()
-        self.c_norm += diag.c_norm.mean().item()
-        self.h_drift += diag.h_drift.mean().item()
-        self.c_drift += diag.c_drift.mean().item()
+        # --- aggregate per-unit metrics as means ---
+        if diag.h_norm is not None:
+            self.h_norm += diag.h_norm.mean().item()
+        
+        if diag.c_norm is not None:
+            self.c_norm += diag.c_norm.mean().item()
+        
+        if diag.h_drift is not None:
+            self.h_drift += diag.h_drift.mean().item()
+        
+        if diag.c_drift is not None:
+            self.c_drift += diag.c_drift.mean().item()
 
         # Gate means
         self.i_mean += diag.i_mean.mean().item()
@@ -876,10 +883,14 @@ class MetricsHistory:
             "g_drift": diag.g_drift.mean(),
             "o_drift": diag.o_drift.mean(),
 
-            "h_norm": diag.h_norm.mean(),
-            "c_norm": diag.c_norm.mean(),
-            "h_drift": diag.h_drift.mean(),
-            "c_drift": diag.c_drift.mean(),
+            "h_norm": (diag.h_norm.mean() if diag.h_norm
+                       is not None else stats.h_norm),
+            "c_norm": (diag.c_norm.mean() if diag.c_norm
+                       is not None else stats.c_norm),
+            "h_drift": (diag.h_drift.mean() if diag.h_drift
+                        is not None else stats.h_drift),
+            "c_drift": (diag.c_drift.mean() if diag.c_drift
+                        is not None else stats.c_drift),
 
             "i_entropy": ent.i_entropy.mean(),
             "f_entropy": ent.f_entropy.mean(),
