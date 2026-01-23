@@ -481,7 +481,7 @@ class LSTMGateEntropy:
 
 
 @dataclass
-class LSTMUnitMetrics:
+class LSTMUnitDiagnostics:
     """
     Per-unit LSTM diagnostics for research-grade interpretability.
     These metrics remain 2-D (hidden_size) and are intentionally
@@ -541,7 +541,7 @@ class PolicyUpdateInfo:
     grad_norm: torch.Tensor
     policy_drift: torch.Tensor
     value_drift: torch.Tensor
-    lstm_unit_metrics: LSTMUnitMetrics
+    lstm_unit_diag: LSTMUnitDiagnostics
 
 
 @dataclass
@@ -614,46 +614,46 @@ class Metrics:
         self.policy_drift += upd.policy_drift.item()
         self.value_drift += upd.value_drift.item()
 
-        um = upd.lstm_unit_metrics
+        diag = upd.lstm_unit_diag
+        sat = diag.saturation
+        ent = diag.entropy
 
-         # Hidden-state norms + drift
-        self.h_norm += um.h_norm.item()
-        self.c_norm += um.c_norm.item()
-        self.h_drift += um.h_drift.item()
-        self.c_drift += um.c_drift.item()
+        # Hidden / cell norms + drift (mean over units)
+        self.h_norm += diag.h_norm.mean().item()
+        self.c_norm += diag.c_norm.mean().item()
+        self.h_drift += diag.h_drift.mean().item()
+        self.c_drift += diag.c_drift.mean().item()
 
         # Gate means
-        self.i_mean += um.i_mean.item()
-        self.f_mean += um.f_mean.item()
-        self.g_mean += um.g_mean.item()
-        self.o_mean += um.o_mean.item()
+        self.i_mean += diag.i_mean.mean().item()
+        self.f_mean += diag.f_mean.mean().item()
+        self.g_mean += diag.g_mean.mean().item()
+        self.o_mean += diag.o_mean.mean().item()
 
         # Gate drift
-        self.i_drift += um.i_drift.item()
-        self.f_drift += um.f_drift.item()
-        self.g_drift += um.g_drift.item()
-        self.o_drift += um.o_drift.item()
+        self.i_drift += diag.i_drift.mean().item()
+        self.f_drift += diag.f_drift.mean().item()
+        self.g_drift += diag.g_drift.mean().item()
+        self.o_drift += diag.o_drift.mean().item()
 
-        # Gate saturation (nested)
-        sat = um.saturation
-        self.i_sat_low  += sat.i_sat_low.item()
-        self.i_sat_high += sat.i_sat_high.item()
-        self.f_sat_low  += sat.f_sat_low.item()
-        self.f_sat_high += sat.f_sat_high.item()
-        self.o_sat_low  += sat.o_sat_low.item()
-        self.o_sat_high += sat.o_sat_high.item()
-        self.g_sat      += sat.g_sat.item()
-        self.c_sat      += sat.c_sat.item()
-        self.h_sat      += sat.h_sat.item()
+        # Gate saturation (fractions per unit → mean over units)
+        self.i_sat_low  += sat.i_sat_low.mean().item()
+        self.i_sat_high += sat.i_sat_high.mean().item()
+        self.f_sat_low  += sat.f_sat_low.mean().item()
+        self.f_sat_high += sat.f_sat_high.mean().item()
+        self.o_sat_low  += sat.o_sat_low.mean().item()
+        self.o_sat_high += sat.o_sat_high.mean().item()
+        self.g_sat      += sat.g_sat.mean().item()
+        self.c_sat      += sat.c_sat.mean().item()
+        self.h_sat      += sat.h_sat.mean().item()
 
-        # Gate entropy (nested)
-        ent = um.entropy
-        self.i_entropy += ent.i_entropy.item()
-        self.f_entropy += ent.f_entropy.item()
-        self.o_entropy += ent.o_entropy.item()
-        self.g_entropy += ent.g_entropy.item()
-        self.c_entropy += ent.c_entropy.item()
-        self.h_entropy += ent.h_entropy.item()
+        # Gate entropy (per unit → mean over units)
+        self.i_entropy += ent.i_entropy.mean().item()
+        self.f_entropy += ent.f_entropy.mean().item()
+        self.o_entropy += ent.o_entropy.mean().item()
+        self.g_entropy += ent.g_entropy.mean().item()
+        self.c_entropy += ent.c_entropy.mean().item()
+        self.h_entropy += ent.h_entropy.mean().item()
 
     def update_episode_stats(self,
                              ep_stats: EpisodeStats):
@@ -700,7 +700,9 @@ class Metrics:
                 setattr(self, field, 0.0)
 
     def to_dict(self):
-        return {k: float(getattr(self, k)) for k in self.__dataclass_fields__}
+
+        return {k: float(getattr(self, k))
+                for k in self.__dataclass_fields__}
 
     def render_ppo_metrics(self,
                            lr: float,
@@ -859,42 +861,42 @@ class MetricsHistory:
 
         self.push("kl", upd.approx_kl.item())
 
-        um = upd.lstm_unit_metrics
-        sat = um.saturation
-        ent = um.entropy
+        diag = upd.lstm_unit_diag
+        sat = diag.saturation
+        ent = diag.entropy
 
         mapping = {
-            "i_mean": um.i_mean,
-            "f_mean": um.f_mean,
-            "g_mean": um.g_mean,
-            "o_mean": um.o_mean,
+            "i_mean": diag.i_mean.mean(),
+            "f_mean": diag.f_mean.mean(),
+            "g_mean": diag.g_mean.mean(),
+            "o_mean": diag.o_mean.mean(),
 
-            "i_drift": um.i_drift,
-            "f_drift": um.f_drift,
-            "g_drift": um.g_drift,
-            "o_drift": um.o_drift,
+            "i_drift": diag.i_drift.mean(),
+            "f_drift": diag.f_drift.mean(),
+            "g_drift": diag.g_drift.mean(),
+            "o_drift": diag.o_drift.mean(),
 
-            "h_norm": um.h_norm,
-            "c_norm": um.c_norm,
-            "h_drift": um.h_drift,
-            "c_drift": um.c_drift,
+            "h_norm": diag.h_norm.mean(),
+            "c_norm": diag.c_norm.mean(),
+            "h_drift": diag.h_drift.mean(),
+            "c_drift": diag.c_drift.mean(),
 
-            "i_entropy": ent.i_entropy,
-            "f_entropy": ent.f_entropy,
-            "g_entropy": ent.g_entropy,
-            "o_entropy": ent.o_entropy,
-            "c_entropy": ent.c_entropy,
-            "h_entropy": ent.h_entropy,
+            "i_entropy": ent.i_entropy.mean(),
+            "f_entropy": ent.f_entropy.mean(),
+            "g_entropy": ent.g_entropy.mean(),
+            "o_entropy": ent.o_entropy.mean(),
+            "c_entropy": ent.c_entropy.mean(),
+            "h_entropy": ent.h_entropy.mean(),
 
-            "i_sat_low":  sat.i_sat_low,
-            "i_sat_high": sat.i_sat_high,
-            "f_sat_low":  sat.f_sat_low,
-            "f_sat_high": sat.f_sat_high,
-            "o_sat_low":  sat.o_sat_low,
-            "o_sat_high": sat.o_sat_high,
-            "g_sat":      sat.g_sat,
-            "c_sat":      sat.c_sat,
-            "h_sat":      sat.h_sat,
+            "i_sat_low":  sat.i_sat_low.mean(),
+            "i_sat_high": sat.i_sat_high.mean(),
+            "f_sat_low":  sat.f_sat_low.mean(),
+            "f_sat_high": sat.f_sat_high.mean(),
+            "o_sat_low":  sat.o_sat_low.mean(),
+            "o_sat_high": sat.o_sat_high.mean(),
+            "g_sat":      sat.g_sat.mean(),
+            "c_sat":      sat.c_sat.mean(),
+            "h_sat":      sat.h_sat.mean(),
 
             "explained_var": stats.explained_var,
             "ep_return": stats.avg_ep_returns,

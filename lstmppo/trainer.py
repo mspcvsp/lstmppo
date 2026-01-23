@@ -47,7 +47,7 @@ from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .policy import LSTMPPOPolicy
 from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
 from .types import RecurrentMiniBatch, PolicyUpdateInfo, PolicyEvalOutput
-from .types import LSTMUnitMetrics, LSTMGateEntropy, LSTMGateSaturation
+from .types import LSTMUnitDiagnostics, LSTMGateEntropy, LSTMGateSaturation
 from .types import LSTMGates
 from .trainer_state import TrainerState
 
@@ -414,7 +414,7 @@ class LSTMPPOTrainer:
         self,
         eval_output: PolicyEvalOutput,
         mask: Optional[torch.Tensor]
-        ) -> LSTMUnitMetrics:
+        ) -> LSTMUnitDiagnostics:
         """
         Computes per-unit LSTM diagnostics (shape [H]) instead of scalars.
         """
@@ -424,6 +424,8 @@ class LSTMPPOTrainer:
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
+        h_g = eval_output.gates.h_gates
+        c_g = eval_output.gates.c_gates
 
         T, B, H = i_g.shape
 
@@ -471,8 +473,10 @@ class LSTMPPOTrainer:
         f_mean = masked_mean(f_g)
         g_mean = masked_mean(g_g)
         o_mean = masked_mean(o_g)
-        h_norm = masked_mean(eval_output.new_hxs)  # (H,)
-        c_norm = masked_mean(eval_output.new_cxs)  # (H,)
+        
+        # Hidden / cell “norms” per unit (here: mean |h|, |c|)
+        h_norm = masked_mean(h_g.abs())
+        c_norm = masked_mean(c_g.abs())
 
         # ----------------------------------------------------
         # Per-unit drift
@@ -520,7 +524,7 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         # Return full per-unit metrics
         # ----------------------------------------------------
-        return LSTMUnitMetrics(
+        return LSTMUnitDiagnostics(
             i_mean=i_mean,
             f_mean=f_mean,
             g_mean=g_mean,
@@ -555,8 +559,8 @@ class LSTMPPOTrainer:
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
-        c_g = eval_output.gates.c_gates  # (T, B, H)
-        h_g = eval_output.gates.h_gates  # (T, B, H)
+        c_g = eval_output.gates.c_gates
+        h_g = eval_output.gates.h_gates
 
         T, B, H = i_g.shape
 
@@ -618,7 +622,7 @@ class LSTMPPOTrainer:
         h_sat = masked_fraction(h_g.abs() > 1 - eps)
 
         # -------------------------
-        # Return dictionary for LSTMUnitMetrics
+        # Return dictionary for LSTMUnitDiagnostics
         # -------------------------
         return LSTMGateSaturation(
             i_sat_low=i_sat_low,
@@ -835,11 +839,14 @@ class LSTMPPOTrainer:
         vals_rec = torch.cat(vals_chunks, dim=0)
         logp_rec = torch.cat(logp_chunks, dim=0)
 
-        print("TBPTT value diff:",
-              (vals_rec - full_vals).abs().max().item())
+        max_val_diff = (vals_rec - full_vals).abs().max().item()
+        max_logp_diff = (logp_rec - full_logp).abs().max().item()
 
-        print("TBPTT logprob diff:",
-              (logp_rec - full_logp).abs().max().item())
+        print("TBPTT value diff:", max_val_diff)
+        print("TBPTT logprob diff:", max_logp_diff)
+
+        assert max_val_diff < 1e-6
+        assert max_logp_diff < 1e-6
 
     def assert_rollout_deterministic(self):
 
