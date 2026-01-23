@@ -844,8 +844,8 @@ class LSTMPPOTrainer:
                 vals_chunks.append(out.values)
                 logp_chunks.append(out.logprobs)
 
-                hxs = out.new_hxs.detach()
-                cxs = out.new_cxs.detach()
+                hxs = out.new_hxs[-1].detach()   # (B, H)
+                cxs = out.new_cxs[-1].detach()   # (B, H)
 
         vals_rec = torch.cat(vals_chunks, dim=0)
         logp_rec = torch.cat(logp_chunks, dim=0)
