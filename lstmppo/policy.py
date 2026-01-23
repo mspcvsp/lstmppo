@@ -361,8 +361,20 @@ class LSTMPPOPolicy(nn.Module):
         across rollout boundaries. PPO treats each rollout as a truncated
         BPTT segment
         """
-        new_hxs = policy_output.new_hxs.detach().transpose(0, 1)  # (T, B, H)
-        new_cxs = policy_output.new_cxs.detach().transpose(0, 1)  # (T, B, H)
+        # --- Make new_hxs/new_cxs time-major (T, B, H) robustly ---
+        new_hxs = policy_output.new_hxs.detach()
+        new_cxs = policy_output.new_cxs.detach()
+
+        if new_hxs.dim() == 2:
+            # (B, H) → (T=1, B, H) – shouldn’t happen here, but guard anyway
+            new_hxs = new_hxs.unsqueeze(0).expand(T, B, -1)
+            new_cxs = new_cxs.unsqueeze(0).expand(T, B, -1)
+        elif new_hxs.dim() == 3:
+            # Either (B, T, H) or (T, B, H)
+            if new_hxs.shape == (B, T, new_hxs.size(-1)):
+                new_hxs = new_hxs.transpose(0, 1)  # (T, B, H)
+                new_cxs = new_cxs.transpose(0, 1)  # (T, B, H)
+            # else assume already (T, B, H)
 
         """
         logprobs, values, and entropy must not be detached because PPO uses

@@ -424,8 +424,8 @@ class LSTMPPOTrainer:
         f_g = eval_output.gates.f_gates
         g_g = eval_output.gates.g_gates
         o_g = eval_output.gates.o_gates
-        h_g = eval_output.gates.h_gates
-        c_g = eval_output.gates.c_gates
+        h_all = eval_output.new_hxs
+        c_all = eval_output.new_cxs
 
         T, B, H = i_g.shape
 
@@ -458,8 +458,15 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         def masked_mean(x):
             # x: (T, B, H)
+            assert x.dim() == 3,\
+                f"masked_mean expects (T,B,H), got {x.shape}"
+
             if mask_tb is None:
                 return x.mean(dim=(0, 1)).detach()
+
+            assert (mask_tb.shape[0] == x.shape[0] and
+                    mask_tb.shape[1] == x.shape[1]), \
+                f"mask/x mismatch: mask {mask_tb.shape}, x {x.shape}"
 
             m = mask_tb.unsqueeze(-1)  # (T, B, 1)
             x = x * m
@@ -474,9 +481,9 @@ class LSTMPPOTrainer:
         g_mean = masked_mean(g_g)
         o_mean = masked_mean(o_g)
         
-        # Hidden / cell “norms” per unit (here: mean |h|, |c|)
-        h_norm = masked_mean(h_g.abs())
-        c_norm = masked_mean(c_g.abs())
+        # --- per-unit norms  ---
+        h_norm = masked_mean(h_all)  # (H,)
+        c_norm = masked_mean(c_all)  # (H,)
 
         # ----------------------------------------------------
         # Per-unit drift
@@ -792,6 +799,10 @@ class LSTMPPOTrainer:
         self.collect_rollout()
 
         batch = next(self.buffer.get_recurrent_minibatches())
+
+        print("batch.hxs shape:", batch.hxs.shape)
+        print("batch.cxs shape:", batch.cxs.shape)
+
         T, B, _ = batch.obs.shape
 
         # Use the hidden state at the start of the sequence

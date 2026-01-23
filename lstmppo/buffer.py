@@ -131,10 +131,12 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     # Store final LSTM states for next rollout
     # ---------------------------------------------------------
-    def store_last_lstm_states(self, last_policy_output):
+    def store_last_lstm_states(self,
+                               last_policy_output):
 
-        self.last_hxs = last_policy_output.new_hxs.detach()
-        self.last_cxs = last_policy_output.new_cxs.detach()
+        # last timestep hidden state (B, H)
+        self.last_hxs = last_policy_output.new_hxs[-1].detach()
+        self.last_cxs = last_policy_output.new_cxs[-1].detach()
 
     # ---------------------------------------------------------
     # GAE-Lambda
