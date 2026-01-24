@@ -17,6 +17,7 @@ dependencies = [
     "torch>=2.0",
     "numpy>=1.23",
     "gymnasium>=0.29",
+    "popgym>=0.1.0",
     "matplotlib>=3.7",
     "tqdm>=4.65",
     "tyro>=0.5",
