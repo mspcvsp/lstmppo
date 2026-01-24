@@ -5,3 +5,4 @@ wandb/
 tb_logs/
 jsonl/
 checkpoints/
+*egg-info
