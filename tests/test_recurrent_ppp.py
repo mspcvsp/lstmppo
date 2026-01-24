@@ -2,6 +2,8 @@ import torch
 import pytest
 from lstmppo.trainer import LSTMPPOTrainer
 
+pytestmark = pytest.mark.gpu
+
 # ------------------------------------------------------------
 # Deterministic trainer fixture
 # ------------------------------------------------------------
@@ -43,6 +45,7 @@ def test_rollout_replay_determinism(deterministic_trainer):
 # ------------------------------------------------------------
 # 3. Hidden-state alignment test
 # ------------------------------------------------------------
+@pytest.mark.gpu
 def test_hidden_state_alignment(deterministic_trainer):
     trainer = deterministic_trainer
     trainer.collect_rollout()
