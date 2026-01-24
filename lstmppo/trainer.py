@@ -933,53 +933,95 @@ class LSTMPPOTrainer:
 
         print("=== LSTM State-Flow Validation ===")
 
-        # Deterministic policy
+        # -----------------------------------------------------
+        # 1. Deterministic mode: no DropConnect, no dropout
+        # -----------------------------------------------------
         self.policy.eval()
+        self.state.cfg.trainer.debug_mode = True
 
-        # Single-env rollout recommended
-        self.collect_rollout()
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
-        batches = list(self.buffer.get_recurrent_minibatches())
-        assert len(batches) == 1, "Use num_envs=1 for validation."
-        batch = batches[0]
+        # -----------------------------------------------------
+        # 2. Collect rollout using *forward()*, not act()
+        # -----------------------------------------------------
+        self.buffer.reset()
+        env_state = self.env.reset(seed=self.state.cfg.trainer.seed)
 
-        T, B, _ = batch.obs.shape
+        # Use stored LSTM states if available
+        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
+
+        stored_values = []
+        stored_logprobs = []
+        stored_hxs = []
+        stored_cxs = []
+        stored_obs = []
+        stored_actions = []
+
+        with torch.no_grad():
+            for _ in range(self.rollout_steps):
+
+                policy_in = env_state.policy_input
+
+                # IMPORTANT: use forward(), not act()
+                policy_out = self.policy.forward(policy_in)
+
+                dist = Categorical(logits=policy_out.logits)
+                actions = dist.sample()
+                logprobs = dist.log_prob(actions)
+
+                stored_obs.append(env_state.obs.clone())
+                stored_values.append(policy_out.values.clone())
+                stored_logprobs.append(logprobs.clone())
+                stored_hxs.append(policy_out.new_hxs.clone())
+                stored_cxs.append(policy_out.new_cxs.clone())
+                stored_actions.append(actions.clone())
+
+                env_state = self.env.step(actions)
+
+        # Stack rollout tensors
+        stored_obs = torch.stack(stored_obs, dim=0)          # (T, B, obs_dim)
+        stored_values = torch.stack(stored_values, dim=0)    # (T, B)
+        stored_logprobs = torch.stack(stored_logprobs, dim=0)# (T, B)
+        stored_hxs = torch.stack(stored_hxs, dim=0)          # (T, B, H)
+        stored_cxs = torch.stack(stored_cxs, dim=0)          # (T, B, H)
+        stored_actions = torch.stack(stored_actions, dim=0)  # (T, B)
+
+        T, B, _ = stored_obs.shape
         print(f"T = {T}, B = {B}")
 
-        stored_values = batch.values          # (T, B)
-        stored_logprobs = batch.logprobs      # (T, B)
-
+        # -----------------------------------------------------
+        # 3. Replay using EXACT SAME forward path
+        # -----------------------------------------------------
         rec_values = []
         rec_logprobs = []
 
         with torch.no_grad():
             for t in range(T):
-                obs_t = batch.obs[t]          # (B, obs_dim)
-                hxs_t = batch.hxs[t]          # (B, H)
-                cxs_t = batch.cxs[t]          # (B, H)
-                act_t = batch.actions[t]      # (B, 1) or (B,)
 
-                # Build single-step PolicyInput
                 policy_in = PolicyInput(
-                    obs=obs_t,                # (B, obs_dim)
-                    hxs=hxs_t,                # (B, H)
-                    cxs=cxs_t,                # (B, H)
+                    obs=stored_obs[t],      # (B, obs_dim)
+                    hxs=stored_hxs[t],      # (B, H)
+                    cxs=stored_cxs[t],      # (B, H)
                 )
 
                 policy_out = self.policy.forward(policy_in)
                 dist = Categorical(logits=policy_out.logits)
 
-                actions = act_t.squeeze(-1) if act_t.dim() == 2 else act_t
+                actions = stored_actions[t]
+                logp_t = dist.log_prob(actions)
 
-                val_t = policy_out.values          # (B,)
-                logp_t = dist.log_prob(actions)    # (B,)
+                rec_values.append(policy_out.values.unsqueeze(0))
+                rec_logprobs.append(logp_t.unsqueeze(0))
 
-                rec_values.append(val_t.unsqueeze(0))    # (1, B)
-                rec_logprobs.append(logp_t.unsqueeze(0)) # (1, B)
+        values_rec = torch.cat(rec_values, dim=0)
+        logprobs_rec = torch.cat(rec_logprobs, dim=0)
 
-        values_rec = torch.cat(rec_values, dim=0)      # (T, B)
-        logprobs_rec = torch.cat(rec_logprobs, dim=0)  # (T, B)
-
+        # -----------------------------------------------------
+        # 4. Compare
+        # -----------------------------------------------------
         val_diff = (values_rec - stored_values).abs()
         logp_diff = (logprobs_rec - stored_logprobs).abs()
 

@@ -13,13 +13,15 @@ class GateLSTMCell(nn.Module):
                  input_size,
                  hidden_size,
                  dropconnect_p,
-                 bias=True):
+                 **kwargs):
         
         super().__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.dropconnect_p = dropconnect_p
+        self.debug_mode = kwargs.get("debug_mode", False)
+        print(f"debug_mode: {self.debug_mode}")
 
         # Input weights
         self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size,
@@ -30,7 +32,7 @@ class GateLSTMCell(nn.Module):
                                                        hidden_size))
 
         # Biases
-        if bias:
+        if kwargs.get("bias", True):
             self.bias_ih = nn.Parameter(torch.Tensor(4 * hidden_size))
             self.bias_hh = nn.Parameter(torch.Tensor(4 * hidden_size))
         else:
@@ -58,7 +60,7 @@ class GateLSTMCell(nn.Module):
 
     def _apply_dropconnect(self):
 
-        if self.training:
+        if self.training and not self.debug_mode:
     
             mask = torch.ones_like(self.weight_hh_raw)
     
@@ -127,7 +129,8 @@ class LSTMPPOPolicy(nn.Module):
         self.lstm_cell = GateLSTMCell(
             input_size=cfg.lstm.enc_hidden_size,    
             hidden_size=cfg.lstm.lstm_hidden_size,
-            dropconnect_p=cfg.lstm.dropconnect_p
+            dropconnect_p=cfg.lstm.dropconnect_p,
+            debug_mode=cfg.trainer.debug_mode
         )
 
         self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
