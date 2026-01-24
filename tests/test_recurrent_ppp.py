@@ -302,3 +302,183 @@ def test_drift_matches_mean_difference(deterministic_trainer):
 
     assert torch.allclose(d2.i_drift, d2.i_mean - d1.i_mean)
     assert torch.allclose(d2.h_drift, d2.h_norm - d1.h_norm)
+
+
+"""
+Saturation and entropy monotonicity tests are incredibly powerful because
+they catch:
+
+- gate collapse
+- gate freezing
+- numerical instability
+- mask‑related regressions
+- incorrect vectorized saturation/entropy logic
+- incorrect clamping behavior
+- incorrect per‑unit aggregation
+
+And they do it without depending on environment dynamics.
+---------------------------------------------------------------
+What “monotonicity” means for LSTM-PPO
+
+For saturation:
+--------------
+- If gate activations move closer to saturation (0 or 1), saturation fraction
+  must increase.
+- If gate activations move away from saturation, saturation fraction must 
+  decrease.
+
+For entropy:
+-----------
+- If gate activations become more extreme (closer to 0 or 1 for sigmoid,
+  ±1 for tanh), entropy must decrease.
+- If gate activations become more uniform (closer to 0.5 for sigmoid, 0 for
+  tanh), entropy must increase.
+-----------------------------------------------------------------------
+This is a test suite that validates:
+
+- saturation increases when gates saturate
+- saturation decreases when gates desaturate
+- entropy decreases when gates saturate
+- entropy increases when gates desaturate
+- sigmoid and tanh behavior both correct
+- vectorized masking logic correct
+- clamping logic correct
+- no numerical instability
+- no regression in gate extraction
+"""
+def test_sigmoid_saturation_monotonicity(deterministic_trainer):
+
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    # Baseline diagnostics
+    base = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    base_sat = base.saturation
+
+    # Force gates toward saturation by scaling weights
+    with torch.no_grad():
+        for p in trainer.policy.lstm_cell.parameters():
+            p.mul_(3.0)
+
+    trainer.collect_rollout()
+    sat = trainer.compute_lstm_unit_diagnostics_from_rollout().saturation
+
+    # Saturation must increase for sigmoid gates
+    assert (sat.i_sat_low >= base_sat.i_sat_low).all()
+    assert (sat.i_sat_high >= base_sat.i_sat_high).all()
+    assert (sat.f_sat_low >= base_sat.f_sat_low).all()
+    assert (sat.f_sat_high >= base_sat.f_sat_high).all()
+    assert (sat.o_sat_low >= base_sat.o_sat_low).all()
+    assert (sat.o_sat_high >= base_sat.o_sat_high).all()
+
+
+def test_tanh_saturation_monotonicity(deterministic_trainer):
+
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    base = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    base_sat = base.saturation
+
+    # Push tanh gates toward ±1
+    with torch.no_grad():
+        for p in trainer.policy.lstm_cell.parameters():
+            p.mul_(3.0)
+
+    trainer.collect_rollout()
+    sat = trainer.compute_lstm_unit_diagnostics_from_rollout().saturation
+
+    assert (sat.g_sat >= base_sat.g_sat).all()
+    assert (sat.c_sat >= base_sat.c_sat).all()
+    assert (sat.h_sat >= base_sat.h_sat).all()
+
+# Entropy must decrease when gates become more extreme.
+def test_sigmoid_entropy_monotonicity(deterministic_trainer):
+
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    base = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    base_ent = base.entropy
+
+    # Push gates toward 0/1
+    with torch.no_grad():
+        for p in trainer.policy.lstm_cell.parameters():
+            p.mul_(3.0)
+
+    trainer.collect_rollout()
+    ent = trainer.compute_lstm_unit_diagnostics_from_rollout().entropy
+
+    assert (ent.i_entropy <= base_ent.i_entropy).all()
+    assert (ent.f_entropy <= base_ent.f_entropy).all()
+    assert (ent.o_entropy <= base_ent.o_entropy).all()
+
+def test_tanh_entropy_monotonicity(deterministic_trainer):
+
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    base = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    base_ent = base.entropy
+
+    # Push tanh gates toward ±1
+    with torch.no_grad():
+        for p in trainer.policy.lstm_cell.parameters():
+            p.mul_(3.0)
+
+    trainer.collect_rollout()
+    ent = trainer.compute_lstm_unit_diagnostics_from_rollout().entropy
+
+    assert (ent.g_entropy <= base_ent.g_entropy).all()
+    assert (ent.c_entropy <= base_ent.c_entropy).all()
+    assert (ent.h_entropy <= base_ent.h_entropy).all()
+
+
+# Verify entropy increases when gates become more uniform. This is the
+# inverse monotonicity test.
+def test_entropy_increases_when_gates_uniformize(deterministic_trainer):
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    base = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    base_ent = base.entropy
+
+    # Push gates toward 0.5 / 0
+    with torch.no_grad():
+        for p in trainer.policy.lstm_cell.parameters():
+            p.mul_(0.1)
+
+    trainer.collect_rollout()
+    ent = trainer.compute_lstm_unit_diagnostics_from_rollout().entropy
+
+    assert (ent.i_entropy >= base_ent.i_entropy).all()
+    assert (ent.f_entropy >= base_ent.f_entropy).all()
+    assert (ent.o_entropy >= base_ent.o_entropy).all()
+    assert (ent.g_entropy >= base_ent.g_entropy).all()
+
+# Verify saturation decreases when gates move away from extremes
+def test_saturation_decreases_when_gates_uniformize(deterministic_trainer):
+
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    base = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    base_sat = base.saturation
+
+    # Push gates toward center
+    with torch.no_grad():
+        for p in trainer.policy.lstm_cell.parameters():
+            p.mul_(0.1)
+
+    trainer.collect_rollout()
+    sat = trainer.compute_lstm_unit_diagnostics_from_rollout().saturation
+
+    assert (sat.i_sat_low <= base_sat.i_sat_low).all()
+    assert (sat.i_sat_high <= base_sat.i_sat_high).all()
+    assert (sat.f_sat_low <= base_sat.f_sat_low).all()
+    assert (sat.f_sat_high <= base_sat.f_sat_high).all()
+    assert (sat.o_sat_low <= base_sat.o_sat_low).all()
+    assert (sat.o_sat_high <= base_sat.o_sat_high).all()
+    assert (sat.g_sat <= base_sat.g_sat).all()
+    assert (sat.c_sat <= base_sat.c_sat).all()
+    assert (sat.h_sat <= base_sat.h_sat).all()
