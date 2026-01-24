@@ -74,3 +74,19 @@ def test_unit_metrics_shapes(deterministic_trainer):
     ]:
         t = getattr(diag, name)
         assert t.shape == (H,)
+
+def test_unit_metrics_mask_behavior(deterministic_trainer):
+    trainer = deterministic_trainer
+
+    trainer.collect_rollout()
+    full = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    # Mask out half the rollout
+    T = trainer.rollout_steps
+    mask = torch.zeros(T, trainer.num_envs)
+    mask[: T // 2] = 1.0
+
+    eval_output = trainer.replay_policy_on_rollout()
+    half = trainer.compute_lstm_unit_diagnostics(eval_output, mask)
+
+    assert not torch.allclose(full.i_mean, half.i_mean)
