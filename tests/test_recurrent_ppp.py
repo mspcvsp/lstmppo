@@ -58,6 +58,7 @@ def test_hidden_state_alignment(deterministic_trainer):
     #    We validate this by ensuring the state-flow validator passes.
     trainer.validate_lstm_state_flow()
 
+
 # Shape correctness for all per‑unit metrics
 def test_unit_metrics_shapes(deterministic_trainer):
     trainer = deterministic_trainer
@@ -75,6 +76,7 @@ def test_unit_metrics_shapes(deterministic_trainer):
         t = getattr(diag, name)
         assert t.shape == (H,)
 
+
 def test_unit_metrics_mask_behavior(deterministic_trainer):
     trainer = deterministic_trainer
 
@@ -91,6 +93,7 @@ def test_unit_metrics_mask_behavior(deterministic_trainer):
 
     assert not torch.allclose(full.i_mean, half.i_mean)
 
+
 def test_unit_metrics_drift_correctness(deterministic_trainer):
     trainer = deterministic_trainer
 
@@ -102,6 +105,7 @@ def test_unit_metrics_drift_correctness(deterministic_trainer):
 
     assert torch.allclose(second.i_drift, second.i_mean - first.i_mean)
     assert torch.allclose(second.h_drift, second.h_norm - first.h_norm)
+
 
 # Test: No NaNs under extreme activations
 def test_unit_metrics_no_nans(deterministic_trainer):
@@ -120,6 +124,7 @@ def test_unit_metrics_no_nans(deterministic_trainer):
         elif isinstance(val, dict):
             for v in val.values():
                 assert torch.isfinite(v).all()
+
 
 def test_unit_metrics_replay_determinism(deterministic_trainer):
 
@@ -146,6 +151,7 @@ def test_unit_metrics_replay_determinism(deterministic_trainer):
 
         # Normal tensor field
         assert torch.allclose(v1, v2, atol=1e-8)
+
 
 """
 mask influences:
@@ -185,3 +191,114 @@ def test_mask_correctness(deterministic_trainer):
     # 4. Mask must be 1 where alive
     alive = ~(buf.terminated | buf.truncated)
     assert torch.all(buf.mask[alive] == 1)
+
+
+"""
+Drift‑trend test suite that:
+- validates initialization
+- validates update logic
+- validates mask behavior
+- validates replay determinism
+- validates numerical stability
+- validates correctness of the drift formula
+- detects LSTM collapse or freezing
+- detects exploding dynamics
+- protects against regressions in gate extraction
+"""
+def test_drift_zero_on_first_rollout(deterministic_trainer):
+
+    trainer = deterministic_trainer
+
+    trainer.collect_rollout()
+    diag = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    for name in ["i_drift", "f_drift", "g_drift",
+                 "o_drift", "h_drift", "c_drift"]:
+        
+        drift = getattr(diag, name)
+        assert torch.allclose(drift, torch.zeros_like(drift))
+
+
+def test_drift_changes_over_time(deterministic_trainer):
+
+    trainer = deterministic_trainer
+
+    trainer.collect_rollout()
+    d1 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    trainer.collect_rollout()
+    d2 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    # At least one drift dimension should change
+    diffs = []
+
+    for name in ["i_drift", "f_drift", "g_drift",
+                 "o_drift", "h_drift", "c_drift"]:
+        
+        diffs.append(torch.allclose(getattr(d1, name), getattr(d2, name)))
+
+    assert not all(diffs), "All drift vectors identical across rollouts"
+
+
+def test_drift_mask_awareness(deterministic_trainer):
+
+    trainer = deterministic_trainer
+
+    trainer.collect_rollout()
+    full = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    # Mask out half the rollout
+    T = trainer.rollout_steps
+    mask = torch.zeros(T, trainer.num_envs).to(trainer.device)
+    mask[: T // 2] = 1.0
+
+    eval_output = trainer.replay_policy_on_rollout()
+    half = trainer.compute_lstm_unit_diagnostics(eval_output, mask)
+
+    # Means must differ → drift must differ
+    assert not torch.allclose(full.i_drift, half.i_drift)
+
+
+def test_drift_replay_determinism(deterministic_trainer):
+
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    d1 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    d2 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    for name in ["i_drift", "f_drift", "g_drift",
+                 "o_drift", "h_drift", "c_drift"]:
+
+        assert torch.allclose(getattr(d1, name),
+                              getattr(d2, name), atol=1e-8)
+        
+
+def test_drift_sanity_bounds(deterministic_trainer):
+
+    trainer = deterministic_trainer
+
+    trainer.collect_rollout()
+    trainer.collect_rollout()
+    diag = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    for name in ["i_drift", "f_drift", "g_drift",
+                 "o_drift", "h_drift", "c_drift"]:
+        
+        drift = getattr(diag, name)
+        assert torch.isfinite(drift).all()
+        assert drift.abs().max() < 10.0  # generous bound
+
+
+def test_drift_matches_mean_difference(deterministic_trainer):
+
+    trainer = deterministic_trainer
+
+    trainer.collect_rollout()
+    d1 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    trainer.collect_rollout()
+    d2 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    assert torch.allclose(d2.i_drift, d2.i_mean - d1.i_mean)
+    assert torch.allclose(d2.h_drift, d2.h_norm - d1.h_norm)
