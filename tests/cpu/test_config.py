@@ -89,7 +89,7 @@ def test_cross_section_invariants():
     assert cfg.trainer.tbptt_chunk_len <= cfg.trainer.rollout_steps
 
     # minibatch envs must divide num_envs
-    assert cfg.trainer.num_envs % cfg.trainer.mini_batch_envs == 0
+    assert cfg.env.num_envs % cfg.trainer.mini_batch_envs == 0
 
     # hidden sizes must match
     assert cfg.lstm.lstm_hidden_size == cfg.buffer_config.lstm_hidden_size

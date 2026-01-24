@@ -358,20 +358,6 @@ class RecurrentRolloutBuffer:
         self.returns.zero_()
         self.advantages.zero_()
 
-        """
-        Ensure
-
-        - all environments are “alive” at the start of a rollout
-        - GAE bootstrapping works
-        - PPO loss masking works
-        - drift/saturation/entropy masking works
-        - replay determinism works
-
-        because mask correctness is one of the most important invariants in
-        an LSTM-PPO pipeline.
-        """
-        self.mask = torch.ones_like(self.rewards)
-
     @property
     def mask(self):
         """

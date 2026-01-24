@@ -7,7 +7,7 @@ This test catches:
 """
 def test_gae_computation_basic():
     import torch
-    from lstmppo.buffer import compute_gae
+    from lstmppo.learning_sch import compute_gae
 
     rewards = torch.tensor([1.0, 1.0, 1.0])
     values = torch.tensor([0.5, 0.5, 0.5])

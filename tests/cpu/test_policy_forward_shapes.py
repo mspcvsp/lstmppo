@@ -5,11 +5,16 @@ This test catches:
 - wrong flattening
 - wrong output dimension
 """
-def test_policy_forward_shapes():
-    import torch
-    from lstmppo.policy import PolicyNetwork
+import torch
+from lstmppo.types import Config
+from lstmppo.policy import LSTMPPOPolicy
 
-    model = PolicyNetwork(obs_dim=4, act_dim=2)
+
+def test_policy_forward_shapes():
+    
+    cfg = Config()
+
+    model = LSTMPPOPolicy(cfg)
     obs = torch.randn(3, 4)
 
     logits = model(obs)

@@ -93,17 +93,17 @@ def test_fill_buffer_reaches_full_pointer():
 
 
 def test_mask_logic_cpu():
+
     _, _, buf = _make_buffer()
 
     # manually set termination/truncation
     buf.terminated[0] = True
     buf.truncated[1] = True
+    mask = buf.mask
 
-    buf.compute_mask()
-
-    assert buf.mask[0].item() == 0
-    assert buf.mask[1].item() == 0
-    assert buf.mask[2].item() == 1  # untouched index
+    assert mask[0].item() == 0
+    assert mask[1].item() == 0
+    assert mask[2].item() == 1  # untouched index
 
 
 def test_reset_clears_state():
@@ -119,8 +119,9 @@ def test_reset_clears_state():
     assert buf.ptr == 0
     assert torch.all(buf.terminated == 0)
     assert torch.all(buf.truncated == 0)
-    assert torch.all(buf.mask == 1)
 
+    mask = buf.mask
+    assert torch.all(mask == 1)
 
 def test_rollout_step_structure():
     cfg, _, buf = _make_buffer()
