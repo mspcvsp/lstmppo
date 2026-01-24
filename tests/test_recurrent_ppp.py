@@ -83,7 +83,7 @@ def test_unit_metrics_mask_behavior(deterministic_trainer):
 
     # Mask out half the rollout
     T = trainer.rollout_steps
-    mask = torch.zeros(T, trainer.num_envs)
+    mask = torch.zeros(T, trainer.num_envs).to(trainer.device)
     mask[: T // 2] = 1.0
 
     eval_output = trainer.replay_policy_on_rollout()
