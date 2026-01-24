@@ -90,3 +90,33 @@ def test_unit_metrics_mask_behavior(deterministic_trainer):
     half = trainer.compute_lstm_unit_diagnostics(eval_output, mask)
 
     assert not torch.allclose(full.i_mean, half.i_mean)
+
+def test_unit_metrics_drift_correctness(deterministic_trainer):
+    trainer = deterministic_trainer
+
+    trainer.collect_rollout()
+    first = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    trainer.collect_rollout()
+    second = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    assert torch.allclose(second.i_drift, second.i_mean - first.i_mean)
+    assert torch.allclose(second.h_drift, second.h_norm - first.h_norm)
+
+# Test: No NaNs under extreme activations
+def test_unit_metrics_no_nans(deterministic_trainer):
+    trainer = deterministic_trainer
+
+    with torch.no_grad():
+        for p in trainer.policy.parameters():
+            p.mul_(50.0)
+
+    trainer.collect_rollout()
+    diag = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    for name, val in diag.__dict__.items():
+        if isinstance(val, torch.Tensor):
+            assert torch.isfinite(val).all()
+        elif isinstance(val, dict):
+            for v in val.values():
+                assert torch.isfinite(v).all()
