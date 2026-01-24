@@ -11,7 +11,24 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+
+# Runtime dependencies
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.23",
+    "gymnasium>=0.29",
+    "matplotlib>=3.7",
+    "tqdm>=4.65",
+    "tyro>=0.5",
+    "tensorboard>=2.14",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
