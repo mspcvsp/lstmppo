@@ -7,7 +7,7 @@ This test catches:
 """
 def test_policy_forward_shapes():
     import torch
-    from lstmppo.model import PolicyNetwork
+    from lstmppo.policy import PolicyNetwork
 
     model = PolicyNetwork(obs_dim=4, act_dim=2)
     obs = torch.randn(3, 4)

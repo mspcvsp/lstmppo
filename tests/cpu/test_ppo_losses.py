@@ -7,7 +7,7 @@ This test catches:
 """
 def test_ppo_loss_shapes():
     import torch
-    from lstmppo.loss import ppo_loss
+    from lstmppo.trainer import ppo_loss
 
     logits_old = torch.randn(4, 2)
     logits_new = torch.randn(4, 2)
