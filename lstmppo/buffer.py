@@ -91,9 +91,23 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     # Add rollout step
     # ---------------------------------------------------------
-    def add(self, step: RolloutStep):
+    def add(self,
+            step: RolloutStep):
 
+        # --- Pointer safety ---
         t = self.step
+
+        """
+        Assertion that protects the write path
+        ----------------------------------------------------
+        - Prevents writing past the end of the buffer
+        - Prevents silent corruption of rollout data
+        - Prevents TBPTT slicing errors
+        - Prevents hidden‑state alignment failures
+        - Makes your GPU tests meaningful
+        """
+        assert t < self.cfg.rollout_steps, \
+            f"RolloutBuffer overflow: step={t}, max={self.cfg.rollout_steps}"
 
         # --- Shape checks ---
         assert step.obs.shape == (self.cfg.num_envs, self.obs.size(-1)), \
@@ -307,10 +321,56 @@ class RecurrentRolloutBuffer:
     # Reset buffer
     # ---------------------------------------------------------
     def reset(self):
+        """
+        Reset attrributes to ensure
 
+        - rollout correctness
+        - TBPTT correctness
+        - hidden‑state alignment
+        - mask correctness
+        - replay determinism
+        - drift/saturation/entropy correctness
+        """
+
+        # Pointer
         self.step = 0
+
+        # Last-step LSTM states (for next rollout)
         self.last_hxs = None
         self.last_cxs = None
+        
+        # Clear rollout storage
+        self.obs.zero_()
+        self.actions.zero_()
+        self.rewards.zero_()
+        self.values.zero_()
+        self.logprobs.zero_()
+        
+        # Episode termination flags
+        self.terminated.zero_()
+        self.truncated.zero_()
+
+        # Hidden states at start of each timestep
+        self.hxs.zero_()
+        self.cxs.zero_()
+
+        # Returns and advantages
+        self.returns.zero_()
+        self.advantages.zero_()
+
+        """
+        Ensure
+
+        - all environments are “alive” at the start of a rollout
+        - GAE bootstrapping works
+        - PPO loss masking works
+        - drift/saturation/entropy masking works
+        - replay determinism works
+
+        because mask correctness is one of the most important invariants in
+        an LSTM-PPO pipeline.
+        """
+        self.mask = torch.ones_like(self.rewards)
 
     @property
     def mask(self):

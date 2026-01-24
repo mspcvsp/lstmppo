@@ -176,7 +176,19 @@ class LSTMPPOTrainer:
     # ---------------------------------------------------------
     def collect_rollout(self):
 
+        """
+        - reset()
+        → step = 0
+            - Trainer collects rollout
+        → step increments to rollout_steps
+            - Trainer finishes rollout
+        → computes returns, advantages, diagnostics, etc.
+            - Trainer calls reset()
+        → but before calling reset, trainer must set step = 0
+        """
+        self.step = 0
         self.buffer.reset()
+
         env_state = self.env_state
 
         # Initialize LSTM states for this rollout
