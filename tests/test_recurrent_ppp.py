@@ -129,12 +129,20 @@ def test_unit_metrics_replay_determinism(deterministic_trainer):
     diag1 = trainer.compute_lstm_unit_diagnostics_from_rollout()
     diag2 = trainer.compute_lstm_unit_diagnostics_from_rollout()
 
-    for name in diag1.__dict__:
-        v1 = getattr(diag1, name)
+    for name, v1 in diag1.__dict__.items():
         v2 = getattr(diag2, name)
 
-        if isinstance(v1, torch.Tensor):
-            assert torch.allclose(v1, v2, atol=1e-8)
-        elif hasattr(v1, "__dict__"):
-            for k in v1.__dict__:
-                assert torch.allclose(getattr(v1, k), getattr(v2, k), atol=1e-8)
+        # Skip non-tensor fields
+        if not isinstance(v1, torch.Tensor):
+            continue
+
+        # Handle nested dataclasses (saturation, entropy)
+        if hasattr(v1, "__dict__"):
+            for k, t1 in v1.__dict__.items():
+                t2 = getattr(v2, k)
+                if isinstance(t1, torch.Tensor):
+                    assert torch.allclose(t1, t2, atol=1e-8)
+            continue
+
+        # Normal tensor field
+        assert torch.allclose(v1, v2, atol=1e-8)
