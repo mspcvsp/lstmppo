@@ -120,3 +120,21 @@ def test_unit_metrics_no_nans(deterministic_trainer):
         elif isinstance(val, dict):
             for v in val.values():
                 assert torch.isfinite(v).all()
+
+def test_unit_metrics_replay_determinism(deterministic_trainer):
+
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    diag1 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    diag2 = trainer.compute_lstm_unit_diagnostics_from_rollout()
+
+    for name in diag1.__dict__:
+        v1 = getattr(diag1, name)
+        v2 = getattr(diag2, name)
+
+        if isinstance(v1, torch.Tensor):
+            assert torch.allclose(v1, v2, atol=1e-8)
+        elif hasattr(v1, "__dict__"):
+            for k in v1.__dict__:
+                assert torch.allclose(getattr(v1, k), getattr(v2, k), atol=1e-8)
