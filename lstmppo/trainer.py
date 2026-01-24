@@ -975,10 +975,12 @@ class LSTMPPOTrainer:
                 stored_obs.append(env_state.obs.clone())
                 stored_values.append(policy_out.values.clone())
                 stored_logprobs.append(logprobs.clone())
-                stored_hxs.append(policy_out.new_hxs.clone())
-                stored_cxs.append(policy_out.new_cxs.clone())
-                stored_actions.append(actions.clone())
+                
+                # PRE-STEP hidden state: what was actually used
+                stored_hxs.append(policy_in.hxs.clone())
+                stored_cxs.append(policy_in.cxs.clone())
 
+                stored_actions.append(actions.clone())
                 env_state = self.env.step(actions)
 
         # Stack rollout tensors
