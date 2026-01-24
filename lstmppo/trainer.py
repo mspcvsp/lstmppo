@@ -816,6 +816,36 @@ class LSTMPPOTrainer:
         self.state.target_kl = trainer_state["target_kl"]
         self.state.early_stopping_kl = trainer_state["early_stopping_kl"]
 
+    def compute_lstm_unit_diagnostics_from_rollout(self):
+        # Re-run the policy on the rollout to get eval_output
+        eval_output = self.replay_policy_on_rollout()
+
+        # Mask from rollout buffer
+        mask = self.buffer.masks  # shape (T, B)
+
+        return self.compute_lstm_unit_diagnostics(eval_output, mask)
+
+    def compute_lstm_unit_diagnostics_from_rollout(self):
+        eval_output = self.replay_policy_on_rollout()
+        mask = self.buffer.mask  # (T, B)
+        return self.compute_lstm_unit_diagnostics(eval_output, mask)
+
+    @torch.no_grad()
+    def replay_policy_on_rollout(self):
+        """
+        Recompute the policy forward pass over the stored rollout.
+        Produces a full (T, B, ...) PolicyEvalOutput identical to 
+        PPO evaluation.
+        """
+        eval_inp = PolicyEvalInput(
+            obs=self.buffer.obs,          # (T, B, obs_dim)
+            hxs=self.buffer.hxs[0],       # (B, H)
+            cxs=self.buffer.cxs[0],       # (B, H)
+            actions=self.buffer.actions.squeeze(-1)  # (T, B)
+        )
+
+        return self.policy.evaluate_actions_sequence(eval_inp)
+
     def validate_tbptt(self, K=16):
 
         self.state.reset(1)

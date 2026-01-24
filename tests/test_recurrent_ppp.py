@@ -58,3 +58,19 @@ def test_hidden_state_alignment(deterministic_trainer):
     #    We validate this by ensuring the state-flow validator passes.
     trainer.validate_lstm_state_flow()
 
+# Shape correctness for all per‑unit metrics
+def test_unit_metrics_shapes(deterministic_trainer):
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    diag = trainer.compute_lstm_unit_diagnostics_from_rollout()
+    H = diag.hidden_size
+
+    for name in [
+        "i_mean", "f_mean", "g_mean", "o_mean",
+        "h_norm", "c_norm",
+        "i_drift", "f_drift", "g_drift", "o_drift",
+        "h_drift", "c_drift",
+    ]:
+        t = getattr(diag, name)
+        assert t.shape == (H,)
