@@ -146,3 +146,42 @@ def test_unit_metrics_replay_determinism(deterministic_trainer):
 
         # Normal tensor field
         assert torch.allclose(v1, v2, atol=1e-8)
+
+"""
+mask influences:
+
+- GAE bootstrapping
+- return normalization
+- advantage normalization
+- PPO loss masking
+- entropy masking
+- gate entropy/saturation masking
+- drift masking
+- TBPTT chunk masking
+- diagnostics masking
+- replay determinism
+
+If the mask is wrong, everything downstream becomes subtly wrong, and the
+bugs are extremely hard to detect.
+"""
+def test_mask_correctness(deterministic_trainer):
+    
+    trainer = deterministic_trainer
+    trainer.collect_rollout()
+
+    buf = trainer.buffer
+
+    # 1. Mask shape
+    assert buf.mask.shape == buf.terminated.shape
+
+    # 2. Mask = 1 - (terminated OR truncated)
+    expected = 1.0 - (buf.terminated | buf.truncated).float()
+    assert torch.allclose(buf.mask, expected)
+
+    # 3. Mask must be 0 where terminated or truncated
+    assert torch.all(buf.mask[buf.terminated] == 0)
+    assert torch.all(buf.mask[buf.truncated] == 0)
+
+    # 4. Mask must be 1 where alive
+    alive = ~(buf.terminated | buf.truncated)
+    assert torch.all(buf.mask[alive] == 1)
