@@ -199,9 +199,22 @@ class LSTMPPOTrainer:
             - policy_out.new_hxs is (B, H)
             - NOT (B, T, H)
             """
-            hxs = policy_out.new_hxs.detach()
-            cxs = policy_out.new_cxs.detach()
 
+            #-------------------------------------------------------------
+            # IMPORTANT:
+            #-------------------------------------------------------------
+            # hxs/cxs stored in the buffer MUST be the PRE-STEP hidden 
+            # state (h_t, c_t).
+            # 
+            # This is required for:
+            #   - state-flow determinism
+            #   - TBPTT correctness
+            #   - value/logprob reproducibility
+            #   - LSTM diagnostics (drift, entropy, saturation)
+            #
+            # If you change this, run validate_lstm_state_flow() and 
+            # validate_tbptt().
+            #-------------------------------------------------------------
             self.buffer.add(RolloutStep(
                 obs=env_state.obs,
                 actions=actions.detach(),
@@ -210,10 +223,21 @@ class LSTMPPOTrainer:
                 logprobs=logprobs.detach(),
                 terminated=next_state.terminated,
                 truncated=next_state.truncated,
-                hxs=hxs,
-                cxs=cxs,
+                hxs=policy_in.hxs.detach(),
+                cxs=policy_in.cxs.detach(),
                 gates=policy_out.gates.detached.transposed()
             ))
+
+            # Verify state-flow determinism
+            assert torch.allclose(
+                policy_in.hxs, self.buffer.hxs[self.buffer.step - 1],
+                atol=1e-8
+            )
+
+            assert torch.allclose(
+                policy_in.cxs, self.buffer.cxs[self.buffer.step - 1],
+                atol=1e-8
+            )
 
             """
             Detach to prevent
@@ -223,8 +247,10 @@ class LSTMPPOTrainer:
             - PPO becoming unstable
             - gradients flowing across episode boundarie
             """
-            self.env.update_hidden_states(hxs,
-                                          cxs)
+            self.env.update_hidden_states(
+                policy_out.new_hxs.detach(), # h_{t+1}
+                policy_out.new_cxs.detach()  # c_{t+1}
+            )
 
             env_state = next_state
 
@@ -1033,6 +1059,9 @@ class LSTMPPOTrainer:
         print("max |logprobs_rec - stored_logprobs|:",
               logp_diff.max().item())
 
+        assert val_diff.max().item() < 1e-8, "Indeterminite state-flow"
+        assert logp_diff.max().item() < 1e-8, "Indeterminite state-flow"
+
         for t in range(min(T, 5)):
             print(f"\n[t = {t}]")
             print(" stored value   :", stored_values[t, 0].item())
@@ -1083,4 +1112,11 @@ def validate():
     trainer.assert_hidden_state_flow()
     trainer.assert_rollout_deterministic()
     trainer.validate_tbptt()
+    trainer.validate_lstm_state_flow()
+
+
+def test_rollout_replay_determinism():
+
+    trainer = LSTMPPOTrainer.for_validation()
+    trainer.collect_rollout()
     trainer.validate_lstm_state_flow()

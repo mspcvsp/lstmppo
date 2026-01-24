@@ -21,7 +21,6 @@ class GateLSTMCell(nn.Module):
         self.hidden_size = hidden_size
         self.dropconnect_p = dropconnect_p
         self.debug_mode = kwargs.get("debug_mode", False)
-        print(f"debug_mode: {self.debug_mode}")
 
         # Input weights
         self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size,
