@@ -216,9 +216,10 @@ class LSTMPPOPolicy(nn.Module):
         obs_flat = self.obs_encoder(x)  # x may be dict/tuple/box
 
         if obs_flat.dim() == 2:
-            obs_flat = obs_flat.unsqueeze(1)
+            obs_flat = obs_flat.unsqueeze(1) # (B,1,F)
 
-        enc = self.encoder(obs_flat)
+        # (B,T,H) for both normal and zero encoder
+        enc = self.encoder(obs_flat) 
 
         # LSTM expects (B, T, F) with batch_first=True
         B, T, F = enc.shape
@@ -486,11 +487,18 @@ class ZeroFeatureEncoder(nn.Module):
         super().__init__()
         self.out_dim = out_dim
 
-    def forward(self, obs):
+    def forward(self,
+                obs):
+        
         # obs: (B, 0) or (B, T, 0)
         if obs.dim() == 2:
             B = obs.size(0)
-            return torch.zeros(B, 1, self.out_dim, device=obs.device)
+            return torch.zeros(B,
+                               self.out_dim,
+                               device=obs.device)      # (B, H)
         else:
             B, T, _ = obs.shape
-            return torch.zeros(B, T, self.out_dim, device=obs.device)
+            return torch.zeros(B,
+                               T,
+                               self.out_dim,
+                               device=obs.device)   # (B, T, H)

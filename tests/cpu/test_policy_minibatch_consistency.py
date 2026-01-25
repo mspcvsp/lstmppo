@@ -58,8 +58,8 @@ def test_policy_minibatch_consistency():
         )
     )
 
-    logps_seq = out_seq.logprobs  # (B, T)
-    values_seq = out_seq.values   # (B, T)
+    logps_seq = out_seq.logprobs.transpose(0, 1)  # (B, T)
+    values_seq = out_seq.values.transpose(0, 1)   # (B, T)
 
     # --- Consistency checks ---
     assert torch.allclose(logps_step, logps_seq)
