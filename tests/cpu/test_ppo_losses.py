@@ -5,25 +5,56 @@ This test catches:
 - missing keys in info dict
 - NaN explosions
 """
+import torch
+from lstmppo.types import Config
+from lstmppo.trainer import LSTMPPOTrainer
+
+
 def test_ppo_loss_shapes():
-    import torch
-    from lstmppo.trainer import ppo_loss
+    cfg = Config()
+    device = torch.device("cpu")
 
-    logits_old = torch.randn(4, 2)
-    logits_new = torch.randn(4, 2)
-    actions = torch.randint(0, 2, (4,))
-    advantages = torch.randn(4)
-    logp_old = torch.randn(4)
+    # Create a trainer (it owns compute_losses)
+    trainer = LSTMPPOTrainer(cfg, device)
 
-    loss, info = ppo_loss(
-        logits_new,
-        logits_old,
-        actions,
-        advantages,
-        logp_old,
-        clip_ratio=0.2
-    )
+    T = cfg.trainer.rollout_steps
+    B = cfg.env.num_envs
 
-    assert torch.isfinite(loss)
-    assert "kl" in info
-    assert "entropy" in info
+    # Fake rollout batch
+    values = torch.randn(T, B)
+    old_values = torch.randn(T, B)
+    returns = torch.randn(T, B)
+    adv = torch.randn(T, B)
+
+    new_logp = torch.randn(T, B)
+    old_logp = torch.randn(T, B)
+
+    # Mask: all alive
+    mask = torch.ones(T, B)
+
+    policy_loss, value_loss, approx_kl, clip_frac =\
+        trainer.compute_losses(
+            values=values,
+            new_logp=new_logp,
+            old_logp=old_logp,
+            old_values=old_values,
+            returns=returns,
+            adv=adv,
+            mask=mask,
+        )
+
+    # --- Assertions ---
+    assert torch.is_tensor(policy_loss)
+    assert torch.is_tensor(value_loss)
+    assert torch.is_tensor(approx_kl)
+    assert torch.is_tensor(clip_frac)
+
+    assert policy_loss.ndim == 0
+    assert value_loss.ndim == 0
+    assert approx_kl.ndim == 0
+    assert clip_frac.ndim == 0
+
+    assert torch.isfinite(policy_loss)
+    assert torch.isfinite(value_loss)
+    assert torch.isfinite(approx_kl)
+    assert torch.isfinite(clip_frac)
