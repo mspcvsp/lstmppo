@@ -1,8 +1,9 @@
 """
-Ensures drift grows smoothly with sequence length — no sudden jumps or 
-collapses. This test ensures drift doesn’t explode or collapse between 
+Ensures drift grows smoothly with sequence length — no sudden jumps or
+collapses. This test ensures drift doesn’t explode or collapse between
 adjacent horizons.
 """
+
 import torch
 
 from lstmppo.policy import LSTMPPOPolicy
@@ -38,5 +39,5 @@ def test_drift_growth_smoothness():
 
     eps = 1e-5
     for i in range(len(avg_drifts) - 1):
-        assert avg_drifts[i+1] + eps >= avg_drifts[i] - eps
-        assert (avg_drifts[i+1] - avg_drifts[i]).abs() < 0.01
+        assert avg_drifts[i + 1] + eps >= avg_drifts[i] - eps
+        assert (avg_drifts[i + 1] - avg_drifts[i]).abs() < 0.01

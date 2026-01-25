@@ -8,6 +8,7 @@ This test ensures:
 - Drift metrics behave meaningfully
 - Diagnostics remain interpretable for long rollouts
 """
+
 import pytest
 import torch
 
@@ -31,16 +32,16 @@ def test_hidden_state_drift_accumulates_over_time():
 
     # Short vs long sequence
     obs_short = torch.randn(B, 5, cfg.env.flat_obs_dim)
-    obs_long  = torch.randn(B, 50, cfg.env.flat_obs_dim)
+    obs_long = torch.randn(B, 50, cfg.env.flat_obs_dim)
 
     h0 = torch.zeros(B, H)
     c0 = torch.zeros(B, H)
 
     out_short = policy.forward(PolicyInput(obs=obs_short, hxs=h0, cxs=c0))
-    out_long  = policy.forward(PolicyInput(obs=obs_long,  hxs=h0, cxs=c0))
+    out_long = policy.forward(PolicyInput(obs=obs_long, hxs=h0, cxs=c0))
 
     drift_short = out_short.gates.h_gates.pow(2).mean()
-    drift_long  = out_long.gates.h_gates.pow(2).mean()
+    drift_long = out_long.gates.h_gates.pow(2).mean()
 
     """
     Hidden‑state drift should be non‑decreasing on average, not strictly increasing.
@@ -51,7 +52,7 @@ def test_hidden_state_drift_accumulates_over_time():
     - LayerNorm stabilizing hidden activations
     - small batch size (B=3)
     - small drift magnitude (~1e‑4)
-    
+
     So tests must use averaging and tolerances, not strict comparisons.
     """
     eps = 1e-6

@@ -672,16 +672,16 @@ class Metrics:
         EXCLUDE = {"steps", "episodes", "alive_envs", "max_ep_len", "avg_ep_len", "max_ep_returns", "avg_ep_returns"}
 
         # Normalize metrics accumulated across minibatches
-        for field in self.__dataclass_fields__:
-            if field not in EXCLUDE:
-                setattr(self, field, getattr(self, field) * factor)
+        for attr in self.__dataclass_fields__:
+            if attr not in EXCLUDE:
+                setattr(self, attr, getattr(self, attr) * factor)
 
     def initialize(self):
-        for field in self.__dataclass_fields__:
-            if field in ("steps",):
-                setattr(self, field, 0)
+        for attr in self.__dataclass_fields__:
+            if attr in ("steps",):
+                setattr(self, attr, 0)
             else:
-                setattr(self, field, 0.0)
+                setattr(self, attr, 0.0)
 
     def to_dict(self):
         return {k: float(getattr(self, k)) for k in self.__dataclass_fields__}
