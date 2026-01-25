@@ -70,6 +70,13 @@ class GateLSTMCell(nn.Module):
 
         self._apply_dropconnect()
 
+        assert isinstance(x, torch.Tensor)
+        assert isinstance(h, torch.Tensor)
+        assert isinstance(self.weight_ih, torch.Tensor)
+        assert isinstance(self.weight_hh, torch.Tensor)
+        assert isinstance(self.bias_ih, torch.Tensor)
+        assert isinstance(self.bias_hh, torch.Tensor)
+
         gates = x @ self.weight_ih.t() + h @ self.weight_hh.t() + self.bias_ih + self.bias_hh
 
         H = self.hidden_size
@@ -91,7 +98,11 @@ class LSTMPPOPolicy(nn.Module):
         self.ar_coef = cfg.lstm.lstm_ar_coef
         self.tar_coef = cfg.lstm.lstm_tar_coef
 
-        self.obs_encoder = build_obs_encoder(cfg.env.obs_space, cfg.obs_dim)
+        obs_space = cfg.env.obs_space
+        if obs_space is None:
+            raise ValueError("obs_space must be initialized before building encoder")
+
+        self.obs_encoder = build_obs_encoder(obs_space, cfg.obs_dim)
 
         # --- SiLU encoder ---
         if cfg.env.flat_obs_dim == 0:
