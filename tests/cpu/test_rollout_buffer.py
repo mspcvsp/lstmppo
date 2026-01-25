@@ -11,15 +11,16 @@ This suite catches:
 """
 import torch
 from lstmppo.buffer import RecurrentRolloutBuffer
-from lstmppo.types import Config, initialize_config
+from lstmppo.types import Config
 from lstmppo.types import RolloutStep, LSTMGates
 
 
 def _make_buffer():
-    cfg = initialize_config(Config())
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() and cfg.trainer.cuda else "cpu"
-    )
+
+    cfg = Config()
+    cfg.trainer.cuda = False   # ← force CPU for tests
+    device = torch.device("cpu")
+
     return cfg, device, RecurrentRolloutBuffer(cfg, device)
 
 
@@ -212,11 +213,8 @@ def test_rollout_step_structure():
 
     buf.add(step)
 
-    step = buf.get_step(0)
-    assert isinstance(step, RolloutStep)
-
-    assert step.obs.shape == (cfg.obs_dim,)
-    assert step.actions.shape == (cfg.env.action_dim,)
-    assert isinstance(step.reward, float)
-    assert isinstance(step.value, float)
-    assert isinstance(step.logprob, float)
+    assert buf.obs[0].shape == (B, D)
+    assert buf.actions[0].shape == (B, 1)
+    assert buf.rewards[0].shape == (B,)
+    assert buf.hxs[0].shape == (B, H)
+    assert buf.cxs[0].shape == (B, H)

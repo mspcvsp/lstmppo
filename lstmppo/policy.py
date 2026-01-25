@@ -48,14 +48,21 @@ class GateLSTMCell(nn.Module):
 
     def reset_parameters(self):
 
-        nn.init.xavier_uniform_(self.weight_ih)
-        nn.init.orthogonal_(self.weight_hh_raw)
-        nn.init.zeros_(self.bias_ih)
-        nn.init.zeros_(self.bias_hh)
+        if self.weight_ih.numel() > 0:
+            nn.init.xavier_uniform_(self.weight_ih)
+        
+        if self.weight_hh_raw.numel() > 0:
+            nn.init.orthogonal_(self.weight_hh_raw)
 
-        # Forget gate bias trick
-        H = self.hidden_size
-        self.bias_ih.data[H:2*H] = 1.0
+        if self.bias_ih is not None and self.bias_ih.numel() > 0:
+            nn.init.zeros_(self.bias_ih)
+        
+            # Forget gate bias trick
+            H = self.hidden_size
+            self.bias_ih.data[H:2*H] = 1.0
+
+        if self.bias_hh is not None and self.bias_hh.numel() > 0:
+            nn.init.zeros_(self.bias_hh)
 
     def _apply_dropconnect(self):
 
@@ -110,19 +117,26 @@ class LSTMPPOPolicy(nn.Module):
                                              cfg.obs_dim)
 
         # --- SiLU encoder ---
-        self.encoder = nn.Sequential(
-            nn.Linear(cfg.obs_dim,
-                      cfg.lstm.enc_hidden_size),
-            nn.SiLU(),
-            nn.Linear(cfg.lstm.enc_hidden_size,
-                      cfg.lstm.enc_hidden_size),
-            nn.SiLU(),
-        )
+        if cfg.obs_dim == 0:
+            self.encoder = nn.Identity()
+        else:
+            self.encoder = nn.Sequential(
+                nn.Linear(cfg.obs_dim,
+                        cfg.lstm.enc_hidden_size),
+                nn.SiLU(),
+                nn.Linear(cfg.lstm.enc_hidden_size,
+                        cfg.lstm.enc_hidden_size),
+                nn.SiLU(),
+            )
 
         for m in self.encoder:
             if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
+
+                if m.weight.numel() > 0:
+                    nn.init.xavier_uniform_(m.weight)
+
+                if m.bias.numel() > 0:
+                    nn.init.zeros_(m.bias)
 
         # --- LN-LSTM with DropConnect ---
         self.lstm_cell = GateLSTMCell(
@@ -140,11 +154,17 @@ class LSTMPPOPolicy(nn.Module):
         
         self.critic = nn.Linear(cfg.lstm.lstm_hidden_size, 1)
 
-        nn.init.xavier_uniform_(self.actor.weight)
-        nn.init.xavier_uniform_(self.critic.weight)
+        if self.actor.weight.numel() > 0:
+            nn.init.xavier_uniform_(self.actor.weight)
+        
+        if self.critic.weight.numel() > 0:
+            nn.init.xavier_uniform_(self.critic.weight)
     
-        nn.init.zeros_(self.actor.bias)
-        nn.init.zeros_(self.critic.bias)
+        if self.actor.bias.numel() > 0:
+            nn.init.zeros_(self.actor.bias)
+        
+        if self.critic.bias.numel() > 0:
+            nn.init.zeros_(self.critic.bias)
 
     # ---------------------------------------------------------
     # Core forward pass (returns activations + AR/TAR)
