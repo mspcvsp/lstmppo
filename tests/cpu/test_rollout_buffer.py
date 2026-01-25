@@ -26,7 +26,7 @@ def test_buffer_initialization_shapes():
     cfg, _, buf = _make_buffer()
 
     T = cfg.trainer.rollout_steps
-    obs_dim = cfg.env.obs_dim
+    obs_dim = cfg.obs_dim
     act_dim = cfg.env.action_dim
 
     assert buf.ptr == 0
@@ -41,6 +41,7 @@ def test_buffer_initialization_shapes():
 
 
 def test_buffer_device_and_dtype():
+
     _, device, buf = _make_buffer()
 
     for t in [
@@ -53,14 +54,14 @@ def test_buffer_device_and_dtype():
         buf.truncated,
         buf.mask,
     ]:
-        assert t.device == device
+        assert t.device.type == device.type
         assert t.dtype in (torch.float32, torch.bool, torch.int64)
 
 
 def test_add_increments_pointer_and_writes_data():
     cfg, device, buf = _make_buffer()
 
-    obs = torch.randn(cfg.env.obs_dim)
+    obs = torch.randn(cfg.obs_dim)
     act = torch.randn(cfg.env.action_dim)
     rew = 1.0
     done = False
@@ -83,7 +84,7 @@ def test_fill_buffer_reaches_full_pointer():
 
     cfg, _, buf = _make_buffer()
 
-    obs = torch.randn(cfg.env.obs_dim)
+    obs = torch.randn(cfg.obs_dim)
     act = torch.randn(cfg.env.action_dim)
 
     for _ in range(cfg.trainer.rollout_steps):
@@ -101,16 +102,17 @@ def test_mask_logic_cpu():
     buf.truncated[1] = True
     mask = buf.mask
 
-    assert mask[0].item() == 0
-    assert mask[1].item() == 0
-    assert mask[2].item() == 1  # untouched index
+    # mask is (T, B) not scalar
+    assert torch.all(buf.mask[0] == 0)
+    assert torch.all(buf.mask[1] == 0)
+    assert torch.all(buf.mask[2] == 1)
 
 
 def test_reset_clears_state():
     cfg, _, buf = _make_buffer()
 
     # fill some data
-    obs = torch.randn(cfg.env.obs_dim)
+    obs = torch.randn(cfg.obs_dim)
     act = torch.randn(cfg.env.action_dim)
     buf.add(obs, act, 1.0, False, 0.5, -0.1)
 
@@ -126,14 +128,14 @@ def test_reset_clears_state():
 def test_rollout_step_structure():
     cfg, _, buf = _make_buffer()
 
-    obs = torch.randn(cfg.env.obs_dim)
+    obs = torch.randn(cfg.obs_dim)
     act = torch.randn(cfg.env.action_dim)
     buf.add(obs, act, 1.0, False, 0.5, -0.1)
 
     step = buf.get_step(0)
     assert isinstance(step, RolloutStep)
 
-    assert step.obs.shape == (cfg.env.obs_dim,)
+    assert step.obs.shape == (cfg.obs_dim,)
     assert step.action.shape == (cfg.env.action_dim,)
     assert isinstance(step.reward, float)
     assert isinstance(step.value, float)
