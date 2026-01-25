@@ -1,3 +1,18 @@
+"""
+This test catches regressions in:
+
+- LSTM weight initialization
+- ZeroFeatureEncoder output shape
+- Hidden‑state propagation
+- Actor head behavior
+- Critic head behavior
+- Any accidental randomness
+- Any nondeterministic CUDA kernels (on CPU this is stable)
+- Any future architectural changes
+
+This test ensures that PPO runs are reproducible, which is essential for
+debugging, ablation studies, and scientific rigor
+"""
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput

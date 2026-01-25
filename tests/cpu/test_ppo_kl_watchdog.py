@@ -1,3 +1,17 @@
+"""
+This test catches regressions in:
+
+- ratio computation: exp(new_logp - old_logp)
+- KL estimator: 0.5 * (ratio - 1).pow(2) or your variant
+- masking logic
+- broadcasting
+- loss aggregation
+- accidental detachment of tensors
+- incorrect reduction (mean vs sum)
+- sign errors
+
+It’s the kind of test that prevents silent PPO collapse months later.
+"""
 import torch
 from lstmppo.types import Config
 from lstmppo.trainer import LSTMPPOTrainer
