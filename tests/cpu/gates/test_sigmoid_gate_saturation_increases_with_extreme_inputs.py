@@ -23,6 +23,9 @@ sat = 1 - |gate| (Lower = more saturated)
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.gates
+
 
 def test_gate_saturation_increases_with_extreme_inputs():
     cfg = Config()

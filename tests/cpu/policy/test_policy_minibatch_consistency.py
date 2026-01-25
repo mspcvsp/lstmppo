@@ -1,6 +1,8 @@
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput, PolicyEvalInput
+import pytest
+pytestmark = pytest.mark.policy
 
 
 def test_policy_minibatch_consistency():

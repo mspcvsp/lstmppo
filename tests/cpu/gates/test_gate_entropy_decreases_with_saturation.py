@@ -4,6 +4,9 @@ Ensures entropy decreases when gates saturate.
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.gates
+
 
 def test_gate_entropy_decreases_with_saturation():
     cfg = Config()

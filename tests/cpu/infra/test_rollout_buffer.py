@@ -13,6 +13,8 @@ import torch
 from lstmppo.buffer import RecurrentRolloutBuffer
 from lstmppo.types import Config
 from lstmppo.types import RolloutStep, LSTMGates
+import pytest
+pytestmark = pytest.mark.infra
 
 
 def _make_buffer():

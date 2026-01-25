@@ -4,6 +4,9 @@ Ensures gate tensors are not part of the computation graph.
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.gates
+
 
 def test_lstm_gate_detached():
     cfg = Config()

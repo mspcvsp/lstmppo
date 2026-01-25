@@ -14,7 +14,8 @@ This tiny test protects from subtle but catastrophic regressions:
 import torch
 from lstmppo.types import Config
 from lstmppo.trainer import LSTMPPOTrainer
-
+import pytest
+pytestmark = pytest.mark.ppo
 
 def test_ppo_value_monotonicity():
     """

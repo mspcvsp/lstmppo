@@ -4,6 +4,9 @@ Verifies gate drift increases when hidden state magnitude increases
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.drift
+
 
 def test_gate_drift_monotonicity():
     cfg = Config()

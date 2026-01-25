@@ -21,6 +21,10 @@ import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
 
+import pytest
+pytestmark = pytest.mark.drift
+
+
 def test_cell_state_drift_accumulates_over_time():
     cfg = Config()
     cfg.env.flat_obs_dim = 4

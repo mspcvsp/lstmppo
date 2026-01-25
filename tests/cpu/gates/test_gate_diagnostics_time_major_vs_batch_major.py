@@ -4,6 +4,9 @@ Ensures diagnostics match regardless of input layout.
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput, PolicyEvalInput
+import pytest
+pytestmark = pytest.mark.gates
+
 
 def test_gate_diagnostics_time_major_vs_batch_major():
 

@@ -16,6 +16,8 @@ debugging, ablation studies, and scientific rigor
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.policy
 
 
 def test_policy_lstm_determinism():

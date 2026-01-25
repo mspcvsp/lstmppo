@@ -5,6 +5,9 @@ pathological oscillations in hidden-state drift.
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.drift
+
 
 def test_drift_variance_stability():
     cfg = Config()

@@ -5,6 +5,9 @@ Ensures the cell state drifts more slowly than the hidden state
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.drift
+
 
 def test_hidden_vs_cell_drift_ratio():
     cfg = Config()

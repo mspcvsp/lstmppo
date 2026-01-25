@@ -4,6 +4,9 @@ Ensures every gate tensor is (B, T, H) and stays batch‑first
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.gates
+
 
 def test_lstm_gate_shapes():
     cfg = Config()

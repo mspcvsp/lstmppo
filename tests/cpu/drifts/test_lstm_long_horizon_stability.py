@@ -4,6 +4,9 @@ Ensures the LSTM does not explode over long sequences.
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.drift
+
 
 def test_lstm_long_horizon_stability():
     cfg = Config()

@@ -11,6 +11,8 @@ This test ensures:
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.drift
 
 
 def test_hidden_state_drift_accumulates_over_time():

@@ -5,6 +5,9 @@ Ensures forget gate correlates with cell‑state magnitude
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.gates
+
 
 def test_gate_to_cell_correlation():
     cfg = Config()
