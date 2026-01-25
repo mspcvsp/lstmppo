@@ -158,15 +158,17 @@ class LSTMPPOPolicy(nn.Module):
 
         self.critic = nn.Linear(cfg.lstm.lstm_hidden_size, 1)
 
-        if self.actor.weight.numel() > 0:
-            nn.init.xavier_uniform_(self.actor.weight)
-        
+        if isinstance(self.actor, nn.Linear):
+
+            if self.actor.weight.numel() > 0:
+                nn.init.xavier_uniform_(self.actor.weight)
+
+            if self.actor.bias.numel() > 0:
+                nn.init.zeros_(self.actor.bias)
+
         if self.critic.weight.numel() > 0:
             nn.init.xavier_uniform_(self.critic.weight)
-    
-        if self.actor.bias.numel() > 0:
-            nn.init.zeros_(self.actor.bias)
-        
+            
         if self.critic.bias.numel() > 0:
             nn.init.zeros_(self.critic.bias)
 
