@@ -1,11 +1,8 @@
-"""
-Ensures entropy decreases when gates saturate.
-"""
 import torch
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
 
-def test_gate_entropy_decreases_with_saturation():
+def test_tanh_gate_saturation_increases_with_extreme_inputs():
     cfg = Config()
     cfg.env.flat_obs_dim = 4
     cfg.env.action_dim = 3
@@ -22,19 +19,11 @@ def test_gate_entropy_decreases_with_saturation():
     out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
     out2 = policy.forward(PolicyInput(obs=obs * 5.0, hxs=h0, cxs=c0))
 
-    i1 = out1.gates.i_gates
-    i2 = out2.gates.i_gates
+    g1 = out1.gates.g_gates
+    g2 = out2.gates.g_gates
 
-    eps = 1e-8
-    
-    ent1 = (
-        -(i1 * torch.log(i1 + eps) +
-          (1 - i1) * torch.log(1 - i1 + eps)).mean()
-    )
-    
-    ent2 = (
-        -(i2 * torch.log(i2 + eps) + 
-          (1 - i2) * torch.log(1 - i2 + eps)).mean()
-    )
+    # Tanh saturation metric: 1 - |g| decreases as saturation increases
+    sat1 = (1 - g1.abs()).mean()
+    sat2 = (1 - g2.abs()).mean()
 
-    assert ent2 < ent1
+    assert sat2 < sat1
