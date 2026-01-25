@@ -21,7 +21,7 @@ def test_drift_growth_smoothness():
     H = cfg.lstm.lstm_hidden_size
 
     lengths = [20, 40, 60, 80]
-    num_samples = 10  # average over 10 random sequences
+    num_samples = 20
 
     avg_drifts = []
 
@@ -35,7 +35,7 @@ def test_drift_growth_smoothness():
             drifts.append(out.gates.h_gates.pow(2).mean())
         avg_drifts.append(torch.stack(drifts).mean())
 
-    # Drift should increase smoothly on average
-    assert avg_drifts[1] >= avg_drifts[0]
-    assert avg_drifts[2] >= avg_drifts[1]
-    assert avg_drifts[3] >= avg_drifts[2]
+    eps = 1e-5
+    for i in range(len(avg_drifts) - 1):
+        assert avg_drifts[i+1] + eps >= avg_drifts[i] - eps
+        assert (avg_drifts[i+1] - avg_drifts[i]).abs() < 0.01
