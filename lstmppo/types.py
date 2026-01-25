@@ -167,6 +167,10 @@ class Config:
     def obs_dim(self):
         return self.env.flat_obs_dim
 
+    @property
+    def action_dim(self):
+        return self.env.action_dim
+
     def init_run_name(self,
                       datetime_str=None):
 

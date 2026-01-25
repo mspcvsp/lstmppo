@@ -1,0 +1,36 @@
+name: GPU Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gpu-tests:
+    runs-on: [self-hosted, gpu, linux]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify GPU availability
+        run: |
+          echo "Checking GPU..."
+          nvidia-smi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install project + dev deps
+        run: |
+          pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Run GPU-specific tests
+        env:
+          CUDA_VISIBLE_DEVICES: "0"
+        run: |
+          pytest -q --disable-warnings --maxfail=1 -m "gpu"

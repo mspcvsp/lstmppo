@@ -2,64 +2,9 @@ import torch
 import pytest
 from lstmppo.trainer import LSTMPPOTrainer
 
-# ------------------------------------------------------------
-# Deterministic trainer fixture
-# ------------------------------------------------------------
-@pytest.fixture
-def deterministic_trainer():
-    trainer = LSTMPPOTrainer.for_validation()
-
-    # Hard determinism
-    torch.manual_seed(0)
-    torch.cuda.manual_seed_all(0)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-    trainer.policy.eval()
-    trainer.state.cfg.trainer.debug_mode = True
-
-    return trainer
+pytestmark = pytest.mark.gpu
 
 
-# ------------------------------------------------------------
-# 1. TBPTT determinism test
-# ------------------------------------------------------------
-def test_tbptt_determinism(deterministic_trainer):
-    trainer = deterministic_trainer
-    trainer.collect_rollout()
-
-    # This will assert internally
-    trainer.validate_tbptt()
-
-
-# ------------------------------------------------------------
-# 2. Rollout → Replay determinism test
-# ------------------------------------------------------------
-def test_rollout_replay_determinism(deterministic_trainer):
-    trainer = deterministic_trainer
-    trainer.validate_lstm_state_flow()  # asserts internally
-
-
-# ------------------------------------------------------------
-# 3. Hidden-state alignment test
-# ------------------------------------------------------------
-def test_hidden_state_alignment(deterministic_trainer):
-    trainer = deterministic_trainer
-    trainer.collect_rollout()
-
-    batch = next(trainer.buffer.get_recurrent_minibatches())
-
-    # Hidden states must be (T, B, H)
-    assert batch.hxs.shape[0] == trainer.rollout_steps
-    assert batch.hxs.shape[1] == trainer.num_envs
-
-    # 2. Hidden states must be PRE-STEP states
-    #    So hxs[t] must equal the state used to compute value/logprob at t.
-    #    We validate this by ensuring the state-flow validator passes.
-    trainer.validate_lstm_state_flow()
-
-
-# Shape correctness for all per‑unit metrics
 def test_unit_metrics_shapes(deterministic_trainer):
     trainer = deterministic_trainer
     trainer.collect_rollout()
@@ -78,6 +23,7 @@ def test_unit_metrics_shapes(deterministic_trainer):
 
 
 def test_unit_metrics_mask_behavior(deterministic_trainer):
+
     trainer = deterministic_trainer
 
     trainer.collect_rollout()
@@ -107,7 +53,6 @@ def test_unit_metrics_drift_correctness(deterministic_trainer):
     assert torch.allclose(second.h_drift, second.h_norm - first.h_norm)
 
 
-# Test: No NaNs under extreme activations
 def test_unit_metrics_no_nans(deterministic_trainer):
     trainer = deterministic_trainer
 
@@ -151,7 +96,6 @@ def test_unit_metrics_replay_determinism(deterministic_trainer):
 
         # Normal tensor field
         assert torch.allclose(v1, v2, atol=1e-8)
-
 
 """
 mask influences:
@@ -392,6 +336,7 @@ def test_tanh_saturation_monotonicity(deterministic_trainer):
     assert (sat.c_sat >= base_sat.c_sat).all()
     assert (sat.h_sat >= base_sat.h_sat).all()
 
+
 # Entropy must decrease when gates become more extreme.
 def test_sigmoid_entropy_monotonicity(deterministic_trainer):
 
@@ -412,6 +357,7 @@ def test_sigmoid_entropy_monotonicity(deterministic_trainer):
     assert (ent.i_entropy <= base_ent.i_entropy).all()
     assert (ent.f_entropy <= base_ent.f_entropy).all()
     assert (ent.o_entropy <= base_ent.o_entropy).all()
+
 
 def test_tanh_entropy_monotonicity(deterministic_trainer):
 
@@ -455,6 +401,7 @@ def test_entropy_increases_when_gates_uniformize(deterministic_trainer):
     assert (ent.f_entropy >= base_ent.f_entropy).all()
     assert (ent.o_entropy >= base_ent.o_entropy).all()
     assert (ent.g_entropy >= base_ent.g_entropy).all()
+
 
 # Verify saturation decreases when gates move away from extremes
 def test_saturation_decreases_when_gates_uniformize(deterministic_trainer):

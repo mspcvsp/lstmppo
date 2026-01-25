@@ -176,7 +176,22 @@ class LSTMPPOTrainer:
     # ---------------------------------------------------------
     def collect_rollout(self):
 
+        """
+        - reset()
+        → step = 0
+            - Trainer collects rollout
+        → step increments to rollout_steps
+            - Trainer finishes rollout
+        → computes returns, advantages, diagnostics, etc.
+            - Trainer calls reset()
+        → but before calling reset, trainer must set step = 0
+        """
         self.buffer.reset()
+
+        assert self.buffer.step == 0,\
+            ("collect_rollout started with " +
+             f"step={self.buffer.step}, expected 0")
+
         env_state = self.env_state
 
         # Initialize LSTM states for this rollout
@@ -255,6 +270,11 @@ class LSTMPPOTrainer:
             env_state = next_state
 
         self.env_state = env_state
+
+        # After the loop, we must have a full rollout
+        assert self.buffer.step == self.rollout_steps, \
+            (f"Incomplete rollout: step={self.buffer.step}, " +
+             f"expected={self.rollout_steps}")
 
         # Bootstrap value + store final LSTM states
         with torch.no_grad():

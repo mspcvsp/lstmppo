@@ -1,0 +1,32 @@
+import torch
+from lstmppo.policy import LSTMPPOPolicy
+from lstmppo.types import Config, PolicyInput
+import pytest
+pytestmark = pytest.mark.gates
+
+
+def test_tanh_gate_saturation_increases_with_extreme_inputs():
+    cfg = Config()
+    cfg.env.flat_obs_dim = 4
+    cfg.env.action_dim = 3
+    cfg.trainer.debug_mode = True
+
+    policy = LSTMPPOPolicy(cfg)
+    policy.eval()
+
+    B, T = 3, 5
+    obs = torch.randn(B, T, cfg.env.flat_obs_dim)
+    h0 = torch.zeros(B, cfg.lstm.lstm_hidden_size)
+    c0 = torch.zeros(B, cfg.lstm.lstm_hidden_size)
+
+    out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
+    out2 = policy.forward(PolicyInput(obs=obs * 5.0, hxs=h0, cxs=c0))
+
+    g1 = out1.gates.g_gates
+    g2 = out2.gates.g_gates
+
+    # Tanh saturation metric: 1 - |g| decreases as saturation increases
+    sat1 = (1 - g1.abs()).mean()
+    sat2 = (1 - g2.abs()).mean()
+
+    assert sat2 < sat1

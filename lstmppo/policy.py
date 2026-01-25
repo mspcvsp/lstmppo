@@ -48,14 +48,21 @@ class GateLSTMCell(nn.Module):
 
     def reset_parameters(self):
 
-        nn.init.xavier_uniform_(self.weight_ih)
-        nn.init.orthogonal_(self.weight_hh_raw)
-        nn.init.zeros_(self.bias_ih)
-        nn.init.zeros_(self.bias_hh)
+        if self.weight_ih.numel() > 0:
+            nn.init.xavier_uniform_(self.weight_ih)
+        
+        if self.weight_hh_raw.numel() > 0:
+            nn.init.orthogonal_(self.weight_hh_raw)
 
-        # Forget gate bias trick
-        H = self.hidden_size
-        self.bias_ih.data[H:2*H] = 1.0
+        if self.bias_ih is not None and self.bias_ih.numel() > 0:
+            nn.init.zeros_(self.bias_ih)
+        
+            # Forget gate bias trick
+            H = self.hidden_size
+            self.bias_ih.data[H:2*H] = 1.0
+
+        if self.bias_hh is not None and self.bias_hh.numel() > 0:
+            nn.init.zeros_(self.bias_hh)
 
     def _apply_dropconnect(self):
 
@@ -110,19 +117,38 @@ class LSTMPPOPolicy(nn.Module):
                                              cfg.obs_dim)
 
         # --- SiLU encoder ---
-        self.encoder = nn.Sequential(
-            nn.Linear(cfg.obs_dim,
-                      cfg.lstm.enc_hidden_size),
-            nn.SiLU(),
-            nn.Linear(cfg.lstm.enc_hidden_size,
-                      cfg.lstm.enc_hidden_size),
-            nn.SiLU(),
-        )
+        if cfg.env.flat_obs_dim == 0:
+            """
+            When obs_dim == 0, the environment provides no observation 
+            features. But the LSTM still needs an input vector of size 
+            enc_hidden_size. So the correct behavior is:
+            
+            - Treat the encoder as a constant zero‑feature generator
+            - Let the LSTM operate purely on its recurrent state
+            - Preserve shape invariants everywhere
 
-        for m in self.encoder:
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
+            This is exactly how RL libraries handle “no observation” cases.
+            """
+            self.encoder = ZeroFeatureEncoder(cfg.lstm.enc_hidden_size)
+        else:
+            self.encoder = nn.Sequential(
+                nn.Linear(cfg.obs_dim,
+                        cfg.lstm.enc_hidden_size),
+                nn.SiLU(),
+                nn.Linear(cfg.lstm.enc_hidden_size,
+                        cfg.lstm.enc_hidden_size),
+                nn.SiLU(),
+            )
+
+        if isinstance(self.encoder, nn.Sequential):
+            for m in self.encoder:
+                if isinstance(m, nn.Linear):
+
+                    if m.weight.numel() > 0:
+                        nn.init.xavier_uniform_(m.weight)
+
+                    if m.bias.numel() > 0:
+                        nn.init.zeros_(m.bias)
 
         # --- LN-LSTM with DropConnect ---
         self.lstm_cell = GateLSTMCell(
@@ -135,16 +161,27 @@ class LSTMPPOPolicy(nn.Module):
         self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
 
         # --- Heads ---
-        self.actor = nn.Linear(cfg.lstm.lstm_hidden_size,
-                               cfg.env.action_dim)
-        
+        if cfg.env.action_dim == 0:
+            self.actor = nn.Identity()
+        else:
+            self.actor = nn.Linear(cfg.lstm.lstm_hidden_size,
+                                   cfg.env.action_dim)
+
         self.critic = nn.Linear(cfg.lstm.lstm_hidden_size, 1)
 
-        nn.init.xavier_uniform_(self.actor.weight)
-        nn.init.xavier_uniform_(self.critic.weight)
-    
-        nn.init.zeros_(self.actor.bias)
-        nn.init.zeros_(self.critic.bias)
+        if isinstance(self.actor, nn.Linear):
+
+            if self.actor.weight.numel() > 0:
+                nn.init.xavier_uniform_(self.actor.weight)
+
+            if self.actor.bias.numel() > 0:
+                nn.init.zeros_(self.actor.bias)
+
+        if self.critic.weight.numel() > 0:
+            nn.init.xavier_uniform_(self.critic.weight)
+            
+        if self.critic.bias.numel() > 0:
+            nn.init.zeros_(self.critic.bias)
 
     # ---------------------------------------------------------
     # Core forward pass (returns activations + AR/TAR)
@@ -179,9 +216,10 @@ class LSTMPPOPolicy(nn.Module):
         obs_flat = self.obs_encoder(x)  # x may be dict/tuple/box
 
         if obs_flat.dim() == 2:
-            obs_flat = obs_flat.unsqueeze(1)
+            obs_flat = obs_flat.unsqueeze(1) # (B,1,F)
 
-        enc = self.encoder(obs_flat)
+        # (B,T,H) for both normal and zero encoder
+        enc = self.encoder(obs_flat) 
 
         # LSTM expects (B, T, F) with batch_first=True
         B, T, F = enc.shape
@@ -258,7 +296,12 @@ class LSTMPPOPolicy(nn.Module):
         # core_out is ALWAYS (B, T, H)
         B, T, H = core_out.out.shape
         flat = core_out.out.reshape(B * T, H)
-        logits = self.actor(flat).view(B, T, -1)   # (B, T, A)
+
+        if isinstance(self.actor, nn.Identity):
+            logits = torch.zeros(B, T, 0, device=flat.device)
+        else:
+            logits = self.actor(flat).view(B, T, -1)   # (B, T, A)
+        
         values = self.critic(flat).view(B, T)      # (B, T)
 
         # If single-step, squeeze back to (B, A) and (B,)
@@ -325,7 +368,7 @@ class LSTMPPOPolicy(nn.Module):
         else:
             actions = inp.actions                      # (T, B)
 
-        dist = Categorical(logits=logits)
+        dist = self._dist_from_logits(logits)
 
         assert logits.dim() == 3,\
             f"logits must be (T,B,A), got {logits.shape}"
@@ -398,3 +441,64 @@ class LSTMPPOPolicy(nn.Module):
             ar_loss=policy_output.ar_loss,
             tar_loss=policy_output.tar_loss,
         )
+    
+    def evaluate_actions(self,
+                         out,
+                         actions):
+        """
+        Evaluate log-prob and entropy for a single timestep.
+
+        out: PolicyOutput from forward()
+            - logits: (B, A)
+            - values: (B,)
+        actions: (B,) or (B,1)
+        """
+
+        # Ensure shape (B,)
+        if actions.dim() == 2 and actions.size(-1) == 1:
+            actions = actions.squeeze(-1)
+
+        dist = self._dist_from_logits(out.logits)  # (B, A)
+
+        logprobs = dist.log_prob(actions)          # (B,)
+        entropy = dist.entropy()                   # (B,)
+
+        return PolicyEvalOutput(
+            values=out.values,     # (B,)
+            logprobs=logprobs,     # (B,)
+            entropy=entropy,       # (B,)
+            new_hxs=out.new_hxs,   # (B, H)
+            new_cxs=out.new_cxs,   # (B, H)
+            gates=out.gates,       # (B, H) or (B, 1, H)
+            ar_loss=out.ar_loss,
+            tar_loss=out.tar_loss,
+        )
+
+    def _dist_from_logits(self,
+                          logits):
+
+        return Categorical(logits=logits)
+
+
+
+class ZeroFeatureEncoder(nn.Module):
+
+    def __init__(self, out_dim):
+        super().__init__()
+        self.out_dim = out_dim
+
+    def forward(self,
+                obs):
+        
+        # obs: (B, 0) or (B, T, 0)
+        if obs.dim() == 2:
+            B = obs.size(0)
+            return torch.zeros(B,
+                               self.out_dim,
+                               device=obs.device)      # (B, H)
+        else:
+            B, T, _ = obs.shape
+            return torch.zeros(B,
+                               T,
+                               self.out_dim,
+                               device=obs.device)   # (B, T, H)

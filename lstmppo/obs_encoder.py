@@ -90,4 +90,7 @@ def build_obs_encoder(space: gym.Space,
     Build a PyTorch encoder for the policy.
     Since the env wrapper already flattens observations, this is trivial.
     """
-    return FlatObsEncoder(flat_dim)
+    if space is None or flat_dim == 0:
+        return nn.Identity()
+    else:
+        return FlatObsEncoder(flat_dim)
