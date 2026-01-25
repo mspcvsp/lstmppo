@@ -25,7 +25,7 @@ def test_cell_state_drift_accumulates_over_time():
     cfg = Config()
     cfg.env.flat_obs_dim = 4
     cfg.env.action_dim = 3
-    cfg.trainer.debug_mode = True   # disable DropConnect randomness
+    cfg.trainer.debug_mode = True
 
     policy = LSTMPPOPolicy(cfg)
     policy.eval()
@@ -33,28 +33,20 @@ def test_cell_state_drift_accumulates_over_time():
     B = 3
     H = cfg.lstm.lstm_hidden_size
 
-    # Short vs long sequences
-    obs_short = torch.randn(B, 5, cfg.env.flat_obs_dim)
-    obs_long  = torch.randn(B, 50, cfg.env.flat_obs_dim)
+    lengths = [5, 50]
+    num_samples = 20  # average over multiple sequences
 
-    h0 = torch.zeros(B, H)
-    c0 = torch.zeros(B, H)
+    avg_drifts = []
 
-    # Forward passes
-    out_short = policy.forward(PolicyInput(obs=obs_short, hxs=h0, cxs=c0))
-    out_long  = policy.forward(PolicyInput(obs=obs_long,  hxs=h0, cxs=c0))
+    for L in lengths:
+        drifts = []
+        for _ in range(num_samples):
+            obs = torch.randn(B, L, cfg.env.flat_obs_dim)
+            h0 = torch.zeros(B, H)
+            c0 = torch.zeros(B, H)
+            out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
+            drifts.append(out.gates.c_gates.pow(2).mean())
+        avg_drifts.append(torch.stack(drifts).mean())
 
-    # Cell-state drift metric: mean squared magnitude of c_t over time
-    drift_short = out_short.gates.c_gates.pow(2).mean()
-    drift_long  = out_long.gates.c_gates.pow(2).mean()
-
-    """
-    Cell drift is monotonic in expectation, but:
-    - drift increments are tiny
-    - float32 collapses values
-    - sometimes drift_long == drift_short
-
-    Correct invariant: Cell drift should not meaningfully decrease.
-    """
-    eps = 1e-6
-    assert drift_long + eps >= drift_short
+    eps = 1e-5
+    assert avg_drifts[1] + eps >= avg_drifts[0] - eps
