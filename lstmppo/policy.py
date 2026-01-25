@@ -150,9 +150,12 @@ class LSTMPPOPolicy(nn.Module):
         self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
 
         # --- Heads ---
-        self.actor = nn.Linear(cfg.lstm.lstm_hidden_size,
-                               cfg.env.action_dim)
-        
+        if cfg.env.action_dim == 0:
+            self.actor = nn.Identity()
+        else:
+            self.actor = nn.Linear(cfg.lstm.lstm_hidden_size,
+                                   cfg.env.action_dim)
+
         self.critic = nn.Linear(cfg.lstm.lstm_hidden_size, 1)
 
         if self.actor.weight.numel() > 0:
@@ -279,7 +282,12 @@ class LSTMPPOPolicy(nn.Module):
         # core_out is ALWAYS (B, T, H)
         B, T, H = core_out.out.shape
         flat = core_out.out.reshape(B * T, H)
-        logits = self.actor(flat).view(B, T, -1)   # (B, T, A)
+
+        if isinstance(self.actor, nn.Identity):
+            logits = torch.zeros(B, T, 0, device=flat.device)
+        else:
+            logits = self.actor(flat).view(B, T, -1)   # (B, T, A)
+        
         values = self.critic(flat).view(B, T)      # (B, T)
 
         # If single-step, squeeze back to (B, A) and (B,)
