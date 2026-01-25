@@ -1,3 +1,16 @@
+"""
+This tiny test protects from subtle but catastrophic regressions:
+
+- critic loss accidentally detached
+- wrong reduction (sum vs mean)
+- masking logic broken
+- value loss weight misapplied
+- incorrect broadcasting
+- sign errors
+- value head output shape changes
+- returns accidentally normalized or clipped
+
+"""
 import torch
 from lstmppo.types import Config
 from lstmppo.trainer import LSTMPPOTrainer

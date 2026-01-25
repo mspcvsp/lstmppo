@@ -367,7 +367,7 @@ class LSTMPPOPolicy(nn.Module):
         else:
             actions = inp.actions                      # (T, B)
 
-        dist = Categorical(logits=logits)
+        dist = self._dist_from_logits(logits)
 
         assert logits.dim() == 3,\
             f"logits must be (T,B,A), got {logits.shape}"
@@ -440,6 +440,44 @@ class LSTMPPOPolicy(nn.Module):
             ar_loss=policy_output.ar_loss,
             tar_loss=policy_output.tar_loss,
         )
+    
+    def evaluate_actions(self,
+                         out,
+                         actions):
+        """
+        Evaluate log-prob and entropy for a single timestep.
+
+        out: PolicyOutput from forward()
+            - logits: (B, A)
+            - values: (B,)
+        actions: (B,) or (B,1)
+        """
+
+        # Ensure shape (B,)
+        if actions.dim() == 2 and actions.size(-1) == 1:
+            actions = actions.squeeze(-1)
+
+        dist = self._dist_from_logits(out.logits)  # (B, A)
+
+        logprobs = dist.log_prob(actions)          # (B,)
+        entropy = dist.entropy()                   # (B,)
+
+        return PolicyEvalOutput(
+            values=out.values,     # (B,)
+            logprobs=logprobs,     # (B,)
+            entropy=entropy,       # (B,)
+            new_hxs=out.new_hxs,   # (B, H)
+            new_cxs=out.new_cxs,   # (B, H)
+            gates=out.gates,       # (B, H) or (B, 1, H)
+            ar_loss=out.ar_loss,
+            tar_loss=out.tar_loss,
+        )
+
+    def _dist_from_logits(self,
+                          logits):
+
+        return Categorical(logits=logits)
+
 
 
 class ZeroFeatureEncoder(nn.Module):
