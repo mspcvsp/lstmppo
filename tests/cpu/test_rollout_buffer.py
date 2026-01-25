@@ -29,7 +29,7 @@ def test_buffer_initialization_shapes():
     obs_dim = cfg.obs_dim
     act_dim = cfg.env.action_dim
 
-    assert buf.ptr == 0
+    assert buf.step == 0
     assert buf.obs.shape == (T, obs_dim)
     assert buf.actions.shape == (T, act_dim)
     assert buf.rewards.shape == (T,)
@@ -70,7 +70,7 @@ def test_add_increments_pointer_and_writes_data():
 
     buf.add(obs, act, rew, done, val, logp)
 
-    assert buf.ptr == 1
+    assert buf.step == 1
     assert torch.allclose(buf.obs[0], obs.to(device))
     assert torch.allclose(buf.actions[0], act.to(device))
     assert buf.rewards[0].item() == rew
@@ -118,7 +118,7 @@ def test_reset_clears_state():
 
     buf.reset()
 
-    assert buf.ptr == 0
+    assert buf.step == 0
     assert torch.all(buf.terminated == 0)
     assert torch.all(buf.truncated == 0)
 
