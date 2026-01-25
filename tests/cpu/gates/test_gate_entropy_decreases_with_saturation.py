@@ -1,10 +1,12 @@
 """
 Ensures entropy decreases when gates saturate.
 """
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
-import pytest
+
 pytestmark = pytest.mark.gates
 
 
@@ -29,14 +31,14 @@ def test_gate_entropy_decreases_with_saturation():
     i2 = out2.gates.i_gates
 
     eps = 1e-8
-    
+
     ent1 = (
         -(i1 * torch.log(i1 + eps) +
           (1 - i1) * torch.log(1 - i1 + eps)).mean()
     )
-    
+
     ent2 = (
-        -(i2 * torch.log(i2 + eps) + 
+        -(i2 * torch.log(i2 + eps) +
           (1 - i2) * torch.log(1 - i2 + eps)).mean()
     )
 

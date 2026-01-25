@@ -1,6 +1,8 @@
 import pytest
 import torch
+
 from lstmppo.trainer import LSTMPPOTrainer
+
 
 @pytest.fixture
 def deterministic_trainer():

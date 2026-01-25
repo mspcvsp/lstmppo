@@ -1,9 +1,8 @@
 # obs_encoder.py
-import numpy as np
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
-
 
 # ============================================================
 # 1. Compute flat observation dimension from any Gym space

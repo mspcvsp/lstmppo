@@ -6,8 +6,9 @@ This test catches:
 - shape mismatches
 """
 import torch
-from lstmppo.types import Config
+
 from lstmppo.buffer import RecurrentRolloutBuffer
+from lstmppo.types import Config
 
 
 def test_gae_computation_basic():

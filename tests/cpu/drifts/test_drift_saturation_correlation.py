@@ -3,8 +3,10 @@ Ensures that when drift increases, saturation also increases
 (a deep interpretability invariant).
 """
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+
 
 def test_drift_saturation_correlation():
     cfg = Config()
@@ -25,7 +27,7 @@ def test_drift_saturation_correlation():
     out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
 
     drift = out.gates.h_gates.pow(2).mean(dim=(0, 2))  # (T,)
-    
+
     sat   = torch.minimum(
         out.gates.i_gates,
         1 - out.gates.i_gates

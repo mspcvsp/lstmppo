@@ -1,7 +1,9 @@
-import streamlit as st
-import numpy as np
 import threading
-from lstmppo.trainer import LSTMPPOTrainer, Config, initialize_config
+
+import numpy as np
+import streamlit as st
+
+from lstmppo.trainer import Config, LSTMPPOTrainer, initialize_config
 
 
 @st.cache_resource

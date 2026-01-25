@@ -1,10 +1,9 @@
 # trainer_renderers.py
 import numpy as np
-
-from rich.table import Table
-from rich.panel import Panel
-from rich.text import Text
 from rich.columns import Columns
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 
 def sparkline(data, width=30, style="cyan"):

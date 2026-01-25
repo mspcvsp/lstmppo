@@ -1,16 +1,17 @@
-from numpy.random import Generator, MT19937, SeedSequence
 import gymnasium as gym
-from gymnasium.vector import SyncVectorEnv
 import torch
+from gymnasium.vector import SyncVectorEnv
+from numpy.random import MT19937, Generator, SeedSequence
 
-from .types import Config, VecEnvState, PolicyInput, LSTMStates, EpisodeStats
 from .obs_encoder import flatten_obs
+from .types import Config, EpisodeStats, LSTMStates, PolicyInput, VecEnvState
 
 
 def make_env(env_id):
     def thunk():
         env = gym.make(env_id)
         return env
+
     return thunk
 
 
@@ -19,12 +20,8 @@ class RecurrentVecEnvWrapper:
     Wrap vectorized env and manage per-env LSTM hidden states.
     """
 
-    def __init__(self,
-                 cfg: Config,
-                 device):
-
-        self.venv = SyncVectorEnv([make_env(cfg.env.env_id)
-                                   for _ in range(cfg.env.num_envs)])
+    def __init__(self, cfg: Config, device):
+        self.venv = SyncVectorEnv([make_env(cfg.env.env_id) for _ in range(cfg.env.num_envs)])
 
         self.num_envs = cfg.env.num_envs
         self.hidden_size = cfg.lstm.lstm_hidden_size
@@ -32,74 +29,54 @@ class RecurrentVecEnvWrapper:
         self.max_history = cfg.env.max_env_history
         self.ep_len_reward_bonus = cfg.env.ep_len_reward_bonus
 
-        self.hxs = torch.zeros(self.num_envs,
-                               self.hidden_size,
-                               device=self.device)
+        self.hxs = torch.zeros(self.num_envs, self.hidden_size, device=self.device)
 
-        self.cxs = torch.zeros(self.num_envs,
-                               self.hidden_size,
-                               device=self.device)
-        
-        self.last_terminated = torch.zeros(self.num_envs,
-                                           dtype=torch.bool,
-                                           device=self.device)
+        self.cxs = torch.zeros(self.num_envs, self.hidden_size, device=self.device)
 
-        self.ep_len = torch.zeros(self.num_envs,
-                                  dtype=torch.int32,
-                                  device=self.device)
-        
-        self.ep_return = torch.zeros(self.num_envs,
-                                     dtype=torch.float32,
-                                     device=self.device)
+        self.last_terminated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+        self.ep_len = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+
+        self.ep_return = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
 
         self.completed_ep_returns = []
         self.completed_ep_lens = []
-        
+
         self.ep_len_history = [[] for _ in range(self.num_envs)]
-        
+
     @property
     def observation_space(self):
         return self.venv.single_observation_space
-    
+
     @property
     def hidden_state(self):
         return LSTMStates(self.hxs, self.cxs)
 
     def reset(self, seed=None) -> VecEnvState:
-
         rng = Generator(MT19937(SeedSequence(seed)))
-        seeds = [int(elem * 1E9) for elem in rng.random(self.num_envs)]
+        seeds = [int(elem * 1e9) for elem in rng.random(self.num_envs)]
 
         obs, info = self.venv.reset(seed=seeds)
 
-        obs = flatten_obs(obs,
-                          self.venv.single_observation_space)
+        obs = flatten_obs(obs, self.venv.single_observation_space)
 
         self.hxs.zero_()
         self.cxs.zero_()
         self.last_terminated.zero_()
 
-        obs = torch.as_tensor(obs,
-                              device=self.device,
-                              dtype=torch.float32)
+        obs = torch.as_tensor(obs, device=self.device, dtype=torch.float32)
 
         return VecEnvState(
             obs=obs,
-            rewards=torch.zeros(self.num_envs,
-                                device=self.device),
-            terminated=torch.zeros(self.num_envs,
-                                   dtype=torch.bool,
-                                   device=self.device),
-            truncated=torch.zeros(self.num_envs,
-                                  dtype=torch.bool,
-                                  device=self.device),
+            rewards=torch.zeros(self.num_envs, device=self.device),
+            terminated=torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            truncated=torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
             info=info,
             hxs=self.hxs.clone(),
             cxs=self.cxs.clone(),
         )
 
-    def set_initial_lstm_states(self,
-                                last_lstm_states: LSTMStates) -> None:
+    def set_initial_lstm_states(self, last_lstm_states: LSTMStates) -> None:
         """
         Called at the start of a new rollout.`
         hxs, cxs: (num_envs, hidden_size)
@@ -108,26 +85,21 @@ class RecurrentVecEnvWrapper:
 
         if last_lstm_states.hxs is None:
             # first rollout ever
-            initial_hxs = torch.zeros(self.num_envs,
-                                      self.hidden_size,
-                                      device=self.device)
+            initial_hxs = torch.zeros(self.num_envs, self.hidden_size, device=self.device)
 
-            initial_cxs = torch.zeros(self.num_envs,
-                                      self.hidden_size,
-                                      device=self.device)
+            initial_cxs = torch.zeros(self.num_envs, self.hidden_size, device=self.device)
         else:
             initial_hxs = last_lstm_states.hxs
             initial_cxs = last_lstm_states.cxs
 
         # Only carry over states for environments that didn't terminate or
         # truncate
-        carry_mask = ~self.last_terminated 
+        carry_mask = ~self.last_terminated
 
         self.hxs[carry_mask] = initial_hxs[carry_mask]
         self.cxs[carry_mask] = initial_cxs[carry_mask]
 
     def step(self, actions: torch.Tensor) -> VecEnvState:
-
         """
         actions: (N,) or (N,1) tensor, discrete.
         """
@@ -136,28 +108,20 @@ class RecurrentVecEnvWrapper:
         else:
             actions_np = actions.cpu().numpy()
 
-        obs, rewards, terminated, truncated, info =\
-            self.venv.step(actions_np)
-        
-        obs = flatten_obs(obs,
-                          self.venv.single_observation_space)
+        obs, rewards, terminated, truncated, info = self.venv.step(actions_np)
 
-        # Convert to Pytorch tensor to avoid no silent 
+        obs = flatten_obs(obs, self.venv.single_observation_space)
+
+        # Convert to Pytorch tensor to avoid no silent
         # NumPy → PyTorch type mismatches prior to reward
         # shaping
-        rewards = torch.as_tensor(rewards,
-                                  device=self.device,
-                                  dtype=torch.float32)
+        rewards = torch.as_tensor(rewards, device=self.device, dtype=torch.float32)
 
         # ------ Convert flags to tensors ------
-        terminated = torch.as_tensor(terminated,
-                                     device=self.device,
-                                     dtype=torch.bool)
-        
-        truncated = torch.as_tensor(truncated,
-                                    device=self.device,
-                                    dtype=torch.bool)
-        
+        terminated = torch.as_tensor(terminated, device=self.device, dtype=torch.bool)
+
+        truncated = torch.as_tensor(truncated, device=self.device, dtype=torch.bool)
+
         # increment all alive envs
         self.ep_len += 1
 
@@ -173,13 +137,12 @@ class RecurrentVecEnvWrapper:
         • 	Are still alive
         • 	Have just been reset
 
-        The trainer and buffer only see batched tensors — they don’t 
+        The trainer and buffer only see batched tensors — they don’t
         know which envs just died.
         """
         done_mask = terminated | truncated
 
         if done_mask.any():
-
             self.hxs[done_mask].zero_()
             self.cxs[done_mask].zero_()
 
@@ -188,23 +151,19 @@ class RecurrentVecEnvWrapper:
             self.completed_ep_lens.extend(finished_lengths)
 
             # --- Terminal reward shaping ---
-            # Add a bonus proportional to episode length when the env 
+            # Add a bonus proportional to episode length when the env
             # terminates
             bonus = self.ep_len_reward_bonus * self.ep_len.float()
 
             # Apply bonus only to terminated/truncated envs
             rewards[done_mask] += bonus[done_mask]
 
-            # Maintain rolling window of episode lengths for each 
+            # Maintain rolling window of episode lengths for each
             # environment.
-            for idx, env_idx in enumerate(
-                done_mask.nonzero(as_tuple=False).squeeze(-1).tolist()
-                ):
-                
+            for idx, env_idx in enumerate(done_mask.nonzero(as_tuple=False).squeeze(-1).tolist()):
                 self.ep_len_history[env_idx].append(finished_lengths[idx])
 
                 if len(self.ep_len_history[env_idx]) > self.max_history:
-
                     self.ep_len_history[env_idx].pop(0)
 
             # record completed episode rewards
@@ -215,9 +174,7 @@ class RecurrentVecEnvWrapper:
             # reset counters for those envs
             self.ep_len[done_mask] = 0
 
-        obs = torch.as_tensor(obs,
-                              device=self.device,
-                              dtype=torch.float32)
+        obs = torch.as_tensor(obs, device=self.device, dtype=torch.float32)
 
         self.last_terminated = done_mask.clone()
 
@@ -231,19 +188,14 @@ class RecurrentVecEnvWrapper:
             cxs=self.cxs.clone(),
         )
 
-    def update_hidden_states(self,
-                             new_hxs: torch.Tensor,
-                             new_cxs: torch.Tensor) -> None:
-
+    def update_hidden_states(self, new_hxs: torch.Tensor, new_cxs: torch.Tensor) -> None:
         self.hxs.copy_(new_hxs)
         self.cxs.copy_(new_cxs)
 
     def get_episode_stats(self):
-
         episodes = len(self.completed_ep_lens)
 
         if episodes == 0:
-            
             max_ep_len = 0
             avg_ep_len = 0.0
             max_ep_returns = 0.0
@@ -251,12 +203,10 @@ class RecurrentVecEnvWrapper:
         else:
             max_ep_len = max(self.completed_ep_lens)
             avg_ep_len = sum(self.completed_ep_lens) / episodes
-            
+
             max_ep_returns = max(self.completed_ep_returns)
 
-            avg_ep_returns =\
-                (sum(self.completed_ep_returns) /
-                 len(self.completed_ep_returns))
+            avg_ep_returns = sum(self.completed_ep_returns) / len(self.completed_ep_returns)
 
         self.completed_ep_lens.clear()
         self.completed_ep_returns.clear()
@@ -267,7 +217,7 @@ class RecurrentVecEnvWrapper:
             max_ep_len=max_ep_len,
             avg_ep_len=float(avg_ep_len),
             max_ep_returns=max_ep_returns,
-            avg_ep_returns=float(avg_ep_returns)
+            avg_ep_returns=float(avg_ep_returns),
         )
 
 

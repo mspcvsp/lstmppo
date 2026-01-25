@@ -17,11 +17,12 @@ This test protects a subtle but crucial invariant:
 
 This test catches regressions that no other test will.
 """
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
 
-import pytest
 pytestmark = pytest.mark.drift
 
 

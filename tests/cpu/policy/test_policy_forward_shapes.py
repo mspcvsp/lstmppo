@@ -6,12 +6,13 @@ This test catches:
 - wrong output dimension
 """
 import torch
-from lstmppo.types import Config, PolicyInput, initialize_config
+
 from lstmppo.policy import LSTMPPOPolicy
+from lstmppo.types import Config, PolicyInput, initialize_config
 
 
 def test_policy_forward_shapes():
-    
+
     cfg = Config()
     cfg = initialize_config(cfg)
     model = LSTMPPOPolicy(cfg)
@@ -33,10 +34,10 @@ def test_policy_forward_shapes():
     assert outp.ar_loss.shape == torch.Size([])
     assert outp.tar_loss.shape == torch.Size([])
 
-    for name in [      
+    for name in [
         "i_gates", "f_gates", "o_gates",
         "o_gates", "c_gates", "h_gates"
         ]:
-        
+
         t = getattr(outp.gates, name)
         assert t.shape == (B, 1, cfg.lstm.lstm_hidden_size)

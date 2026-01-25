@@ -4,6 +4,7 @@ collapses. This test ensures drift doesn’t explode or collapse between
 adjacent horizons.
 """
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
 

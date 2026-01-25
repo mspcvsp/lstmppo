@@ -1,99 +1,44 @@
 import torch
-from .types import Config, RolloutStep, RecurrentBatch, LSTMStates
+
+from .types import Config, LSTMStates, RecurrentBatch, RolloutStep
 
 
 class RecurrentRolloutBuffer:
-
-    def __init__(self,
-                 cfg: Config,
-                 device):
-
+    def __init__(self, cfg: Config, device):
         self.device = device
 
         self.cfg = cfg.buffer_config
 
         # --- Storage ---
-        self.obs = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            cfg.env.flat_obs_dim,
-            device=self.device
-        )
+        self.obs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, cfg.env.flat_obs_dim, device=self.device)
 
-        self.actions = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            1,
-            device=self.device
-        )
+        self.actions = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, 1, device=self.device)
 
-        self.rewards = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            device=self.device
-        )
+        self.rewards = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
-        self.values = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            device=self.device
-        )
+        self.values = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
-        self.logprobs = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            device=self.device
-        )
+        self.logprobs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
-        self.terminated = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            dtype=torch.bool,
-            device=self.device
-        )
+        self.terminated = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, dtype=torch.bool, device=self.device)
 
-        self.truncated = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            dtype=torch.bool,
-            device=self.device
-        )
+        self.truncated = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, dtype=torch.bool, device=self.device)
 
         # Hidden states at *start* of each timestep
-        self.hxs = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            self.cfg.lstm_hidden_size,
-            device=self.device
-        )
+        self.hxs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, self.cfg.lstm_hidden_size, device=self.device)
 
-        self.cxs = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            self.cfg.lstm_hidden_size,
-            device=self.device
-        )
+        self.cxs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, self.cfg.lstm_hidden_size, device=self.device)
 
-        self.returns = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            device=self.device
-        )
+        self.returns = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
-        self.advantages = torch.zeros(
-            self.cfg.rollout_steps,
-            self.cfg.num_envs,
-            device=self.device
-        )
+        self.advantages = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
         self.reset()
 
     # ---------------------------------------------------------
     # Add rollout step
     # ---------------------------------------------------------
-    def add(self,
-            step: RolloutStep):
-
+    def add(self, step: RolloutStep):
         # --- Pointer safety ---
         t = self.step
 
@@ -106,21 +51,17 @@ class RecurrentRolloutBuffer:
         - Prevents hidden‑state alignment failures
         - Makes your GPU tests meaningful
         """
-        assert t < self.cfg.rollout_steps, \
-            f"RolloutBuffer overflow: step={t}, max={self.cfg.rollout_steps}"
+        assert t < self.cfg.rollout_steps, f"RolloutBuffer overflow: step={t}, max={self.cfg.rollout_steps}"
 
         # --- Shape checks ---
-        assert step.obs.shape == (self.cfg.num_envs, self.obs.size(-1)), \
-            f"Obs shape mismatch: {step.obs.shape}"
+        assert step.obs.shape == (self.cfg.num_envs, self.obs.size(-1)), f"Obs shape mismatch: {step.obs.shape}"
 
-        assert step.hxs.shape == (self.cfg.num_envs,
-                                  self.cfg.lstm_hidden_size)
-        
-        assert step.cxs.shape == (self.cfg.num_envs,
-                                  self.cfg.lstm_hidden_size)
+        assert step.hxs.shape == (self.cfg.num_envs, self.cfg.lstm_hidden_size)
+
+        assert step.cxs.shape == (self.cfg.num_envs, self.cfg.lstm_hidden_size)
 
         # --- Store rollout data ---
-        self.obs[t].copy_(step.obs)   # step.obs is already flat
+        self.obs[t].copy_(step.obs)  # step.obs is already flat
 
         # Actions must be (B,1)
         if step.actions.dim() == 1:
@@ -145,9 +86,7 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     # Store final LSTM states for next rollout
     # ---------------------------------------------------------
-    def store_last_lstm_states(self,
-                               last_policy_output):
-
+    def store_last_lstm_states(self, last_policy_output):
         # last timestep hidden state (B, H)
         self.last_hxs = last_policy_output.new_hxs[-1].detach()
         self.last_cxs = last_policy_output.new_cxs[-1].detach()
@@ -155,39 +94,38 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     # GAE-Lambda
     # ---------------------------------------------------------
-    def compute_returns_and_advantages(self,
-                                       last_value):
+    def compute_returns_and_advantages(self, last_value):
         """
         Reward & Return normalization operate at  different stages and
         solve different stability problems.
 
         Reward normalization
         ---------------------
-        stabilizes the advantage calculation because GAE uses rewards 
+        stabilizes the advantage calculation because GAE uses rewards
         directly
 
         Return normalization
         --------------------
         stabilizes the critic’s regression target because the value loss
-        uses returns directly. 
+        uses returns directly.
 
         ####################
         Reward Normalization
         ####################
-        
+
         What it normalizes:
         ------------------
             The raw rewards coming from the environment (after shaping).
-        
+
         Where it happens:
         -----------------
             Inside the rollout buffer, before computing GAE.
-        
+
         Why it exists:
         --------------
             Reward normalization stabilizes the critic’s TD error by ensuring
             that the reward scale is consistent across rollouts.
-        
+
         Why it matters:
         --------------
         • 	Shaping increases reward variance
@@ -195,45 +133,33 @@ class RecurrentRolloutBuffer:
         • 	Dense rewards can explode the critic
         • 	PPO’s GAE is sensitive to reward scale
         • 	LSTMs amplify variance over long horizons
-        
+
         Effect:
         ------
         Reward normalization makes the advantage signal smoother, which makes
         the critic learn faster and prevents value explosion.
-        
+
         Analogy:
         -------
-        Reward normalization is like normalizing your input features before 
+        Reward normalization is like normalizing your input features before
         training a neural network.
         """
         r = self.rewards
         self.rewards = (r - r.mean()) / (r.std(unbiased=False) + 1e-8)
 
-        last_gae = torch.zeros(self.cfg.num_envs,
-                               device=self.device)
+        last_gae = torch.zeros(self.cfg.num_envs, device=self.device)
 
         for t in reversed(range(self.cfg.rollout_steps)):
-
             true_terminal = self.terminated[t]
 
             # truncated episodes bootstrap; terminated do not
             bootstrap = ~true_terminal
 
-            next_value = (
-                last_value if t == self.cfg.rollout_steps - 1
-                else self.values[t + 1]
-            )
+            next_value = last_value if t == self.cfg.rollout_steps - 1 else self.values[t + 1]
 
-            delta = (
-                self.rewards[t]
-                + self.cfg.gamma * next_value * bootstrap
-                - self.values[t]
-            )
+            delta = self.rewards[t] + self.cfg.gamma * next_value * bootstrap - self.values[t]
 
-            last_gae = (
-                delta + self.cfg.gamma
-                * self.cfg.lam * last_gae * bootstrap
-            )
+            last_gae = delta + self.cfg.gamma * self.cfg.lam * last_gae * bootstrap
 
             self.advantages[t] = last_gae
 
@@ -269,12 +195,12 @@ class RecurrentRolloutBuffer:
 
         Effect:
         ------
-        Return normalization makes the critic’s regression target stable, 
+        Return normalization makes the critic’s regression target stable,
         which improves explained variance and prevents critic drift.
 
         Analogy:
         -------
-        Return normalization is like whitening your labels in a regression 
+        Return normalization is like whitening your labels in a regression
         problem.
         """
         ret = self.returns
@@ -284,15 +210,10 @@ class RecurrentRolloutBuffer:
     # Yield minibatches of full sequences (T, B, ...)
     # ---------------------------------------------------------
     def get_recurrent_minibatches(self):
+        env_indices = torch.randperm(self.cfg.num_envs, device=self.device)
 
-        env_indices = torch.randperm(self.cfg.num_envs,
-                                     device=self.device)
-
-        for start in range(0,
-                           self.cfg.num_envs,
-                           self.cfg.mini_batch_envs):
-
-            idx = env_indices[start:start + self.cfg.mini_batch_envs]
+        for start in range(0, self.cfg.num_envs, self.cfg.mini_batch_envs):
+            idx = env_indices[start : start + self.cfg.mini_batch_envs]
 
             yield RecurrentBatch(
                 obs=self.obs[:, idx],
@@ -304,18 +225,14 @@ class RecurrentRolloutBuffer:
                 hxs=self.hxs[:, idx],
                 cxs=self.cxs[:, idx],
                 terminated=self.terminated[:, idx],
-                truncated=self.truncated[:, idx]
+                truncated=self.truncated[:, idx],
             )
 
     # ---------------------------------------------------------
     # LSTM state handoff to env wrapper
     # ---------------------------------------------------------
     def get_last_lstm_states(self):
-
-        return LSTMStates(
-            hxs=self.last_hxs,
-            cxs=self.last_cxs
-        )
+        return LSTMStates(hxs=self.last_hxs, cxs=self.last_cxs)
 
     # ---------------------------------------------------------
     # Reset buffer
@@ -338,14 +255,14 @@ class RecurrentRolloutBuffer:
         # Last-step LSTM states (for next rollout)
         self.last_hxs = None
         self.last_cxs = None
-        
+
         # Clear rollout storage
         self.obs.zero_()
         self.actions.zero_()
         self.rewards.zero_()
         self.values.zero_()
         self.logprobs.zero_()
-        
+
         # Episode termination flags
         self.terminated.zero_()
         self.truncated.zero_()
@@ -370,5 +287,4 @@ class RecurrentRolloutBuffer:
     # Optional safety check
     # ---------------------------------------------------------
     def finalize(self):
-        assert self.step == self.cfg.rollout_steps, \
-            f"Rollout incomplete: {self.step}/{self.cfg.rollout_steps}"
+        assert self.step == self.cfg.rollout_steps, f"Rollout incomplete: {self.step}/{self.cfg.rollout_steps}"

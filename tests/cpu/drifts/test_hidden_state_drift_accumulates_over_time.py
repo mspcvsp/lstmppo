@@ -8,10 +8,12 @@ This test ensures:
 - Drift metrics behave meaningfully
 - Diagnostics remain interpretable for long rollouts
 """
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
-import pytest
+
 pytestmark = pytest.mark.drift
 
 

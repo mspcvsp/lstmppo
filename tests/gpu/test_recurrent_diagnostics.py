@@ -1,6 +1,5 @@
-import torch
 import pytest
-from lstmppo.trainer import LSTMPPOTrainer
+import torch
 
 pytestmark = pytest.mark.gpu
 
@@ -13,17 +12,24 @@ def test_unit_metrics_shapes(deterministic_trainer):
     H = diag.hidden_size
 
     for name in [
-        "i_mean", "f_mean", "g_mean", "o_mean",
-        "h_norm", "c_norm",
-        "i_drift", "f_drift", "g_drift", "o_drift",
-        "h_drift", "c_drift",
+        "i_mean",
+        "f_mean",
+        "g_mean",
+        "o_mean",
+        "h_norm",
+        "c_norm",
+        "i_drift",
+        "f_drift",
+        "g_drift",
+        "o_drift",
+        "h_drift",
+        "c_drift",
     ]:
         t = getattr(diag, name)
         assert t.shape == (H,)
 
 
 def test_unit_metrics_mask_behavior(deterministic_trainer):
-
     trainer = deterministic_trainer
 
     trainer.collect_rollout()
@@ -72,7 +78,6 @@ def test_unit_metrics_no_nans(deterministic_trainer):
 
 
 def test_unit_metrics_replay_determinism(deterministic_trainer):
-
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
@@ -97,6 +102,7 @@ def test_unit_metrics_replay_determinism(deterministic_trainer):
         # Normal tensor field
         assert torch.allclose(v1, v2, atol=1e-8)
 
+
 """
 mask influences:
 
@@ -114,8 +120,9 @@ mask influences:
 If the mask is wrong, everything downstream becomes subtly wrong, and the
 bugs are extremely hard to detect.
 """
+
+
 def test_mask_correctness(deterministic_trainer):
-    
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
@@ -149,22 +156,20 @@ Drift‑trend test suite that:
 - detects exploding dynamics
 - protects against regressions in gate extraction
 """
-def test_drift_zero_on_first_rollout(deterministic_trainer):
 
+
+def test_drift_zero_on_first_rollout(deterministic_trainer):
     trainer = deterministic_trainer
 
     trainer.collect_rollout()
     diag = trainer.compute_lstm_unit_diagnostics_from_rollout()
 
-    for name in ["i_drift", "f_drift", "g_drift",
-                 "o_drift", "h_drift", "c_drift"]:
-        
+    for name in ["i_drift", "f_drift", "g_drift", "o_drift", "h_drift", "c_drift"]:
         drift = getattr(diag, name)
         assert torch.allclose(drift, torch.zeros_like(drift))
 
 
 def test_drift_changes_over_time(deterministic_trainer):
-
     trainer = deterministic_trainer
 
     trainer.collect_rollout()
@@ -176,16 +181,13 @@ def test_drift_changes_over_time(deterministic_trainer):
     # At least one drift dimension should change
     diffs = []
 
-    for name in ["i_drift", "f_drift", "g_drift",
-                 "o_drift", "h_drift", "c_drift"]:
-        
+    for name in ["i_drift", "f_drift", "g_drift", "o_drift", "h_drift", "c_drift"]:
         diffs.append(torch.allclose(getattr(d1, name), getattr(d2, name)))
 
     assert not all(diffs), "All drift vectors identical across rollouts"
 
 
 def test_drift_mask_awareness(deterministic_trainer):
-
     trainer = deterministic_trainer
 
     trainer.collect_rollout()
@@ -204,38 +206,30 @@ def test_drift_mask_awareness(deterministic_trainer):
 
 
 def test_drift_replay_determinism(deterministic_trainer):
-
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
     d1 = trainer.compute_lstm_unit_diagnostics_from_rollout()
     d2 = trainer.compute_lstm_unit_diagnostics_from_rollout()
 
-    for name in ["i_drift", "f_drift", "g_drift",
-                 "o_drift", "h_drift", "c_drift"]:
+    for name in ["i_drift", "f_drift", "g_drift", "o_drift", "h_drift", "c_drift"]:
+        assert torch.allclose(getattr(d1, name), getattr(d2, name), atol=1e-8)
 
-        assert torch.allclose(getattr(d1, name),
-                              getattr(d2, name), atol=1e-8)
-        
 
 def test_drift_sanity_bounds(deterministic_trainer):
-
     trainer = deterministic_trainer
 
     trainer.collect_rollout()
     trainer.collect_rollout()
     diag = trainer.compute_lstm_unit_diagnostics_from_rollout()
 
-    for name in ["i_drift", "f_drift", "g_drift",
-                 "o_drift", "h_drift", "c_drift"]:
-        
+    for name in ["i_drift", "f_drift", "g_drift", "o_drift", "h_drift", "c_drift"]:
         drift = getattr(diag, name)
         assert torch.isfinite(drift).all()
         assert drift.abs().max() < 10.0  # generous bound
 
 
 def test_drift_matches_mean_difference(deterministic_trainer):
-
     trainer = deterministic_trainer
 
     trainer.collect_rollout()
@@ -268,7 +262,7 @@ For saturation:
 --------------
 - If gate activations move closer to saturation (0 or 1), saturation fraction
   must increase.
-- If gate activations move away from saturation, saturation fraction must 
+- If gate activations move away from saturation, saturation fraction must
   decrease.
 
 For entropy:
@@ -290,8 +284,9 @@ This is a test suite that validates:
 - no numerical instability
 - no regression in gate extraction
 """
-def test_sigmoid_saturation_monotonicity(deterministic_trainer):
 
+
+def test_sigmoid_saturation_monotonicity(deterministic_trainer):
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
@@ -317,7 +312,6 @@ def test_sigmoid_saturation_monotonicity(deterministic_trainer):
 
 
 def test_tanh_saturation_monotonicity(deterministic_trainer):
-
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
@@ -339,7 +333,6 @@ def test_tanh_saturation_monotonicity(deterministic_trainer):
 
 # Entropy must decrease when gates become more extreme.
 def test_sigmoid_entropy_monotonicity(deterministic_trainer):
-
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
@@ -360,7 +353,6 @@ def test_sigmoid_entropy_monotonicity(deterministic_trainer):
 
 
 def test_tanh_entropy_monotonicity(deterministic_trainer):
-
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
@@ -405,7 +397,6 @@ def test_entropy_increases_when_gates_uniformize(deterministic_trainer):
 
 # Verify saturation decreases when gates move away from extremes
 def test_saturation_decreases_when_gates_uniformize(deterministic_trainer):
-
     trainer = deterministic_trainer
     trainer.collect_rollout()
 
