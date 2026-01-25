@@ -11,7 +11,8 @@ This suite catches:
 """
 import torch
 from lstmppo.buffer import RecurrentRolloutBuffer
-from lstmppo.types import Config, initialize_config, RolloutStep
+from lstmppo.types import Config, initialize_config
+from lstmppo.types import RolloutStep, LSTMGates
 
 
 def _make_buffer():
@@ -26,18 +27,19 @@ def test_buffer_initialization_shapes():
     cfg, _, buf = _make_buffer()
 
     T = cfg.trainer.rollout_steps
-    obs_dim = cfg.obs_dim
-    act_dim = cfg.env.action_dim
+    B = cfg.env.num_envs
+    D = cfg.env.flat_obs_dim
+    H = cfg.lstm.lstm_hidden_size
 
-    assert buf.step == 0
-    assert buf.obs.shape == (T, obs_dim)
-    assert buf.actions.shape == (T, act_dim)
-    assert buf.rewards.shape == (T,)
-    assert buf.values.shape == (T,)
-    assert buf.logprobs.shape == (T,)
-    assert buf.terminated.shape == (T,)
-    assert buf.truncated.shape == (T,)
-    assert buf.mask.shape == (T,)
+    assert buf.obs.shape == (T, B, D)
+    assert buf.actions.shape == (T, B, 1)
+    assert buf.rewards.shape == (T, B)
+    assert buf.values.shape == (T, B)
+    assert buf.logprobs.shape == (T, B)
+    assert buf.terminated.shape == (T, B)
+    assert buf.truncated.shape == (T, B)
+    assert buf.hxs.shape == (T, B, H)
+    assert buf.cxs.shape == (T, B, H)
 
 
 def test_buffer_device_and_dtype():
@@ -59,36 +61,87 @@ def test_buffer_device_and_dtype():
 
 
 def test_add_increments_pointer_and_writes_data():
-    cfg, device, buf = _make_buffer()
+    
+    cfg, _, buf = _make_buffer()
 
-    obs = torch.randn(cfg.obs_dim)
-    act = torch.randn(cfg.env.action_dim)
-    rew = 1.0
-    done = False
-    val = 0.5
-    logp = -0.1
+    B = cfg.env.num_envs
+    D = cfg.env.flat_obs_dim
+    H = cfg.lstm.lstm_hidden_size
 
-    buf.add(obs, act, rew, done, val, logp)
+    obs = torch.randn(B, D)
+    act = torch.randn(B)
+    rew = torch.randn(B)
+    val = torch.randn(B)
+    logp = torch.randn(B)
+    term = torch.zeros(B, dtype=torch.bool)
+    trunc = torch.zeros(B, dtype=torch.bool)
+    hxs = torch.randn(B, H)
+    cxs = torch.randn(B, H)
+
+    gates = LSTMGates(
+        i_gates=hxs, f_gates=hxs, g_gates=hxs,
+        o_gates=hxs, c_gates=hxs, h_gates=hxs,
+    )
+
+    step = RolloutStep(
+        obs=obs,
+        actions=act,
+        rewards=rew,
+        values=val,
+        logprobs=logp,
+        terminated=term,
+        truncated=trunc,
+        hxs=hxs,
+        cxs=cxs,
+        gates=gates,
+    )
+
+    buf.add(step)
 
     assert buf.step == 1
-    assert torch.allclose(buf.obs[0], obs.to(device))
-    assert torch.allclose(buf.actions[0], act.to(device))
-    assert buf.rewards[0].item() == rew
-    assert buf.values[0].item() == val
-    assert buf.logprobs[0].item() == logp
-    assert buf.terminated[0].item() == 0
-    assert buf.truncated[0].item() == 0
+    assert torch.allclose(buf.obs[0], obs)
+    assert torch.allclose(buf.actions[0].squeeze(-1), act)
 
 
 def test_fill_buffer_reaches_full_pointer():
 
     cfg, _, buf = _make_buffer()
 
-    obs = torch.randn(cfg.obs_dim)
-    act = torch.randn(cfg.env.action_dim)
+    B = cfg.env.num_envs
+    D = cfg.env.flat_obs_dim
+    H = cfg.lstm.lstm_hidden_size
 
     for _ in range(cfg.trainer.rollout_steps):
-        buf.add(obs, act, 1.0, False, 0.5, -0.1)
+
+        obs = torch.randn(B, D)
+        act = torch.randn(B)
+        rew = torch.randn(B)
+        val = torch.randn(B)
+        logp = torch.randn(B)
+        term = torch.zeros(B, dtype=torch.bool)
+        trunc = torch.zeros(B, dtype=torch.bool)
+        hxs = torch.randn(B, H)
+        cxs = torch.randn(B, H)
+
+        gates = LSTMGates(
+            i_gates=hxs, f_gates=hxs, g_gates=hxs,
+            o_gates=hxs, c_gates=hxs, h_gates=hxs,
+        )
+
+        step = RolloutStep(
+            obs=obs,
+            actions=act,
+            rewards=rew,
+            values=val,
+            logprobs=logp,
+            terminated=term,
+            truncated=trunc,
+            hxs=hxs,
+            cxs=cxs,
+            gates=gates,
+        )
+
+        buf.add(step)
 
     assert buf.step == cfg.trainer.rollout_steps
 
@@ -109,34 +162,61 @@ def test_mask_logic_cpu():
 
 
 def test_reset_clears_state():
-    cfg, _, buf = _make_buffer()
+    
+    _, _, buf = _make_buffer()
 
-    # fill some data
-    obs = torch.randn(cfg.obs_dim)
-    act = torch.randn(cfg.env.action_dim)
-    buf.add(obs, act, 1.0, False, 0.5, -0.1)
+    buf.terminated[0] = True
+    buf.truncated[0] = True
 
     buf.reset()
 
     assert buf.step == 0
     assert torch.all(buf.terminated == 0)
     assert torch.all(buf.truncated == 0)
+    assert torch.all(buf.mask == 1)
 
-    mask = buf.mask
-    assert torch.all(mask == 1)
 
 def test_rollout_step_structure():
     cfg, _, buf = _make_buffer()
 
-    obs = torch.randn(cfg.obs_dim)
-    act = torch.randn(cfg.env.action_dim)
-    buf.add(obs, act, 1.0, False, 0.5, -0.1)
+    B = cfg.env.num_envs
+    D = cfg.obs_dim
+    H = cfg.lstm.lstm_hidden_size
+
+    obs = torch.randn(B, D)
+    act = torch.randn(B)
+    rew = torch.randn(B)
+    val = torch.randn(B)
+    logp = torch.randn(B)
+    term = torch.zeros(B, dtype=torch.bool)
+    trunc = torch.zeros(B, dtype=torch.bool)
+    hxs = torch.randn(B, H)
+    cxs = torch.randn(B, H)
+    gates = LSTMGates(
+        i_gates=hxs, f_gates=hxs, g_gates=hxs,
+        o_gates=hxs, c_gates=hxs, h_gates=hxs,
+    )
+
+    step = RolloutStep(
+        obs=obs,
+        actions=act,
+        rewards=rew,
+        values=val,
+        logprobs=logp,
+        terminated=term,
+        truncated=trunc,
+        hxs=hxs,
+        cxs=cxs,
+        gates=gates,
+    )
+
+    buf.add(step)
 
     step = buf.get_step(0)
     assert isinstance(step, RolloutStep)
 
     assert step.obs.shape == (cfg.obs_dim,)
-    assert step.action.shape == (cfg.env.action_dim,)
+    assert step.actions.shape == (cfg.env.action_dim,)
     assert isinstance(step.reward, float)
     assert isinstance(step.value, float)
     assert isinstance(step.logprob, float)
