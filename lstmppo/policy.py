@@ -129,14 +129,15 @@ class LSTMPPOPolicy(nn.Module):
                 nn.SiLU(),
             )
 
-        for m in self.encoder:
-            if isinstance(m, nn.Linear):
+        if isinstance(self.encoder, nn.Sequential):
+            for m in self.encoder:
+                if isinstance(m, nn.Linear):
 
-                if m.weight.numel() > 0:
-                    nn.init.xavier_uniform_(m.weight)
+                    if m.weight.numel() > 0:
+                        nn.init.xavier_uniform_(m.weight)
 
-                if m.bias.numel() > 0:
-                    nn.init.zeros_(m.bias)
+                    if m.bias.numel() > 0:
+                        nn.init.zeros_(m.bias)
 
         # --- LN-LSTM with DropConnect ---
         self.lstm_cell = GateLSTMCell(
