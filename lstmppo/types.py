@@ -316,7 +316,7 @@ class VecEnvState:
     rewards: torch.Tensor  # (N,)
     terminated: torch.Tensor  # (N,)
     truncated: torch.Tensor  # (N,)
-    info: List[Any]
+    info: dict[str, Any] | list[dict[str, Any]]
     hxs: torch.Tensor  # (N,H)
     cxs: torch.Tensor  # (N,H)
 

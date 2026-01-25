@@ -1,3 +1,5 @@
+from typing import Sequence, cast
+
 import gymnasium as gym
 import torch
 from gymnasium.vector import SyncVectorEnv
@@ -52,11 +54,22 @@ class RecurrentVecEnvWrapper:
     def hidden_state(self):
         return LSTMStates(self.hxs, self.cxs)
 
-    def reset(self, seed=None) -> VecEnvState:
-        rng = Generator(MT19937(SeedSequence(seed)))
-        seeds = [int(elem * 1e9) for elem in rng.random(self.num_envs)]
+    def reset(self, seed: int | list[int] | None = None) -> VecEnvState:
+        # Collapse any sequence into a single integer seed for NumPy
+        if isinstance(seed, Sequence) and not isinstance(seed, (str, bytes)):
+            base_seed_raw = seed[0] if seed else None
+        else:
+            base_seed_raw = seed
 
-        obs, info = self.venv.reset(seed=seeds)
+        # Explicitly narrow the type for Pylance
+        base_seed = cast(int | None, base_seed_raw)
+
+        rng = Generator(MT19937(SeedSequence(base_seed)))
+
+        # Now generate per-env seeds (ints only)
+        per_env_seeds = [int(elem * 1e9) for elem in rng.random(self.num_envs)]
+        typed_seeds = cast(list[int | None], per_env_seeds)
+        obs, info = self.venv.reset(seed=typed_seeds)
 
         obs = flatten_obs(obs, self.venv.single_observation_space)
 
@@ -213,7 +226,7 @@ class RecurrentVecEnvWrapper:
 
         return EpisodeStats(
             episodes=episodes,
-            alive_envs=(self.ep_len > 0).sum().item(),
+            alive_envs=int((self.ep_len > 0).sum().item()),
             max_ep_len=max_ep_len,
             avg_ep_len=float(avg_ep_len),
             max_ep_returns=max_ep_returns,
