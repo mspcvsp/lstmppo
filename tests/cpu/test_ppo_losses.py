@@ -1,9 +1,11 @@
 """
-This test catches:
-
-- PPO math regressions
-- missing keys in info dict
-- NaN explosions
+A PPO loss test should check:
+- Shapes are correct
+- Losses are finite
+- Masking works
+- Clipping works
+- KL and clip_frac are scalars
+- No CPU/GPU mismatch
 """
 import torch
 from lstmppo.types import Config
