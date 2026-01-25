@@ -5,12 +5,13 @@
 • 	No torch backend mutation
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import gymnasium as gym
 import torch
+from gymnasium.spaces import Discrete
 from rich.text import Text
 
 from .obs_encoder import get_flat_obs_dim
@@ -119,7 +120,7 @@ class EnvironmentConfig:
     """ Flattened observation dimension """
     action_dim: int = 0
     """ Action dimension """
-    max_episode_steps: int = None
+    max_episode_steps: int | None = None
     """ Maximum number of steps per episode """
     max_env_history: int = 30
     """ Maximum per env history length """
@@ -600,7 +601,7 @@ class Metrics:
         self.entropy += upd.entropy.item()
         self.approx_kl += upd.approx_kl.item()
         self.clip_frac += upd.clip_frac.item()
-        self.grad_norm += upd.grad_norm
+        self.grad_norm += float(upd.grad_norm)
 
         self.policy_drift += upd.policy_drift.item()
         self.value_drift += upd.value_drift.item()
@@ -623,35 +624,48 @@ class Metrics:
             self.c_drift += diag.c_drift.mean().item()
 
         # Gate means
-        self.i_mean += diag.i_mean.mean().item()
-        self.f_mean += diag.f_mean.mean().item()
-        self.g_mean += diag.g_mean.mean().item()
-        self.o_mean += diag.o_mean.mean().item()
+        if diag.i_mean is not None:
+            self.i_mean += diag.i_mean.mean().item()
+
+        if diag.f_mean is not None:
+            self.f_mean += diag.f_mean.mean().item()
+
+        if diag.g_mean is not None:
+            self.g_mean += diag.g_mean.mean().item()
+
+        if diag.o_mean is not None:
+            self.o_mean += diag.o_mean.mean().item()
 
         # Gate drift
-        self.i_drift += diag.i_drift.mean().item()
-        self.f_drift += diag.f_drift.mean().item()
-        self.g_drift += diag.g_drift.mean().item()
-        self.o_drift += diag.o_drift.mean().item()
+        if diag.i_drift is not None:
+            self.i_drift += diag.i_drift.mean().item()
+        if diag.f_drift is not None:
+            self.f_drift += diag.f_drift.mean().item()
+        if diag.g_drift is not None:
+            self.g_drift += diag.g_drift.mean().item()
+        if diag.o_drift is not None:
+            self.o_drift += diag.o_drift.mean().item()
 
         # Gate saturation (fractions per unit → mean over units)
-        self.i_sat_low += sat.i_sat_low.mean().item()
-        self.i_sat_high += sat.i_sat_high.mean().item()
-        self.f_sat_low += sat.f_sat_low.mean().item()
-        self.f_sat_high += sat.f_sat_high.mean().item()
-        self.o_sat_low += sat.o_sat_low.mean().item()
-        self.o_sat_high += sat.o_sat_high.mean().item()
-        self.g_sat += sat.g_sat.mean().item()
-        self.c_sat += sat.c_sat.mean().item()
-        self.h_sat += sat.h_sat.mean().item()
+        if sat is not None:
+            self.i_sat_low += sat.i_sat_low.mean().item()
+            self.i_sat_high += sat.i_sat_high.mean().item()
+            self.f_sat_low += sat.f_sat_low.mean().item()
+            self.f_sat_high += sat.f_sat_high.mean().item()
+            self.o_sat_low += sat.o_sat_low.mean().item()
+            self.o_sat_high += sat.o_sat_high.mean().item()
+            self.g_sat += sat.g_sat.mean().item()
+            self.c_sat += sat.c_sat.mean().item()
+            self.h_sat += sat.h_sat.mean().item()
 
         # Gate entropy (per unit → mean over units)
-        self.i_entropy += ent.i_entropy.mean().item()
-        self.f_entropy += ent.f_entropy.mean().item()
-        self.o_entropy += ent.o_entropy.mean().item()
-        self.g_entropy += ent.g_entropy.mean().item()
-        self.c_entropy += ent.c_entropy.mean().item()
-        self.h_entropy += ent.h_entropy.mean().item()
+        if ent is not None:
+            self.i_entropy += ent.i_entropy.mean().item()
+            self.f_entropy += ent.f_entropy.mean().item()
+            self.o_entropy += ent.o_entropy.mean().item()
+            self.g_entropy += ent.g_entropy.mean().item()
+            self.c_entropy += ent.c_entropy.mean().item()
+            self.h_entropy += ent.h_entropy.mean().item()
 
     def update_episode_stats(self, ep_stats: EpisodeStats):
         self.episodes = ep_stats.episodes
@@ -805,38 +819,45 @@ class MetricsHistory:
         sat = diag.saturation
         ent = diag.entropy
 
-        mapping = {
-            "i_mean": diag.i_mean.mean(),
-            "f_mean": diag.f_mean.mean(),
-            "g_mean": diag.g_mean.mean(),
-            "o_mean": diag.o_mean.mean(),
-            "i_drift": diag.i_drift.mean(),
-            "f_drift": diag.f_drift.mean(),
-            "g_drift": diag.g_drift.mean(),
-            "o_drift": diag.o_drift.mean(),
-            "h_norm": (diag.h_norm.mean() if diag.h_norm is not None else stats.h_norm),
-            "c_norm": (diag.c_norm.mean() if diag.c_norm is not None else stats.c_norm),
-            "h_drift": (diag.h_drift.mean() if diag.h_drift is not None else stats.h_drift),
-            "c_drift": (diag.c_drift.mean() if diag.c_drift is not None else stats.c_drift),
-            "i_entropy": ent.i_entropy.mean(),
-            "f_entropy": ent.f_entropy.mean(),
-            "g_entropy": ent.g_entropy.mean(),
-            "o_entropy": ent.o_entropy.mean(),
-            "c_entropy": ent.c_entropy.mean(),
-            "h_entropy": ent.h_entropy.mean(),
-            "i_sat_low": sat.i_sat_low.mean(),
-            "i_sat_high": sat.i_sat_high.mean(),
-            "f_sat_low": sat.f_sat_low.mean(),
-            "f_sat_high": sat.f_sat_high.mean(),
-            "o_sat_low": sat.o_sat_low.mean(),
-            "o_sat_high": sat.o_sat_high.mean(),
-            "g_sat": sat.g_sat.mean(),
-            "c_sat": sat.c_sat.mean(),
-            "h_sat": sat.h_sat.mean(),
-            "explained_var": stats.explained_var,
-            "ep_return": stats.avg_ep_returns,
-            "ep_len": stats.avg_ep_len,
-        }
+        mapping = {}
+
+        # Handle all simple Optional[Tensor] fields in LSTMUnitDiagnostics
+        for f in fields(diag):
+            name = f.name
+            value = getattr(diag, name)
+
+            # Skip nested objects; handle them separately
+            if name in ("saturation", "entropy", "hidden_size"):
+                continue
+
+            if isinstance(value, torch.Tensor):
+                mapping[name] = value.mean().item()
+            elif value is None:
+                # fallback to stats if available
+                if hasattr(stats, name):
+                    mapping[name] = getattr(stats, name)
+
+        # Handle entropy
+        if diag.entropy is not None:
+            ent = diag.entropy
+            for f in fields(ent):
+                name = f.name
+                value = getattr(ent, name)
+                if isinstance(value, torch.Tensor):
+                    mapping[name] = value.mean().item()
+
+        # Handle saturation
+        if diag.saturation is not None:
+            sat = diag.saturation
+            for f in fields(sat):
+                name = f.name
+                value = getattr(sat, name)
+                if isinstance(value, torch.Tensor):
+                    mapping[name] = value.mean().item()
+
+        mapping["explained_var"] = stats.explained_var
+        mapping["ep_return"] = stats.avg_ep_returns
+        mapping["ep_len"] = stats.avg_ep_len
 
         for name, tensor in mapping.items():
             self.push(name, tensor.item())
@@ -920,8 +941,18 @@ def initialize_config(cfg: Config, **kwargs):
     dummy_env = gym.make(cfg.env.env_id)
 
     cfg.env.obs_space = dummy_env.observation_space
-    cfg.env.action_dim = dummy_env.action_space.n
-    cfg.env.max_episode_steps = dummy_env.spec.max_episode_steps
+
+    action_space = dummy_env.action_space
+    if isinstance(action_space, Discrete):
+        cfg.env.action_dim = int(action_space.n)
+    else:
+        raise TypeError("Environment must have a Discrete action space")
+
+    spec = dummy_env.spec
+    if spec is not None:
+        cfg.env.max_episode_steps = spec.max_episode_steps
+    else:
+        cfg.env.max_episode_steps = None
 
     cfg.env.flat_obs_dim = get_flat_obs_dim(cfg.env.obs_space)
 
@@ -943,3 +974,7 @@ def sparkline(data, width=20):
     scaled = [(x - mn) / (mx - mn) for x in data[-width:]]
     idx = [int(s * (len(blocks) - 1)) for s in scaled]
     return "".join(blocks[i] for i in idx)
+
+
+def safe_mean(x: torch.Tensor | None) -> float:
+    return x.mean().item() if x is not None else 0.0
