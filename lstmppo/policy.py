@@ -117,8 +117,19 @@ class LSTMPPOPolicy(nn.Module):
                                              cfg.obs_dim)
 
         # --- SiLU encoder ---
-        if cfg.obs_dim == 0:
-            self.encoder = nn.Identity()
+        if cfg.env.flat_obs_dim == 0:
+            """
+            When obs_dim == 0, the environment provides no observation 
+            features. But the LSTM still needs an input vector of size 
+            enc_hidden_size. So the correct behavior is:
+            
+            - Treat the encoder as a constant zero‑feature generator
+            - Let the LSTM operate purely on its recurrent state
+            - Preserve shape invariants everywhere
+
+            This is exactly how RL libraries handle “no observation” cases.
+            """
+            self.encoder = ZeroFeatureEncoder(cfg.lstm.enc_hidden_size)
         else:
             self.encoder = nn.Sequential(
                 nn.Linear(cfg.obs_dim,
@@ -429,3 +440,19 @@ class LSTMPPOPolicy(nn.Module):
             ar_loss=policy_output.ar_loss,
             tar_loss=policy_output.tar_loss,
         )
+
+
+class ZeroFeatureEncoder(nn.Module):
+
+    def __init__(self, out_dim):
+        super().__init__()
+        self.out_dim = out_dim
+
+    def forward(self, obs):
+        # obs: (B, 0) or (B, T, 0)
+        if obs.dim() == 2:
+            B = obs.size(0)
+            return torch.zeros(B, 1, self.out_dim, device=obs.device)
+        else:
+            B, T, _ = obs.shape
+            return torch.zeros(B, T, self.out_dim, device=obs.device)
