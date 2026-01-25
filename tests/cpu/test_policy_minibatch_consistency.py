@@ -11,6 +11,8 @@ def test_policy_minibatch_consistency():
     """
 
     cfg = Config()
+
+    cfg.trainer.debug_mode = True  # disable DropConnect randomness
     cfg.env.flat_obs_dim = 4
     cfg.env.action_dim = 3
 
@@ -51,8 +53,8 @@ def test_policy_minibatch_consistency():
     # --- Sequence-mode evaluation ---
     out_seq = policy.evaluate_actions_sequence(
         PolicyEvalInput(
-            obs=obs,
-            actions=actions,
+            obs=obs.transpose(0, 1),      # (T, B, F)
+            actions=actions.transpose(0, 1),  # (T, B)
             hxs=h0,
             cxs=c0
         )
