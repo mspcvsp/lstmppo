@@ -89,6 +89,9 @@ class LearningRateScheduler(object):
         if self.debug_mode:
             return self.base_lr
         else:
+            if self.warmup_updates is None or self.total_updates is None:
+                raise ValueError("LearningRateScheduler not initialized. Call reset() before using.")
+
             # Zero learning rate is expected for 1st update
             if update_idx < self.warmup_updates:
                 lr = self.base_lr * (update_idx / self.warmup_updates)

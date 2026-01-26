@@ -362,6 +362,16 @@ class LSTMStates:
 
 
 @dataclass
+class LSTMUnitPrev:
+    i_mean: torch.Tensor
+    f_mean: torch.Tensor
+    g_mean: torch.Tensor
+    o_mean: torch.Tensor
+    h_norm: torch.Tensor
+    c_norm: torch.Tensor
+
+
+@dataclass
 class LSTMCoreOutput:
     out: torch.Tensor
     h: torch.Tensor
@@ -590,6 +600,12 @@ class Metrics:
     g_entropy: float = 0.0
     c_entropy: float = 0.0
     h_entropy: float = 0.0
+
+    entropy_adjusted: float = 0.0
+    entropy_up: float = 0.0
+    entropy_down: float = 0.0
+    entropy_scheduled: float = 0.0
+    entropy_delta: float = 0.0
 
     explained_var: float = 0.0
     kl_watchdog_triggered: int = 0

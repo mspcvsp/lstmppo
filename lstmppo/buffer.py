@@ -232,7 +232,13 @@ class RecurrentRolloutBuffer:
     # LSTM state handoff to env wrapper
     # ---------------------------------------------------------
     def get_last_lstm_states(self):
-        return LSTMStates(hxs=self.last_hxs, cxs=self.last_cxs)
+        hxs = self.last_hxs
+        cxs = self.last_cxs
+
+        assert isinstance(hxs, torch.Tensor)
+        assert isinstance(cxs, torch.Tensor)
+
+        return LSTMStates(hxs=hxs, cxs=cxs)
 
     # ---------------------------------------------------------
     # Reset buffer

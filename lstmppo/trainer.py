@@ -34,7 +34,6 @@ PPO loss
 
 import random
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Optional
 
 import numpy as np
@@ -65,6 +64,7 @@ from .types import (
     LSTMGates,
     LSTMGateSaturation,
     LSTMUnitDiagnostics,
+    LSTMUnitPrev,
     PolicyEvalInput,
     PolicyEvalOutput,
     PolicyInput,
@@ -354,7 +354,7 @@ class LSTMPPOTrainer:
         policy_drift = (new_logp - old_logp).abs().mean()
         value_drift = (values - old_values).abs().mean()
 
-        lstm_unit_metrics = self.compute_lstm_unit_diagnostics(eval_output, mask_tb)
+        lstm_unit_diag = self.compute_lstm_unit_diagnostics(eval_output, mask_tb)
 
         loss = policy_loss + self.state.cfg.ppo.vf_coef * value_loss - self.state.entropy_coef * entropy
 
@@ -373,7 +373,7 @@ class LSTMPPOTrainer:
                 grad_norm=grad_norm,
                 policy_drift=policy_drift,
                 value_drift=value_drift,
-                lstm_unit_metrics=lstm_unit_metrics,
+                lstm_unit_diag=lstm_unit_diag,
             )
         )
 
@@ -499,7 +499,7 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         # Store for next iteration
         # ----------------------------------------------------
-        self.state.prev_lstm_unit_metrics = SimpleNamespace(
+        self.state.prev_lstm_unit_metrics = LSTMUnitPrev(
             i_mean=i_mean, f_mean=f_mean, g_mean=g_mean, o_mean=o_mean, h_norm=h_norm, c_norm=c_norm
         )
 

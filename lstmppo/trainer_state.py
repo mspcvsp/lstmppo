@@ -1,6 +1,6 @@
 import io
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .buffer import RecurrentRolloutBuffer
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
-from .types import Config, EpisodeStats, Metrics, MetricsHistory, PolicyUpdateInfo
+from .types import Config, EpisodeStats, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
 
 
 @dataclass
@@ -21,20 +21,20 @@ class TrainerState:
     clip_range: float = 0.0
     target_kl: float = 0.0
     early_stopping_kl: float = 0.0
-    writer: SummaryWriter | None = None
-    jsonl_file: str = ""
+    metrics: Metrics = field(default_factory=Metrics)
+    writer: SummaryWriter = field(init=False)
+    jsonl_file: Path | str = ""
     jsonl_fp: io.TextIOWrapper | None = None
     validation_mode: bool = False
 
     def __init__(self, cfg: Config, validation_mode: bool = False):
         self.cfg = cfg
         self.validation_mode = validation_mode
-        self.metrics = Metrics()
 
         # Can’t have a non‑default field after default fields. Easiest
         # solution is don’t make prev_lstm_unit_metrics a dataclass field
         # at all — treat it as a plain attribute
-        self.prev_lstm_unit_metrics = None
+        self.prev_lstm_unit_metrics = None  # type: LSTMUnitPrev | None
 
         if self.validation_mode:
             self.cfg.env.num_envs = 1
@@ -180,6 +180,7 @@ class TrainerState:
 
     def log_metrics(self):
         record = self.metrics.to_dict()
+        assert self.writer is not None, "TensorBoard writer not initialized."
 
         for key, value in record.items():
             self.writer.add_scalar(key, value, self.global_step)
@@ -189,8 +190,10 @@ class TrainerState:
         record["entropy_coef"] = float(self.entropy_coef)
         record["clip_range"] = float(self.clip_range)
 
-        self.jsonl_fp.write(json.dumps(record) + "\n")
-        self.jsonl_fp.flush()
+        fp = self.jsonl_fp
+        if fp is not None:
+            fp.write(json.dumps(record) + "\n")
+            fp.flush()
 
     def init_stats(self):
         self.metrics.initialize()
@@ -250,7 +253,6 @@ class TrainerState:
         self.lr = self._lr_sch(self.update_idx)
 
         self.writer.add_scalar("entropy_coef", self.entropy_coef, self.update_idx)
-
         self.writer.add_scalar("learning_rate", self.lr, self.update_idx)
 
         for param_group in optimizer.param_groups:
@@ -271,6 +273,9 @@ class TrainerState:
     @property
     def warmup_complete(self):
         # Use the same warmup_updates as your LR scheduler
+        assert self._lr_sch.warmup_updates is not None, (
+            "LearningRateScheduler not initialized. Call reset() before using."
+        )
         return self.update_idx >= self._lr_sch.warmup_updates
 
     def render_dashboard(self):
