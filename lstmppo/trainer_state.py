@@ -1,3 +1,10 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .types import LSTMUnitPrev
+
 import io
 import json
 from dataclasses import dataclass, field
@@ -10,11 +17,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .buffer import RecurrentRolloutBuffer
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
-from .types import Config, EpisodeStats, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
+from .types import Config, EpisodeStats, Metrics, MetricsHistory, PolicyUpdateInfo
 
 
 @dataclass
 class TrainerState:
+    prev_lstm_unit_metrics: LSTMUnitPrev | None = None
     update_idx: int = 0
     lr: float = 0.0
     entropy_coef: float = 0.0
@@ -34,7 +42,7 @@ class TrainerState:
         # Can’t have a non‑default field after default fields. Easiest
         # solution is don’t make prev_lstm_unit_metrics a dataclass field
         # at all — treat it as a plain attribute
-        self.prev_lstm_unit_metrics = None  # type: LSTMUnitPrev | None
+        self.prev_lstm_unit_metrics = None
 
         if self.validation_mode:
             self.cfg.env.num_envs = 1
