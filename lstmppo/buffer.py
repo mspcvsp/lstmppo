@@ -33,6 +33,8 @@ class RecurrentRolloutBuffer:
 
         self.advantages = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
+        self.masks: torch.Tensor | None = None
+
         self.reset()
 
     # ---------------------------------------------------------
@@ -272,6 +274,14 @@ class RecurrentRolloutBuffer:
         # Episode termination flags
         self.terminated.zero_()
         self.truncated.zero_()
+
+        """
+        - .mask is great for quick access
+        - .masks is needed for diagnostics, TBPTT, and replay
+        - Trainer code stays unchanged
+        - No performance penalty (you compute mask once per rollout)
+        """
+        self.masks = self.mask  # property → tensor
 
         # Hidden states at start of each timestep
         self.hxs.zero_()

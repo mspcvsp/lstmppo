@@ -98,6 +98,15 @@ class LSTMPPOTrainer:
 
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.state.cfg.sched.base_lr, eps=1e-5)
 
+        # Attach as methods
+        self.render_ppo_table = render_ppo_table
+        self.render_episode_table = render_episode_table
+        self.render_episode_trends = render_episode_trends
+        self.render_policy_stability = render_policy_stability
+        self.render_value_drift = render_value_drift
+        self.render_histogram = render_histogram
+        self.render_env_timelines = render_env_timelines
+
         self.reset()
 
     @property
@@ -1027,16 +1036,6 @@ class LSTMPPOTrainer:
             print(" |diff|         :", logp_diff[t, 0].item())
 
         print("=== Validation complete ===")
-
-
-# Attach as methods
-LSTMPPOTrainer.render_ppo_table = render_ppo_table
-LSTMPPOTrainer.render_episode_table = render_episode_table
-LSTMPPOTrainer.render_episode_trends = render_episode_trends
-LSTMPPOTrainer.render_policy_stability = render_policy_stability
-LSTMPPOTrainer.render_value_drift = render_value_drift
-LSTMPPOTrainer.render_histogram = render_histogram
-LSTMPPOTrainer.render_env_timelines = render_env_timelines
 
 
 def train(total_updates=2000):
