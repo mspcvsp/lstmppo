@@ -91,6 +91,21 @@ class GateLSTMCell(nn.Module):
         return new_h, new_c, (i, f, g, o)
 
 
+class LSTMCore(nn.Module):
+    def __init__(self, cell: GateLSTMCell):
+        super().__init__()
+        self.cell = cell
+        self.hidden_size = cell.hidden_size
+
+    def initial_state(self, batch_size: int, device):
+        h = torch.zeros(batch_size, self.hidden_size, device=device)
+        c = torch.zeros(batch_size, self.hidden_size, device=device)
+        return h, c
+
+    def forward(self, x, state):
+        return self.cell(x, state)
+
+
 class LSTMPPOPolicy(nn.Module):
     def __init__(self, cfg: Config):
         super().__init__()
@@ -146,6 +161,9 @@ class LSTMPPOPolicy(nn.Module):
             debug_mode=cfg.trainer.debug_mode,
         )
 
+        # Wrap it so diagnostics can call policy.lstm.initial_state(...)
+        self.lstm = LSTMCore(self.lstm_cell)
+
         self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
 
         # --- Heads ---
@@ -168,6 +186,9 @@ class LSTMPPOPolicy(nn.Module):
 
         if self.critic.bias.numel() > 0:
             nn.init.zeros_(self.critic.bias)
+
+    def initial_state(self, batch_size: int, device):
+        return self.lstm.initial_state(batch_size, device)
 
     # ---------------------------------------------------------
     # Core forward pass (returns activations + AR/TAR)
@@ -223,7 +244,7 @@ class LSTMPPOPolicy(nn.Module):
         h_list = []
 
         for t in range(T):
-            h, c, gates = self.lstm_cell(enc[:, t, :], (h, c))
+            h, c, gates = self.lstm(enc[:, t, :], (h, c))
             outputs.append(h.unsqueeze(1))
             gate_list.append(gates)
 
