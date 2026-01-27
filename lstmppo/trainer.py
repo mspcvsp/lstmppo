@@ -976,6 +976,15 @@ class LSTMPPOTrainer:
     def validate_lstm_state_flow(self):
         print("=== LSTM State-Flow Validation ===")
 
+        # Ensure last LSTM states exist
+        if self.buffer.last_hxs is None or self.buffer.last_cxs is None:
+            with torch.no_grad():
+                h0, c0 = self.policy.initial_state(self.num_envs, self.device)
+            self.buffer.last_hxs = h0
+            self.buffer.last_cxs = c0
+
+        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
+
         # -----------------------------------------------------
         # 1. Deterministic mode: no DropConnect, no dropout
         # -----------------------------------------------------
