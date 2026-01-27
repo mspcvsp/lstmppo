@@ -363,12 +363,12 @@ class LSTMStates:
 
 @dataclass
 class LSTMUnitPrev:
-    i_mean: torch.Tensor
-    f_mean: torch.Tensor
-    g_mean: torch.Tensor
-    o_mean: torch.Tensor
-    h_norm: torch.Tensor
-    c_norm: torch.Tensor
+    i_mean: torch.Tensor | None = None
+    f_mean: torch.Tensor | None = None
+    g_mean: torch.Tensor | None = None
+    o_mean: torch.Tensor | None = None
+    h_norm: torch.Tensor | None = None
+    c_norm: torch.Tensor | None = None
 
 
 @dataclass
