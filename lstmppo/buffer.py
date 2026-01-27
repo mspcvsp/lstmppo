@@ -89,6 +89,17 @@ class RecurrentRolloutBuffer:
     # Store final LSTM states for next rollout
     # ---------------------------------------------------------
     def store_last_lstm_states(self, last_policy_output):
+        """
+        Stores the PRE-STEP LSTM state used to produce the next action.
+
+        Shape invariant:
+            new_hxs, new_cxs: (T, B, H)
+            last_hxs, last_cxs: (B, H)
+
+        Tests rely on:
+            • last_hxs/cxs always being 2-D
+            • representing the state at time t BEFORE env.step()
+        """
         # last timestep hidden state (B, H)
         self.last_hxs = last_policy_output.new_hxs[-1].detach()
         self.last_cxs = last_policy_output.new_cxs[-1].detach()

@@ -183,14 +183,14 @@ class LSTMPPOTrainer:
     # ---------------------------------------------------------
     def collect_rollout(self):
         """
-        - reset()
-        → step = 0
-            - Trainer collects rollout
-        → step increments to rollout_steps
-            - Trainer finishes rollout
-        → computes returns, advantages, diagnostics, etc.
-            - Trainer calls reset()
-        → but before calling reset, trainer must set step = 0
+        Rollout invariant:
+
+        • Trainer owns LSTM state initialization.
+        • Buffer.reset() clears storage but does NOT create LSTM states.
+        • Trainer must call policy.initial_state() and write into:
+            buffer.last_hxs, buffer.last_cxs
+        • Env receives (h0, c0) via set_initial_lstm_states() BEFORE step 0.
+        • Tests expect the first rollout to start from deterministic zero-state.
         """
         self.buffer.reset()
 
@@ -975,6 +975,20 @@ class LSTMPPOTrainer:
         return hxs_trace, cxs_trace
 
     def validate_lstm_state_flow(self):
+        """
+        Validates the core recurrent invariant:
+
+        Given:
+            • identical (obs_t, h_t, c_t)
+        Then:
+            • forward() must produce identical (values_t, logp_t)
+
+        This test enforces:
+            • deterministic LSTM transitions
+            • correct hidden-state alignment
+            • correct PRE-STEP state capture
+            • correct replay of stored (h_t, c_t)
+        """
         print("=== LSTM State-Flow Validation ===")
 
         # -----------------------------------------------------
