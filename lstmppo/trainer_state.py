@@ -43,7 +43,7 @@ class TrainerState:
         # Can’t have a non‑default field after default fields. Easiest
         # solution is don’t make prev_lstm_unit_metrics a dataclass field
         # at all — treat it as a plain attribute
-        self.prev_lstm_unit_metrics = LSTMUnitPrev(None, None, None, None, None, None)
+        self.prev_lstm_unit_metrics = None
 
         if self.validation_mode:
             self.cfg.env.num_envs = 1

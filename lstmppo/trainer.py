@@ -521,7 +521,21 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         prev = getattr(self.state, "prev_lstm_unit_metrics", None)
 
-        if prev is None:
+        """
+        Guarantee:
+        ---------
+        - first rollout → all drifts zero
+        - subsequent rollouts → proper difference
+        """
+        if (
+            prev is None
+            or prev.i_mean is None
+            or prev.f_mean is None
+            or prev.g_mean is None
+            or prev.o_mean is None
+            or prev.h_norm is None
+            or prev.c_norm is None
+        ):
             i_drift = torch.zeros_like(i_mean)
             f_drift = torch.zeros_like(f_mean)
             g_drift = torch.zeros_like(g_mean)
@@ -537,13 +551,6 @@ class LSTMPPOTrainer:
             c_drift = (c_norm - prev.c_norm).detach()
 
         # ----------------------------------------------------
-        # Store for next iteration
-        # ----------------------------------------------------
-        self.state.prev_lstm_unit_metrics = LSTMUnitPrev(
-            i_mean=i_mean, f_mean=f_mean, g_mean=g_mean, o_mean=o_mean, h_norm=h_norm, c_norm=c_norm
-        )
-
-        # ----------------------------------------------------
         # Saturation + entropy (vectorized)
         # ----------------------------------------------------
         sat = self.compute_gate_saturation_vectorized(eval_output, mask_tb)
@@ -553,7 +560,7 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         # Return full per-unit metrics
         # ----------------------------------------------------
-        return LSTMUnitDiagnostics(
+        diag = LSTMUnitDiagnostics(
             i_mean=i_mean,
             f_mean=f_mean,
             g_mean=g_mean,
@@ -570,6 +577,17 @@ class LSTMPPOTrainer:
             c_drift=c_drift,
             hidden_size=H,
         )
+
+        self.state.prev_lstm_unit_metrics = LSTMUnitPrev(
+            i_mean=diag.i_mean,
+            f_mean=diag.f_mean,
+            g_mean=diag.g_mean,
+            o_mean=diag.o_mean,
+            h_norm=diag.h_norm,
+            c_norm=diag.c_norm,
+        )
+
+        return diag
 
     def compute_gate_saturation_vectorized(
         self, eval_output: PolicyEvalOutput, mask: Optional[torch.Tensor]
