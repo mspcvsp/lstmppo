@@ -11,6 +11,7 @@ This tiny test protects from subtle but catastrophic regressions:
 - returns accidentally normalized or clipped
 
 """
+
 import pytest
 import torch
 
@@ -19,6 +20,7 @@ from lstmppo.types import Config
 
 pytestmark = pytest.mark.ppo
 
+
 def test_ppo_value_monotonicity():
     """
     Smoke test: critic loss must increase when value predictions
@@ -26,9 +28,9 @@ def test_ppo_value_monotonicity():
     """
 
     cfg = Config()
-    device = torch.device("cpu")
+    cfg.trainer.cuda = False
 
-    trainer = LSTMPPOTrainer(cfg, device)
+    trainer = LSTMPPOTrainer(cfg)
 
     T = cfg.trainer.rollout_steps
     B = cfg.env.num_envs

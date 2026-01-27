@@ -12,6 +12,7 @@ This test catches regressions in:
 
 It’s the kind of test that prevents silent PPO collapse months later.
 """
+
 import torch
 
 from lstmppo.trainer import LSTMPPOTrainer
@@ -25,9 +26,9 @@ def test_ppo_kl_watchdog():
     """
 
     cfg = Config()
-    device = torch.device("cpu")
+    cfg.trainer.cuda = False
 
-    trainer = LSTMPPOTrainer(cfg, device)
+    trainer = LSTMPPOTrainer(cfg)
 
     T = cfg.trainer.rollout_steps
     B = cfg.env.num_envs

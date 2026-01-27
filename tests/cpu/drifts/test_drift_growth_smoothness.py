@@ -9,6 +9,7 @@ import torch
 
 from lstmppo.diagnostics.recurrent import compute_drift_sequence
 from lstmppo.policy import LSTMPPOPolicy
+from lstmppo.types import Config, initialize_config
 
 
 @pytest.mark.drift
@@ -25,11 +26,14 @@ def test_drift_growth_smoothness():
     num_sequences = 32
     T = 64  # sequence length
 
-    policy = LSTMPPOPolicy(
-        obs_dim=8,
-        action_dim=4,
-        hidden_size=32,
-    )
+    cfg = Config()
+    cfg = initialize_config(cfg)
+
+    cfg.env.flat_obs_dim = 8
+    cfg.env.action_dim = 4
+    cfg.lstm.lstm_hidden_size = 32
+
+    policy = LSTMPPOPolicy(cfg)
 
     drifts = []
 

@@ -7,6 +7,7 @@ A PPO loss test should check:
 - KL and clip_frac are scalars
 - No CPU/GPU mismatch
 """
+
 import torch
 
 from lstmppo.trainer import LSTMPPOTrainer
@@ -15,10 +16,10 @@ from lstmppo.types import Config
 
 def test_ppo_loss_shapes():
     cfg = Config()
-    device = torch.device("cpu")
+    cfg.trainer.cuda = False
 
     # Create a trainer (it owns compute_losses)
-    trainer = LSTMPPOTrainer(cfg, device)
+    trainer = LSTMPPOTrainer(cfg)
 
     T = cfg.trainer.rollout_steps
     B = cfg.env.num_envs
@@ -35,16 +36,15 @@ def test_ppo_loss_shapes():
     # Mask: all alive
     mask = torch.ones(T, B)
 
-    policy_loss, value_loss, approx_kl, clip_frac =\
-        trainer.compute_losses(
-            values=values,
-            new_logp=new_logp,
-            old_logp=old_logp,
-            old_values=old_values,
-            returns=returns,
-            adv=adv,
-            mask=mask,
-        )
+    policy_loss, value_loss, approx_kl, clip_frac = trainer.compute_losses(
+        values=values,
+        new_logp=new_logp,
+        old_logp=old_logp,
+        old_values=old_values,
+        returns=returns,
+        adv=adv,
+        mask=mask,
+    )
 
     # --- Assertions ---
     assert torch.is_tensor(policy_loss)
