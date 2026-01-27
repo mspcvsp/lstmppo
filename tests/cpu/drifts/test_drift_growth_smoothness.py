@@ -6,8 +6,8 @@ adjacent horizons.
 
 import pytest
 import torch
-from lstmppo.diagnostics.recurrent import compute_drift_sequence
 
+from lstmppo.diagnostics.recurrent import compute_drift_sequence
 from lstmppo.policy import LSTMPPOPolicy
 
 
