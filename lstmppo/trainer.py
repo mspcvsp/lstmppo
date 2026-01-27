@@ -63,6 +63,7 @@ from .types import (
     LSTMGateEntropy,
     LSTMGates,
     LSTMGateSaturation,
+    LSTMStates,
     LSTMUnitDiagnostics,
     LSTMUnitPrev,
     PolicyEvalInput,
@@ -976,15 +977,6 @@ class LSTMPPOTrainer:
     def validate_lstm_state_flow(self):
         print("=== LSTM State-Flow Validation ===")
 
-        # Ensure last LSTM states exist
-        if self.buffer.last_hxs is None or self.buffer.last_cxs is None:
-            with torch.no_grad():
-                h0, c0 = self.policy.initial_state(self.num_envs, self.device)
-            self.buffer.last_hxs = h0
-            self.buffer.last_cxs = c0
-
-        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
-
         # -----------------------------------------------------
         # 1. Deterministic mode: no DropConnect, no dropout
         # -----------------------------------------------------
@@ -997,13 +989,19 @@ class LSTMPPOTrainer:
         torch.backends.cudnn.benchmark = False
 
         # -----------------------------------------------------
-        # 2. Collect rollout using *forward()*, not act()
+        # 2. Fresh rollout from a known initial LSTM state
         # -----------------------------------------------------
         self.buffer.reset()
+
+        # Fresh env reset
         env_state = self.env.reset(seed=self.state.cfg.trainer.seed)
 
-        # Use stored LSTM states if available
-        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
+        # Initialize LSTM state directly from the policy
+        with torch.no_grad():
+            h0, c0 = self.policy.initial_state(self.num_envs, self.device)
+
+        # Hand it to the env without going through the buffer
+        self.env.set_initial_lstm_states(LSTMStates(hxs=h0, cxs=c0))
 
         stored_values = []
         stored_logprobs = []
@@ -1078,11 +1076,10 @@ class LSTMPPOTrainer:
         logp_diff = (logprobs_rec - stored_logprobs).abs()
 
         print("max |values_rec - stored_values|   :", val_diff.max().item())
-
         print("max |logprobs_rec - stored_logprobs|:", logp_diff.max().item())
 
-        assert val_diff.max().item() < 1e-8, "Indeterminite state-flow"
-        assert logp_diff.max().item() < 1e-8, "Indeterminite state-flow"
+        assert val_diff.max().item() < 1e-8, "Indeterminate state-flow (values)"
+        assert logp_diff.max().item() < 1e-8, "Indeterminate state-flow (logprobs)"
 
         for t in range(min(T, 5)):
             print(f"\n[t = {t}]")
