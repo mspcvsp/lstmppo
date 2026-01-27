@@ -103,8 +103,8 @@ class LSTMCore(nn.Module):
         return h, c
 
     def forward(self, x, state):
-        h, c, _ = self.cell(x, state)
-        return h, c
+        # MUST return (h, c, gates)
+        return self.cell(x, state)
 
 
 class LSTMPPOPolicy(nn.Module):
@@ -245,7 +245,7 @@ class LSTMPPOPolicy(nn.Module):
         h_list = []
 
         for t in range(T):
-            h, c, gates = self.lstm_cell(enc[:, t, :], (h, c))
+            h, c, gates = self.lstm(enc[:, t, :], (h, c))
             outputs.append(h.unsqueeze(1))
             gate_list.append(gates)
 
@@ -327,6 +327,17 @@ class LSTMPPOPolicy(nn.Module):
             tar_loss=core_out.tar_loss,
             gates=core_out.gates,
         )
+
+    def forward_step(self, obs, h, c):
+        """
+        Trainer requires step‑mode LSTM evaluation. LSTM-PPO must return the initial hidden state for each environment
+        atthe start of rollout, and the final hidden state after each step.
+        """
+        enc = self.encoder(self.obs_encoder(obs))  # (B, H)
+        h, c, gates = self.lstm(enc, (h, c))
+        logits = self.actor(h)
+        value = self.critic(h)
+        return logits, value, h, c, gates
 
     def act(self, policy_input: PolicyInput):
         policy_output = self.forward(policy_input)

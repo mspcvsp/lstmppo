@@ -193,6 +193,37 @@ class LSTMPPOTrainer:
         """
         self.buffer.reset()
 
+        """
+        Trainer
+            - orchestrates rollouts
+            - owns the policy
+            - owns the environment
+            - owns the buffer
+            - initializes LSTM states
+            - enforces determinism
+
+        Buffer
+            - stores data
+            - stores last_hxs/last_cxs
+            - does not create LSTM states
+
+        Policy
+            - defines initial_state()
+            - defines recurrent transition
+        """
+        batch_size = self.num_envs
+
+        """
+        Ensure the initial state is always created on the same device as the policy, even if the trainer’s self.device
+        changes or the policy is moved to GPU later.
+        """
+        device = next(self.policy.parameters()).device
+
+        with torch.no_grad():
+            h0, c0 = self.policy.initial_state(batch_size, device)
+            self.buffer.last_hxs = h0
+            self.buffer.last_cxs = c0
+
         assert self.buffer.step == 0, "collect_rollout started with " + f"step={self.buffer.step}, expected 0"
 
         env_state = self.env_state
