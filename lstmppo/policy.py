@@ -103,7 +103,8 @@ class LSTMCore(nn.Module):
         return h, c
 
     def forward(self, x, state):
-        return self.cell(x, state)
+        h, c, _ = self.cell(x, state)
+        return h, c
 
 
 class LSTMPPOPolicy(nn.Module):
@@ -244,7 +245,7 @@ class LSTMPPOPolicy(nn.Module):
         h_list = []
 
         for t in range(T):
-            h, c, gates = self.lstm(enc[:, t, :], (h, c))
+            h, c, gates = self.lstm_cell(enc[:, t, :], (h, c))
             outputs.append(h.unsqueeze(1))
             gate_list.append(gates)
 
