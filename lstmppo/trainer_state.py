@@ -38,6 +38,7 @@ class TrainerState:
     def __init__(self, cfg: Config, validation_mode: bool = False):
         self.cfg = cfg
         self.validation_mode = validation_mode
+        self.metrics = Metrics()
 
         # Can’t have a non‑default field after default fields. Easiest
         # solution is don’t make prev_lstm_unit_metrics a dataclass field
