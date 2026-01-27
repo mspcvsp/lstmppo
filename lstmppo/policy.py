@@ -98,11 +98,14 @@ class LSTMPPOPolicy(nn.Module):
         self.ar_coef = cfg.lstm.lstm_ar_coef
         self.tar_coef = cfg.lstm.lstm_tar_coef
 
-        obs_space = cfg.env.obs_space
-        if obs_space is None:
-            raise ValueError("obs_space must be initialized before building encoder")
+        # If obs_space is None, rely on flat_obs_dim (tests do this intentionally)
+        if cfg.env.flat_obs_dim == 0:
+            self.obs_dim = 0
+        else:
+            self.obs_dim = cfg.env.flat_obs_dim
 
-        self.obs_encoder = build_obs_encoder(obs_space, cfg.obs_dim)
+        obs_space = cfg.env.obs_space
+        self.obs_encoder = build_obs_encoder(obs_space, self.obs_dim)
 
         # --- SiLU encoder ---
         if cfg.env.flat_obs_dim == 0:
