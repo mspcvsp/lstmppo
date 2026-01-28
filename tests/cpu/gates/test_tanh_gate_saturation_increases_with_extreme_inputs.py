@@ -1,7 +1,9 @@
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
-import pytest
+
 pytestmark = pytest.mark.gates
 
 

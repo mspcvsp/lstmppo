@@ -31,67 +31,82 @@ Advantage normalization (trainer)
       ↓
 PPO loss
 """
+
+import random
 from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import torch
-from typing import Optional
-from types import SimpleNamespace
-import random
+from rich.console import Console
+from rich.live import Live
 from torch import nn
 from torch.distributions.categorical import Categorical
-from rich.live import Live
-from rich.console import Console
 
-from .env import RecurrentVecEnvWrapper
 from .buffer import RecurrentRolloutBuffer, RolloutStep
+from .env import RecurrentVecEnvWrapper
 from .policy import LSTMPPOPolicy
-from .types import Config, PolicyEvalInput, PolicyInput, initialize_config
-from .types import RecurrentMiniBatch, PolicyUpdateInfo, PolicyEvalOutput
-from .types import LSTMUnitDiagnostics, LSTMGateEntropy, LSTMGateSaturation
-from .types import LSTMGates
+
+# https://realpython.com/python-mixin/
+from .trainer_renderers import (
+    render_env_timelines,
+    render_episode_table,
+    render_episode_trends,
+    render_histogram,
+    render_policy_stability,
+    render_ppo_table,
+    render_value_drift,
+)
 from .trainer_state import TrainerState
+from .types import (
+    Config,
+    LSTMGateEntropy,
+    LSTMGates,
+    LSTMGateSaturation,
+    LSTMStates,
+    LSTMUnitDiagnostics,
+    LSTMUnitPrev,
+    PolicyEvalInput,
+    PolicyEvalOutput,
+    PolicyInput,
+    PolicyUpdateInfo,
+    RecurrentMiniBatch,
+    initialize_config,
+)
 
 
 class LSTMPPOTrainer:
+    def __init__(self, cfg: Config, validation_mode: bool = False):
+        self.device = torch.device("cuda" if torch.cuda.is_available() and cfg.trainer.cuda else "cpu")
 
-    def __init__(self,
-                 cfg: Config,
-                 validation_mode: bool = False):
+        self.state = TrainerState(cfg, validation_mode=validation_mode)
 
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available()
-            and cfg.trainer.cuda else "cpu"
-        )
+        self.env = RecurrentVecEnvWrapper(self.state.cfg, self.device)
 
-        self.state = TrainerState(cfg,
-                                  validation_mode=validation_mode)
-
-        self.env = RecurrentVecEnvWrapper(self.state.cfg,
-                                          self.device)
-        
         self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
 
-        self.buffer = RecurrentRolloutBuffer(self.state.cfg,
-                                             self.device)
+        self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
 
         if self.state.validation_mode:
-
             self.policy.eval()
 
-        self.checkpoint_dir = Path(*[self.state.cfg.log.checkpoint_dir,
-                                     self.state.cfg.env.env_id,
-                                     self.state.cfg.trainer.exp_name])
+        self.checkpoint_dir = Path(
+            *[self.state.cfg.log.checkpoint_dir, self.state.cfg.env.env_id, self.state.cfg.trainer.exp_name]
+        )
 
         if self.checkpoint_dir.exists() is False:
+            self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-            self.checkpoint_dir.mkdir(parents=True,
-                                      exist_ok=True)
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.state.cfg.sched.base_lr, eps=1e-5)
 
-        self.optimizer = torch.optim.Adam(
-            self.policy.parameters(),
-            lr=self.state.cfg.sched.base_lr,
-            eps=1e-5
-        )
+        # Attach as methods
+        self.render_ppo_table = render_ppo_table
+        self.render_episode_table = render_episode_table
+        self.render_episode_trends = render_episode_trends
+        self.render_policy_stability = render_policy_stability
+        self.render_value_drift = render_value_drift
+        self.render_histogram = render_histogram
+        self.render_env_timelines = render_env_timelines
 
         self.reset()
 
@@ -115,14 +130,10 @@ class LSTMPPOTrainer:
         return cls(cfg, validation_mode=True)
 
     @classmethod
-    def from_preset(cls,
-                    preset_name: str,
-                    **kwargs):
-
+    def from_preset(cls, preset_name: str, **kwargs):
         cfg = Config()
 
         if preset_name == "cartpole_easy":
-
             cfg.env.env_id = "popgym-PositionOnlyCartPoleEasy-v0"
             cfg.ppo.target_kl = 0.005
             cfg.sched.start_entropy_coef = 0.1
@@ -133,7 +144,6 @@ class LSTMPPOTrainer:
         return cls(cfg)
 
     def reset(self):
-
         random.seed(self.state.cfg.trainer.seed)
         np.random.seed(self.state.cfg.trainer.seed)
         torch.manual_seed(self.state.cfg.trainer.seed)
@@ -141,21 +151,18 @@ class LSTMPPOTrainer:
         # persistent env state across rollouts
         self.env_state = self.env.reset(seed=self.state.cfg.trainer.seed)
 
-    def train(self,
-              total_updates: int):
-
+    def train(self, total_updates: int):
         self.state.reset(total_updates)
 
         self.state.init_stats()
 
         console = Console()
 
-        with open(self.state.jsonl_file, "w") as self.state.jsonl_fp,\
-            Live(console=console,
-                 refresh_per_second=4) as live:
-
+        with (
+            open(self.state.jsonl_file, "w") as self.state.jsonl_fp,
+            Live(console=console, refresh_per_second=4) as live,
+        ):
             for self.state.update_idx in range(total_updates):
-
                 self.state.init_stats()
 
                 self.state.apply_schedules(self.optimizer)
@@ -175,32 +182,57 @@ class LSTMPPOTrainer:
     # Rollout Phase (unchanged except act() signature)
     # ---------------------------------------------------------
     def collect_rollout(self):
-
         """
-        - reset()
-        → step = 0
-            - Trainer collects rollout
-        → step increments to rollout_steps
-            - Trainer finishes rollout
-        → computes returns, advantages, diagnostics, etc.
-            - Trainer calls reset()
-        → but before calling reset, trainer must set step = 0
+        Rollout invariant:
+
+        • Trainer owns LSTM state initialization.
+        • Buffer.reset() clears storage but does NOT create LSTM states.
+        • Trainer must call policy.initial_state() and write into:
+            buffer.last_hxs, buffer.last_cxs
+        • Env receives (h0, c0) via set_initial_lstm_states() BEFORE step 0.
+        • Tests expect the first rollout to start from deterministic zero-state.
         """
         self.buffer.reset()
 
-        assert self.buffer.step == 0,\
-            ("collect_rollout started with " +
-             f"step={self.buffer.step}, expected 0")
+        """
+        Trainer
+            - orchestrates rollouts
+            - owns the policy
+            - owns the environment
+            - owns the buffer
+            - initializes LSTM states
+            - enforces determinism
+
+        Buffer
+            - stores data
+            - stores last_hxs/last_cxs
+            - does not create LSTM states
+
+        Policy
+            - defines initial_state()
+            - defines recurrent transition
+        """
+        batch_size = self.num_envs
+
+        """
+        Ensure the initial state is always created on the same device as the policy, even if the trainer’s self.device
+        changes or the policy is moved to GPU later.
+        """
+        device = next(self.policy.parameters()).device
+
+        with torch.no_grad():
+            h0, c0 = self.policy.initial_state(batch_size, device)
+            self.buffer.last_hxs = h0
+            self.buffer.last_cxs = c0
+
+        assert self.buffer.step == 0, "collect_rollout started with " + f"step={self.buffer.step}, expected 0"
 
         env_state = self.env_state
 
         # Initialize LSTM states for this rollout
-        self.env.set_initial_lstm_states(
-            self.buffer.get_last_lstm_states()
-        )
+        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
 
         for _ in range(self.rollout_steps):
-
             policy_in = env_state.policy_input
 
             # NEW: act() now takes a PolicyInput dataclass
@@ -215,44 +247,40 @@ class LSTMPPOTrainer:
             - NOT (B, T, H)
             """
 
-            #-------------------------------------------------------------
+            # -------------------------------------------------------------
             # IMPORTANT:
-            #-------------------------------------------------------------
-            # hxs/cxs stored in the buffer MUST be the PRE-STEP hidden 
+            # -------------------------------------------------------------
+            # hxs/cxs stored in the buffer MUST be the PRE-STEP hidden
             # state (h_t, c_t).
-            # 
+            #
             # This is required for:
             #   - state-flow determinism
             #   - TBPTT correctness
             #   - value/logprob reproducibility
             #   - LSTM diagnostics (drift, entropy, saturation)
             #
-            # If you change this, run validate_lstm_state_flow() and 
+            # If you change this, run validate_lstm_state_flow() and
             # validate_tbptt().
-            #-------------------------------------------------------------
-            self.buffer.add(RolloutStep(
-                obs=env_state.obs,
-                actions=actions.detach(),
-                rewards=next_state.rewards,
-                values=policy_out.values.detach(),
-                logprobs=logprobs.detach(),
-                terminated=next_state.terminated,
-                truncated=next_state.truncated,
-                hxs=policy_in.hxs.detach(),
-                cxs=policy_in.cxs.detach(),
-                gates=policy_out.gates.detached.transposed()
-            ))
+            # -------------------------------------------------------------
+            self.buffer.add(
+                RolloutStep(
+                    obs=env_state.obs,
+                    actions=actions.detach(),
+                    rewards=next_state.rewards,
+                    values=policy_out.values.detach(),
+                    logprobs=logprobs.detach(),
+                    terminated=next_state.terminated,
+                    truncated=next_state.truncated,
+                    hxs=policy_in.hxs.detach(),
+                    cxs=policy_in.cxs.detach(),
+                    gates=policy_out.gates.detached.transposed(),
+                )
+            )
 
             # Verify state-flow determinism
-            assert torch.allclose(
-                policy_in.hxs, self.buffer.hxs[self.buffer.step - 1],
-                atol=1e-8
-            )
+            assert torch.allclose(policy_in.hxs, self.buffer.hxs[self.buffer.step - 1], atol=1e-8)
 
-            assert torch.allclose(
-                policy_in.cxs, self.buffer.cxs[self.buffer.step - 1],
-                atol=1e-8
-            )
+            assert torch.allclose(policy_in.cxs, self.buffer.cxs[self.buffer.step - 1], atol=1e-8)
 
             """
             Detach to prevent
@@ -263,8 +291,8 @@ class LSTMPPOTrainer:
             - gradients flowing across episode boundarie
             """
             self.env.update_hidden_states(
-                policy_out.new_hxs.detach(), # h_{t+1}
-                policy_out.new_cxs.detach()  # c_{t+1}
+                policy_out.new_hxs.detach(),  # h_{t+1}
+                policy_out.new_cxs.detach(),  # c_{t+1}
             )
 
             env_state = next_state
@@ -272,13 +300,12 @@ class LSTMPPOTrainer:
         self.env_state = env_state
 
         # After the loop, we must have a full rollout
-        assert self.buffer.step == self.rollout_steps, \
-            (f"Incomplete rollout: step={self.buffer.step}, " +
-             f"expected={self.rollout_steps}")
+        assert self.buffer.step == self.rollout_steps, (
+            f"Incomplete rollout: step={self.buffer.step}, " + f"expected={self.rollout_steps}"
+        )
 
         # Bootstrap value + store final LSTM states
         with torch.no_grad():
-
             policy_in = self.env_state.policy_input
 
             _, _, last_policy_out = self.policy.act(policy_in)
@@ -298,15 +325,9 @@ class LSTMPPOTrainer:
         return last_value
 
     def optimize_policy(self):
-
         for _ in range(self.state.cfg.ppo.update_epochs):
-
             for batch in self.buffer.get_recurrent_minibatches():
-
-                for mb in batch.iter_chunks(
-                    self.state.cfg.trainer.tbptt_chunk_len
-                    ):
-
+                for mb in batch.iter_chunks(self.state.cfg.trainer.tbptt_chunk_len):
                     self.optimize_chunk(mb)
 
         self.state.compute_explained_variance(self.buffer)
@@ -319,9 +340,7 @@ class LSTMPPOTrainer:
 
         self.state.log_metrics()
 
-    def optimize_chunk(self,
-                       mb: RecurrentMiniBatch):
-
+    def optimize_chunk(self, mb: RecurrentMiniBatch):
         # ------- Forward pass -------
         eval_output = self.policy.evaluate_actions_sequence(
             PolicyEvalInput(
@@ -346,14 +365,14 @@ class LSTMPPOTrainer:
         adv = mb.advantages.reshape(-1)
         returns = mb.returns.reshape(-1)
         old_values = mb.old_values.reshape(-1)
-    
+
         """
         Need two views of the mask:
 
         - Flattened mask for scalar losses: shape (K * B,)
         - Time–batch mask for diagnostics: shape (K, B)
         """
-        mask_tb = mb.mask # (K, B)
+        mask_tb = mb.mask  # (K, B)
         mask_flat = mask_tb.reshape(-1)
 
         if mask_flat.sum() == 0:
@@ -362,19 +381,12 @@ class LSTMPPOTrainer:
             return
 
         valid_adv = adv[mask_flat > 0.5]
-        
-        adv =\
-            (adv - valid_adv.mean()) /\
-            (valid_adv.std(unbiased=False) + 1e-8)
 
-        policy_loss, value_loss, approx_kl, clip_frac = \
-            self.compute_losses(values,
-                                new_logp,
-                                old_logp,
-                                old_values,
-                                returns,
-                                adv,
-                                mask_flat)
+        adv = (adv - valid_adv.mean()) / (valid_adv.std(unbiased=False) + 1e-8)
+
+        policy_loss, value_loss, approx_kl, clip_frac = self.compute_losses(
+            values, new_logp, old_logp, old_values, returns, adv, mask_flat
+        )
 
         # --- Masked entropy from eval_output ---
         entropy = eval_output.entropy.reshape(-1)
@@ -383,62 +395,42 @@ class LSTMPPOTrainer:
         policy_drift = (new_logp - old_logp).abs().mean()
         value_drift = (values - old_values).abs().mean()
 
-        lstm_unit_metrics =\
-            self.compute_lstm_unit_diagnostics(eval_output,
-                                               mask_tb)
+        lstm_unit_diag = self.compute_lstm_unit_diagnostics(eval_output, mask_tb)
 
-        loss = (
-            policy_loss
-            + self.state.cfg.ppo.vf_coef * value_loss
-            - self.state.entropy_coef * entropy
-        )
+        loss = policy_loss + self.state.cfg.ppo.vf_coef * value_loss - self.state.entropy_coef * entropy
 
         if self.state.cfg.trainer.debug_mode is False:
-
-            loss = (
-                loss
-                + eval_output.ar_loss
-                + eval_output.tar_loss
-            )
+            loss = loss + eval_output.ar_loss + eval_output.tar_loss
 
         grad_norm = self.backward_and_clip(loss)
 
         self.state.update_stats(
-            PolicyUpdateInfo(policy_loss=policy_loss,
-                             value_loss=value_loss,
-                             entropy=entropy,
-                             approx_kl=approx_kl,
-                             clip_frac=clip_frac,
-                             grad_norm=grad_norm,
-                             policy_drift=policy_drift,
-                             value_drift=value_drift,
-                             lstm_unit_metrics=lstm_unit_metrics)
+            PolicyUpdateInfo(
+                policy_loss=policy_loss,
+                value_loss=value_loss,
+                entropy=entropy,
+                approx_kl=approx_kl,
+                clip_frac=clip_frac,
+                grad_norm=grad_norm,
+                policy_drift=policy_drift,
+                value_drift=value_drift,
+                lstm_unit_diag=lstm_unit_diag,
+            )
         )
 
-    def compute_losses(self,
-                       values,
-                       new_logp,
-                       old_logp,
-                       old_values,
-                       returns,
-                       adv,
-                       mask):
-
+    def compute_losses(self, values, new_logp, old_logp, old_values, returns, adv, mask):
         ratio = torch.exp(new_logp - old_logp)
 
         kl = 0.5 * (old_logp - new_logp).pow(2)
         approx_kl = (kl * mask).sum() / mask.sum()
 
         clip_frac = (
-            ((ratio > 1 + self.state.clip_range) |
-             (ratio < 1 - self.state.clip_range)).float() * mask
+            ((ratio > 1 + self.state.clip_range) | (ratio < 1 - self.state.clip_range)).float() * mask
         ).sum() / mask.sum()
 
         surr1 = ratio * adv
 
-        surr2 = torch.clamp(ratio,
-                            1 - self.state.clip_range,
-                            1 + self.state.clip_range) * adv
+        surr2 = torch.clamp(ratio, 1 - self.state.clip_range, 1 + self.state.clip_range) * adv
 
         policy_loss = -(torch.min(surr1, surr2) * mask).sum() / mask.sum()
 
@@ -448,19 +440,14 @@ class LSTMPPOTrainer:
             self.state.clip_range,
         )
 
-        value_loss = 0.5 * torch.max(
-            (values - returns).pow(2),
-            (value_pred_clipped - returns).pow(2)
-        )
+        value_loss = 0.5 * torch.max((values - returns).pow(2), (value_pred_clipped - returns).pow(2))
         value_loss = (value_loss * mask).sum() / mask.sum()
 
         return policy_loss, value_loss, approx_kl, clip_frac
 
     def compute_lstm_unit_diagnostics(
-        self,
-        eval_output: PolicyEvalOutput,
-        mask: Optional[torch.Tensor]
-        ) -> LSTMUnitDiagnostics:
+        self, eval_output: PolicyEvalOutput, mask: Optional[torch.Tensor]
+    ) -> LSTMUnitDiagnostics:
         """
         Computes per-unit LSTM diagnostics (shape [H]) instead of scalars.
         """
@@ -504,15 +491,14 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         def masked_mean(x):
             # x: (T, B, H)
-            assert x.dim() == 3,\
-                f"masked_mean expects (T,B,H), got {x.shape}"
+            assert x.dim() == 3, f"masked_mean expects (T,B,H), got {x.shape}"
 
             if mask_tb is None:
                 return x.mean(dim=(0, 1)).detach()
 
-            assert (mask_tb.shape[0] == x.shape[0] and
-                    mask_tb.shape[1] == x.shape[1]), \
+            assert mask_tb.shape[0] == x.shape[0] and mask_tb.shape[1] == x.shape[1], (
                 f"mask/x mismatch: mask {mask_tb.shape}, x {x.shape}"
+            )
 
             m = mask_tb.unsqueeze(-1)  # (T, B, 1)
             x = x * m
@@ -526,7 +512,7 @@ class LSTMPPOTrainer:
         f_mean = masked_mean(f_g)
         g_mean = masked_mean(g_g)
         o_mean = masked_mean(o_g)
-        
+
         # --- per-unit norms  ---
         h_norm = masked_mean(h_all)  # (H,)
         c_norm = masked_mean(c_all)  # (H,)
@@ -534,11 +520,23 @@ class LSTMPPOTrainer:
         # ----------------------------------------------------
         # Per-unit drift
         # ----------------------------------------------------
-        prev = getattr(self.state,
-                       "prev_lstm_unit_metrics",
-                       None)
+        prev = getattr(self.state, "prev_lstm_unit_metrics", None)
 
-        if prev is None:
+        """
+        Guarantee:
+        ---------
+        - first rollout → all drifts zero
+        - subsequent rollouts → proper difference
+        """
+        if (
+            prev is None
+            or prev.i_mean is None
+            or prev.f_mean is None
+            or prev.g_mean is None
+            or prev.o_mean is None
+            or prev.h_norm is None
+            or prev.c_norm is None
+        ):
             i_drift = torch.zeros_like(i_mean)
             f_drift = torch.zeros_like(f_mean)
             g_drift = torch.zeros_like(g_mean)
@@ -554,30 +552,16 @@ class LSTMPPOTrainer:
             c_drift = (c_norm - prev.c_norm).detach()
 
         # ----------------------------------------------------
-        # Store for next iteration
-        # ----------------------------------------------------
-        self.state.prev_lstm_unit_metrics = SimpleNamespace(
-            i_mean=i_mean,
-            f_mean=f_mean,
-            g_mean=g_mean,
-            o_mean=o_mean,
-            h_norm=h_norm,
-            c_norm=c_norm
-        )
-
-        # ----------------------------------------------------
         # Saturation + entropy (vectorized)
         # ----------------------------------------------------
-        sat = self.compute_gate_saturation_vectorized(eval_output,
-                                                      mask_tb)
+        sat = self.compute_gate_saturation_vectorized(eval_output, mask_tb)
 
-        ent = self.compute_gate_entropy_vectorized(eval_output.gates,
-                                                   mask_tb)
+        ent = self.compute_gate_entropy_vectorized(eval_output.gates, mask_tb)
 
         # ----------------------------------------------------
         # Return full per-unit metrics
         # ----------------------------------------------------
-        return LSTMUnitDiagnostics(
+        diag = LSTMUnitDiagnostics(
             i_mean=i_mean,
             f_mean=f_mean,
             g_mean=g_mean,
@@ -592,14 +576,23 @@ class LSTMPPOTrainer:
             c_norm=c_norm,
             h_drift=h_drift,
             c_drift=c_drift,
-            hidden_size=H
+            hidden_size=H,
         )
 
+        self.state.prev_lstm_unit_metrics = LSTMUnitPrev(
+            i_mean=diag.i_mean,
+            f_mean=diag.f_mean,
+            g_mean=diag.g_mean,
+            o_mean=diag.o_mean,
+            h_norm=diag.h_norm,
+            c_norm=diag.c_norm,
+        )
+
+        return diag
+
     def compute_gate_saturation_vectorized(
-        self,
-        eval_output: PolicyEvalOutput,
-        mask: Optional[torch.Tensor]
-        ) -> LSTMGateSaturation:
+        self, eval_output: PolicyEvalOutput, mask: Optional[torch.Tensor]
+    ) -> LSTMGateSaturation:
         """
         Computes per-unit saturation metrics for all LSTM gates.
         Returns LSTMGateSaturation dataclass
@@ -658,13 +651,13 @@ class LSTMPPOTrainer:
         # -------------------------
         eps = self.state.cfg.trainer.gate_sat_eps
 
-        i_sat_low  = masked_fraction(i_g < eps)
+        i_sat_low = masked_fraction(i_g < eps)
         i_sat_high = masked_fraction(i_g > 1 - eps)
 
-        f_sat_low  = masked_fraction(f_g < eps)
+        f_sat_low = masked_fraction(f_g < eps)
         f_sat_high = masked_fraction(f_g > 1 - eps)
 
-        o_sat_low  = masked_fraction(o_g < eps)
+        o_sat_low = masked_fraction(o_g < eps)
         o_sat_high = masked_fraction(o_g > 1 - eps)
 
         # -------------------------
@@ -687,14 +680,10 @@ class LSTMPPOTrainer:
             g_sat=g_sat,
             c_sat=c_sat,
             h_sat=h_sat,
-            hidden_size=H
+            hidden_size=H,
         )
 
-    def compute_gate_entropy_vectorized(
-        self,
-        gates: LSTMGates,
-        mask: Optional[torch.Tensor]
-        ) -> LSTMGateEntropy:
+    def compute_gate_entropy_vectorized(self, gates: LSTMGates, mask: Optional[torch.Tensor]) -> LSTMGateEntropy:
         """
         Computes per-unit entropy for all LSTM gates.
         Returns LSTMGateEntropy dataclass with 1-D tensors [H].
@@ -779,13 +768,11 @@ class LSTMPPOTrainer:
             g_entropy=g_entropy,
             c_entropy=c_entropy,
             h_entropy=h_entropy,
-            hidden_size=H
+            hidden_size=H,
         )
 
-    def backward_and_clip(self,
-                          loss):
-
-        # Disabling set to None reduces memory fragmentation and 
+    def backward_and_clip(self, loss):
+        # Disabling set to None reduces memory fragmentation and
         # speeds up training.
         self.optimizer.zero_grad(set_to_none=False)
         loss.backward()
@@ -795,38 +782,36 @@ class LSTMPPOTrainer:
             if p.grad is not None:
                 grad_norm += p.grad.data.norm(2).item() ** 2
 
-        grad_norm = grad_norm ** 0.5
+        grad_norm = grad_norm**0.5
 
-        nn.utils.clip_grad_norm_(self.policy.parameters(),
-                                 self.state.cfg.ppo.max_grad_norm)
+        nn.utils.clip_grad_norm_(self.policy.parameters(), self.state.cfg.ppo.max_grad_norm)
 
         self.optimizer.step()
 
         return grad_norm
 
     def save_checkpoint(self):
-
-        checkpoint_pth =\
-            self.checkpoint_dir.joinpath(self.state.cfg.log.run_name +
-                                         "_checkpoint_" +
-                                         f"{self.state.update_idx}.pt")
-        torch.save({
-            "policy": self.policy.state_dict(),
-            "optimizer": self.optimizer.state_dict(),
-            "update_idx": self.state.update_idx,
-            "trainer_state": {
+        checkpoint_pth = self.checkpoint_dir.joinpath(
+            self.state.cfg.log.run_name + "_checkpoint_" + f"{self.state.update_idx}.pt"
+        )
+        torch.save(
+            {
+                "policy": self.policy.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
                 "update_idx": self.state.update_idx,
-                "lr": float(self.state.lr),
-                "entropy_coef": float(self.state.entropy_coef),
-                "clip_range": float(self.state.clip_range),
-                "target_kl": float(self.state.target_kl),
-                "early_stopping_kl": float(self.state.early_stopping_kl),
-            }
-        }, checkpoint_pth)
+                "trainer_state": {
+                    "update_idx": self.state.update_idx,
+                    "lr": float(self.state.lr),
+                    "entropy_coef": float(self.state.entropy_coef),
+                    "clip_range": float(self.state.clip_range),
+                    "target_kl": float(self.state.target_kl),
+                    "early_stopping_kl": float(self.state.early_stopping_kl),
+                },
+            },
+            checkpoint_pth,
+        )
 
-    def load_checkpoint(self,
-                        checkpoint):
-
+    def load_checkpoint(self, checkpoint):
         trainer_state = checkpoint["trainer_state"]
 
         self.state.update_idx = trainer_state["update_idx"]
@@ -845,29 +830,23 @@ class LSTMPPOTrainer:
 
         return self.compute_lstm_unit_diagnostics(eval_output, mask)
 
-    def compute_lstm_unit_diagnostics_from_rollout(self):
-        eval_output = self.replay_policy_on_rollout()
-        mask = self.buffer.mask  # (T, B)
-        return self.compute_lstm_unit_diagnostics(eval_output, mask)
-
     @torch.no_grad()
     def replay_policy_on_rollout(self):
         """
         Recompute the policy forward pass over the stored rollout.
-        Produces a full (T, B, ...) PolicyEvalOutput identical to 
+        Produces a full (T, B, ...) PolicyEvalOutput identical to
         PPO evaluation.
         """
         eval_inp = PolicyEvalInput(
-            obs=self.buffer.obs,          # (T, B, obs_dim)
-            hxs=self.buffer.hxs[0],       # (B, H)
-            cxs=self.buffer.cxs[0],       # (B, H)
-            actions=self.buffer.actions.squeeze(-1)  # (T, B)
+            obs=self.buffer.obs,  # (T, B, obs_dim)
+            hxs=self.buffer.hxs[0],  # (B, H)
+            cxs=self.buffer.cxs[0],  # (B, H)
+            actions=self.buffer.actions.squeeze(-1),  # (T, B)
         )
 
         return self.policy.evaluate_actions_sequence(eval_inp)
 
     def validate_tbptt(self, K=16):
-
         self.state.reset(1)
         self.state.init_stats()
 
@@ -882,21 +861,21 @@ class LSTMPPOTrainer:
         T, B, _ = batch.obs.shape
 
         # Use the hidden state at the start of the sequence
-        hxs0 = batch.hxs[0]   # (B, H)
-        cxs0 = batch.cxs[0]   # (B, H)
+        hxs0 = batch.hxs[0]  # (B, H)
+        cxs0 = batch.cxs[0]  # (B, H)
 
         # ----- Full sequence -----
         with torch.no_grad():
             full = self.policy.evaluate_actions_sequence(
                 PolicyEvalInput(
-                    obs=batch.obs,        # (T, B, obs_dim)
-                    hxs=hxs0,             # (B, H)
-                    cxs=cxs0,             # (B, H)
-                    actions=batch.actions # (T, B, 1) or (T, B)
+                    obs=batch.obs,  # (T, B, obs_dim)
+                    hxs=hxs0,  # (B, H)
+                    cxs=cxs0,  # (B, H)
+                    actions=batch.actions,  # (T, B, 1) or (T, B)
                 )
             )
-            full_vals = full.values      # (T, B)
-            full_logp = full.logprobs    # (T, B)
+            full_vals = full.values  # (T, B)
+            full_logp = full.logprobs  # (T, B)
 
         # ----- Chunked sequence -----
         hxs = hxs0.clone()
@@ -910,18 +889,18 @@ class LSTMPPOTrainer:
 
                 out = self.policy.evaluate_actions_sequence(
                     PolicyEvalInput(
-                        obs=batch.obs[t0:t1],        # (K, B, obs_dim)
-                        hxs=hxs,                     # (B, H)
-                        cxs=cxs,                     # (B, H)
-                        actions=batch.actions[t0:t1] # (K, B)
+                        obs=batch.obs[t0:t1],  # (K, B, obs_dim)
+                        hxs=hxs,  # (B, H)
+                        cxs=cxs,  # (B, H)
+                        actions=batch.actions[t0:t1],  # (K, B)
                     )
                 )
 
                 vals_chunks.append(out.values)
                 logp_chunks.append(out.logprobs)
 
-                hxs = out.new_hxs[-1].detach()   # (B, H)
-                cxs = out.new_cxs[-1].detach()   # (B, H)
+                hxs = out.new_hxs[-1].detach()  # (B, H)
+                cxs = out.new_cxs[-1].detach()  # (B, H)
 
         vals_rec = torch.cat(vals_chunks, dim=0)
         logp_rec = torch.cat(logp_chunks, dim=0)
@@ -936,19 +915,15 @@ class LSTMPPOTrainer:
         assert max_logp_diff < 1e-6
 
     def assert_rollout_deterministic(self):
-
         self.policy.eval()
         _, v1, p1 = self.run_deterministic_rollout()
         _, v2, p2 = self.run_deterministic_rollout()
 
-        assert torch.allclose(v1[0], v2[0], atol=1e-6), \
-            "Rollout values are not deterministic"
+        assert torch.allclose(v1[0], v2[0], atol=1e-6), "Rollout values are not deterministic"
 
-        assert torch.allclose(p1[0], p2[0], atol=1e-6), \
-            "Rollout logprobs are not deterministic"
-        
+        assert torch.allclose(p1[0], p2[0], atol=1e-6), "Rollout logprobs are not deterministic"
+
     def run_deterministic_rollout(self, steps=50):
-
         self.policy.eval()
         self.env.reset()
         self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
@@ -960,7 +935,6 @@ class LSTMPPOTrainer:
         env_state = self.env_state
 
         for _ in range(steps):
-
             policy_in = env_state.policy_input
             actions, logprobs, policy_out = self.policy.act(policy_in)
 
@@ -971,20 +945,16 @@ class LSTMPPOTrainer:
             env_state = self.env.step(actions)
 
         return obs_list, val_list, logp_list
-        
-    def assert_hidden_state_flow(self):
 
+    def assert_hidden_state_flow(self):
         h1, c1 = self.trace_hidden_states()
         h2, c2 = self.trace_hidden_states()
 
         for t in range(len(h1)):
-            assert torch.allclose(h1[t], h2[t], atol=1e-6), \
-                f"hxs mismatch at t={t}"
-            assert torch.allclose(c1[t], c2[t], atol=1e-6), \
-                f"cxs mismatch at t={t}"
+            assert torch.allclose(h1[t], h2[t], atol=1e-6), f"hxs mismatch at t={t}"
+            assert torch.allclose(c1[t], c2[t], atol=1e-6), f"cxs mismatch at t={t}"
 
     def trace_hidden_states(self, steps=20):
-
         self.reset()
 
         self.policy.eval()
@@ -995,7 +965,6 @@ class LSTMPPOTrainer:
         cxs_trace = []
 
         for _ in range(steps):
-
             policy_in = env_state.policy_input
             hxs_trace.append(policy_in.hxs.clone())
             cxs_trace.append(policy_in.cxs.clone())
@@ -1004,9 +973,22 @@ class LSTMPPOTrainer:
             env_state = self.env.step(actions)
 
         return hxs_trace, cxs_trace
-    
-    def validate_lstm_state_flow(self):
 
+    def validate_lstm_state_flow(self):
+        """
+        Validates the core recurrent invariant:
+
+        Given:
+            • identical (obs_t, h_t, c_t)
+        Then:
+            • forward() must produce identical (values_t, logp_t)
+
+        This test enforces:
+            • deterministic LSTM transitions
+            • correct hidden-state alignment
+            • correct PRE-STEP state capture
+            • correct replay of stored (h_t, c_t)
+        """
         print("=== LSTM State-Flow Validation ===")
 
         # -----------------------------------------------------
@@ -1021,13 +1003,19 @@ class LSTMPPOTrainer:
         torch.backends.cudnn.benchmark = False
 
         # -----------------------------------------------------
-        # 2. Collect rollout using *forward()*, not act()
+        # 2. Fresh rollout from a known initial LSTM state
         # -----------------------------------------------------
         self.buffer.reset()
+
+        # Fresh env reset
         env_state = self.env.reset(seed=self.state.cfg.trainer.seed)
 
-        # Use stored LSTM states if available
-        self.env.set_initial_lstm_states(self.buffer.get_last_lstm_states())
+        # Initialize LSTM state directly from the policy
+        with torch.no_grad():
+            h0, c0 = self.policy.initial_state(self.num_envs, self.device)
+
+        # Hand it to the env without going through the buffer
+        self.env.set_initial_lstm_states(LSTMStates(hxs=h0, cxs=c0))
 
         stored_values = []
         stored_logprobs = []
@@ -1038,7 +1026,6 @@ class LSTMPPOTrainer:
 
         with torch.no_grad():
             for _ in range(self.rollout_steps):
-
                 policy_in = env_state.policy_input
 
                 # IMPORTANT: use forward(), not act()
@@ -1051,7 +1038,7 @@ class LSTMPPOTrainer:
                 stored_obs.append(env_state.obs.clone())
                 stored_values.append(policy_out.values.clone())
                 stored_logprobs.append(logprobs.clone())
-                
+
                 # PRE-STEP hidden state: what was actually used
                 stored_hxs.append(policy_in.hxs.clone())
                 stored_cxs.append(policy_in.cxs.clone())
@@ -1060,11 +1047,11 @@ class LSTMPPOTrainer:
                 env_state = self.env.step(actions)
 
         # Stack rollout tensors
-        stored_obs = torch.stack(stored_obs, dim=0)          # (T, B, obs_dim)
-        stored_values = torch.stack(stored_values, dim=0)    # (T, B)
-        stored_logprobs = torch.stack(stored_logprobs, dim=0)# (T, B)
-        stored_hxs = torch.stack(stored_hxs, dim=0)          # (T, B, H)
-        stored_cxs = torch.stack(stored_cxs, dim=0)          # (T, B, H)
+        stored_obs = torch.stack(stored_obs, dim=0)  # (T, B, obs_dim)
+        stored_values = torch.stack(stored_values, dim=0)  # (T, B)
+        stored_logprobs = torch.stack(stored_logprobs, dim=0)  # (T, B)
+        stored_hxs = torch.stack(stored_hxs, dim=0)  # (T, B, H)
+        stored_cxs = torch.stack(stored_cxs, dim=0)  # (T, B, H)
         stored_actions = torch.stack(stored_actions, dim=0)  # (T, B)
 
         T, B, _ = stored_obs.shape
@@ -1078,11 +1065,10 @@ class LSTMPPOTrainer:
 
         with torch.no_grad():
             for t in range(T):
-
                 policy_in = PolicyInput(
-                    obs=stored_obs[t],      # (B, obs_dim)
-                    hxs=stored_hxs[t],      # (B, H)
-                    cxs=stored_cxs[t],      # (B, H)
+                    obs=stored_obs[t],  # (B, obs_dim)
+                    hxs=stored_hxs[t],  # (B, H)
+                    cxs=stored_cxs[t],  # (B, H)
                 )
 
                 policy_out = self.policy.forward(policy_in)
@@ -1103,14 +1089,11 @@ class LSTMPPOTrainer:
         val_diff = (values_rec - stored_values).abs()
         logp_diff = (logprobs_rec - stored_logprobs).abs()
 
-        print("max |values_rec - stored_values|   :",
-              val_diff.max().item())
-        
-        print("max |logprobs_rec - stored_logprobs|:",
-              logp_diff.max().item())
+        print("max |values_rec - stored_values|   :", val_diff.max().item())
+        print("max |logprobs_rec - stored_logprobs|:", logp_diff.max().item())
 
-        assert val_diff.max().item() < 1e-8, "Indeterminite state-flow"
-        assert logp_diff.max().item() < 1e-8, "Indeterminite state-flow"
+        assert val_diff.max().item() < 1e-8, "Indeterminate state-flow (values)"
+        assert logp_diff.max().item() < 1e-8, "Indeterminate state-flow (logprobs)"
 
         for t in range(min(T, 5)):
             print(f"\n[t = {t}]")
@@ -1121,31 +1104,26 @@ class LSTMPPOTrainer:
             print(" recomputed logp:", logprobs_rec[t, 0].item())
             print(" |diff|         :", logp_diff[t, 0].item())
 
+        # -----------------------------------------------------
+        # 5. Persist final LSTM state for future rollouts
+        # -----------------------------------------------------
+
+        # stored_hxs/cxs: (T, B, H)
+        final_hxs = stored_hxs[-1]
+        final_cxs = stored_cxs[-1]
+
+        # Ensure (B, H)
+        if final_hxs.dim() == 1:
+            final_hxs = final_hxs.unsqueeze(0)
+            final_cxs = final_cxs.unsqueeze(0)
+
+        self.buffer.last_hxs = final_hxs.detach()
+        self.buffer.last_cxs = final_cxs.detach()
+
         print("=== Validation complete ===")
-
-# https://realpython.com/python-mixin/
-from .trainer_renderers import (
-    render_ppo_table,
-    render_episode_table,
-    render_episode_trends,
-    render_policy_stability,
-    render_value_drift,
-    render_histogram,
-    render_env_timelines,
-)
-
-# Attach as methods
-LSTMPPOTrainer.render_ppo_table = render_ppo_table
-LSTMPPOTrainer.render_episode_table = render_episode_table
-LSTMPPOTrainer.render_episode_trends = render_episode_trends
-LSTMPPOTrainer.render_policy_stability = render_policy_stability
-LSTMPPOTrainer.render_value_drift = render_value_drift
-LSTMPPOTrainer.render_histogram = render_histogram
-LSTMPPOTrainer.render_env_timelines = render_env_timelines
 
 
 def train(total_updates=2000):
-
     cfg = Config()
 
     cfg = initialize_config(cfg)
@@ -1156,7 +1134,6 @@ def train(total_updates=2000):
 
 
 def validate():
-
     trainer = LSTMPPOTrainer.for_validation()
 
     trainer.assert_hidden_state_flow()
@@ -1166,7 +1143,6 @@ def validate():
 
 
 def test_rollout_replay_determinism():
-
     trainer = LSTMPPOTrainer.for_validation()
     trainer.collect_rollout()
     trainer.validate_lstm_state_flow()

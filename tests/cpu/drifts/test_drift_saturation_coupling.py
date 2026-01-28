@@ -4,6 +4,7 @@ invariant). This tests ensures drift and saturation metrics are coherent
 and interpretable.
 """
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
 

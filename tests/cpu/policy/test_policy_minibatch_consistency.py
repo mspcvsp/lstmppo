@@ -1,7 +1,9 @@
-import torch
-from lstmppo.policy import LSTMPPOPolicy
-from lstmppo.types import Config, PolicyInput, PolicyEvalInput
 import pytest
+import torch
+
+from lstmppo.policy import LSTMPPOPolicy
+from lstmppo.types import Config, PolicyEvalInput, PolicyInput
+
 pytestmark = pytest.mark.policy
 
 

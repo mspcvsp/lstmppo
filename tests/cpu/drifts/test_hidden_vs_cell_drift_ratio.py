@@ -2,10 +2,12 @@
 Ensures the cell state drifts more slowly than the hidden state
 (a known LSTMproperty).
 """
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
-import pytest
+
 pytestmark = pytest.mark.drift
 
 

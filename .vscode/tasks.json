@@ -1,0 +1,40 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Ruff Lint",
+            "type": "shell",
+            "command": "ruff check .",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Fix Ruff Issues",
+            "type": "shell",
+            "command": "ruff check --fix .",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Format Code (Ruff + Black)",
+            "type": "shell",
+            "command": "ruff format . && black .",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run CPU Tests",
+            "type": "shell",
+            "command": "pytest tests/cpu -q",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Drift Tests",
+            "type": "shell",
+            "command": "pytest -m drift -q",
+            "group": "test",
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,5 +1,51 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": [],
-    "python-envs.defaultPackageManager": "ms-python.python:conda"
+    // -----------------------------
+    // Python interpreter & analysis
+    // -----------------------------
+    "python.defaultInterpreterPath": "python",
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.useLibraryCodeForTypes": true,
+
+    // -----------------------------
+    // Ruff integration
+    // -----------------------------
+    "ruff.enable": true,
+    "ruff.format.enable": true,
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+
+    // Run Ruff linting on save
+    // "editor.codeActionsOnSave": {
+    //     "source.fixAll.ruff": true,
+    //     "source.organizeImports": true
+    // },
+
+    // -----------------------------
+    // Black compatibility (optional)
+    // -----------------------------
+    "python.formatting.provider": "none",
+
+    // -----------------------------
+    // Testing configuration
+    // -----------------------------
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+
+    // -----------------------------
+    // Editor ergonomics
+    // -----------------------------
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "editor.tabSize": 4,
+    "editor.rulers": [120],
+    "editor.wordWrap": "off",
+
+    // -----------------------------
+    // VS Code UI niceties
+    // -----------------------------
+    "workbench.colorTheme": "Default Dark Modern",
+    "breadcrumbs.enabled": true
 }

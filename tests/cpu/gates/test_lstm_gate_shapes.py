@@ -1,10 +1,12 @@
 """
 Ensures every gate tensor is (B, T, H) and stays batch‑first
 """
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
-import pytest
+
 pytestmark = pytest.mark.gates
 
 

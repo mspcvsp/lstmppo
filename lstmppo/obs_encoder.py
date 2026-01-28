@@ -1,13 +1,13 @@
 # obs_encoder.py
-import numpy as np
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
-
 
 # ============================================================
 # 1. Compute flat observation dimension from any Gym space
 # ============================================================
+
 
 def get_flat_obs_dim(space: gym.Space) -> int:
     """
@@ -34,8 +34,8 @@ def get_flat_obs_dim(space: gym.Space) -> int:
 # 2. Flatten raw observations into a numpy array (env wrapper)
 # ============================================================
 
-def flatten_obs(obs,
-                space: gym.Space) -> np.ndarray:
+
+def flatten_obs(obs, space: gym.Space) -> np.ndarray:
     """
     Convert an observation (possibly dict/tuple/nested) into a flat
     numpy array of shape (N, flat_obs_dim).
@@ -70,22 +70,22 @@ def flatten_obs(obs,
 # 3. PyTorch encoder module for the policy
 # ============================================================
 
+
 class FlatObsEncoder(nn.Module):
     """
     Simple identity encoder: input is already flat.
     """
+
     def __init__(self, flat_dim: int):
         super().__init__()
         self.output_size = flat_dim
 
-    def forward(self,
-                obs: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
         # obs: (B, flat_dim) or (B, T, flat_dim)
         return obs
 
 
-def build_obs_encoder(space: gym.Space,
-                      flat_dim: int) -> nn.Module:
+def build_obs_encoder(space: gym.Space | None, flat_dim: int) -> nn.Module:
     """
     Build a PyTorch encoder for the policy.
     Since the env wrapper already flattens observations, this is trivial.

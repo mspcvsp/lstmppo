@@ -2,8 +2,10 @@
 Ensures AR/TAR are scalars and always ≥ 0.
 """
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
+
 
 def test_ar_tar_sanity():
     cfg = Config()

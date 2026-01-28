@@ -1,41 +1,60 @@
 """
-Ensures drift grows smoothly with sequence length — no sudden jumps or 
-collapses. This test ensures drift doesn’t explode or collapse between 
+Ensures drift grows smoothly with sequence length — no sudden jumps or
+collapses. This test ensures drift doesn’t explode or collapse between
 adjacent horizons.
 """
+
+import pytest
 import torch
+
+from lstmppo.diagnostics.recurrent import compute_drift_sequence
 from lstmppo.policy import LSTMPPOPolicy
-from lstmppo.types import Config, PolicyInput
+from lstmppo.types import Config, initialize_config
 
 
+@pytest.mark.drift
 def test_drift_growth_smoothness():
+    """
+    Drift should grow smoothly on average across multiple sequences.
+    Individual sequences may fluctuate due to float32 noise, so we test
+    the averaged drift curve and its smoothness properties.
+    """
+
+    torch.manual_seed(0)
+
+    # Number of independent drift rollouts to average over
+    num_sequences = 32
+    T = 64  # sequence length
+
     cfg = Config()
-    cfg.env.flat_obs_dim = 4
-    cfg.env.action_dim = 3
-    cfg.trainer.debug_mode = True
+    cfg = initialize_config(cfg)
+
+    cfg.env.flat_obs_dim = 8
+    cfg.env.action_dim = 4
+    cfg.lstm.lstm_hidden_size = 32
 
     policy = LSTMPPOPolicy(cfg)
-    policy.eval()
 
-    B = 3
-    H = cfg.lstm.lstm_hidden_size
+    drifts = []
 
-    lengths = [20, 40, 60, 80]
-    num_samples = 20
+    for _ in range(num_sequences):
+        drift = compute_drift_sequence(policy, T=T)
+        assert drift.shape == (T,)
+        drifts.append(drift)
 
-    avg_drifts = []
+    # (N, T)
+    drift_tensor = torch.stack(drifts, dim=0)
 
-    for L in lengths:
-        drifts = []
-        for _ in range(num_samples):
-            obs = torch.randn(B, L, cfg.env.flat_obs_dim)
-            h0 = torch.zeros(B, H)
-            c0 = torch.zeros(B, H)
-            out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-            drifts.append(out.gates.h_gates.pow(2).mean())
-        avg_drifts.append(torch.stack(drifts).mean())
+    # Mean drift over sequences
+    mean_drift = drift_tensor.mean(dim=0)
 
-    eps = 1e-5
-    for i in range(len(avg_drifts) - 1):
-        assert avg_drifts[i+1] + eps >= avg_drifts[i] - eps
-        assert (avg_drifts[i+1] - avg_drifts[i]).abs() < 0.01
+    # 1. Mean drift should be non-decreasing within tolerance
+    diff = mean_drift[1:] - mean_drift[:-1]
+    assert torch.all(diff >= -1e-6), "Mean drift should not decrease beyond tiny tolerance"
+
+    # 2. Smoothness: no large jumps
+    assert diff.abs().max() < 1e-3, "Mean drift should change smoothly without large jumps"
+
+    # 3. Variance should remain bounded
+    var = drift_tensor.var(dim=0)
+    assert var.max() < 1e-3, "Drift variance across sequences should remain stable"

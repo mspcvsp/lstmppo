@@ -1,5 +1,5 @@
 """
-Instead of checking abs(gate) > 0.95, measure distance to the 
+Instead of checking abs(gate) > 0.95, measure distance to the
 saturation boundaries:
 
 For sigmoid gates (i, f, o):
@@ -20,10 +20,13 @@ Tanh saturation:
 ------------------
 sat = 1 - |gate| (Lower = more saturated)
 """
+
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
-import pytest
+
 pytestmark = pytest.mark.gates
 
 

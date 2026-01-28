@@ -9,18 +9,19 @@ This suite catches:
 - incorrect initialization/reset behavior
 - incorrect RolloutStep structure
 """
-import torch
-from lstmppo.buffer import RecurrentRolloutBuffer
-from lstmppo.types import Config
-from lstmppo.types import RolloutStep, LSTMGates
+
 import pytest
+import torch
+
+from lstmppo.buffer import RecurrentRolloutBuffer
+from lstmppo.types import Config, LSTMGates, RolloutStep
+
 pytestmark = pytest.mark.infra
 
 
 def _make_buffer():
-
     cfg = Config()
-    cfg.trainer.cuda = False   # ← force CPU for tests
+    cfg.trainer.cuda = False  # ← force CPU for tests
     device = torch.device("cpu")
 
     return cfg, device, RecurrentRolloutBuffer(cfg, device)
@@ -46,7 +47,6 @@ def test_buffer_initialization_shapes():
 
 
 def test_buffer_device_and_dtype():
-
     _, device, buf = _make_buffer()
 
     for t in [
@@ -64,7 +64,6 @@ def test_buffer_device_and_dtype():
 
 
 def test_add_increments_pointer_and_writes_data():
-    
     cfg, _, buf = _make_buffer()
 
     B = cfg.env.num_envs
@@ -82,8 +81,12 @@ def test_add_increments_pointer_and_writes_data():
     cxs = torch.randn(B, H)
 
     gates = LSTMGates(
-        i_gates=hxs, f_gates=hxs, g_gates=hxs,
-        o_gates=hxs, c_gates=hxs, h_gates=hxs,
+        i_gates=hxs,
+        f_gates=hxs,
+        g_gates=hxs,
+        o_gates=hxs,
+        c_gates=hxs,
+        h_gates=hxs,
     )
 
     step = RolloutStep(
@@ -107,7 +110,6 @@ def test_add_increments_pointer_and_writes_data():
 
 
 def test_fill_buffer_reaches_full_pointer():
-
     cfg, _, buf = _make_buffer()
 
     B = cfg.env.num_envs
@@ -115,7 +117,6 @@ def test_fill_buffer_reaches_full_pointer():
     H = cfg.lstm.lstm_hidden_size
 
     for _ in range(cfg.trainer.rollout_steps):
-
         obs = torch.randn(B, D)
         act = torch.randn(B)
         rew = torch.randn(B)
@@ -127,8 +128,12 @@ def test_fill_buffer_reaches_full_pointer():
         cxs = torch.randn(B, H)
 
         gates = LSTMGates(
-            i_gates=hxs, f_gates=hxs, g_gates=hxs,
-            o_gates=hxs, c_gates=hxs, h_gates=hxs,
+            i_gates=hxs,
+            f_gates=hxs,
+            g_gates=hxs,
+            o_gates=hxs,
+            c_gates=hxs,
+            h_gates=hxs,
         )
 
         step = RolloutStep(
@@ -150,13 +155,11 @@ def test_fill_buffer_reaches_full_pointer():
 
 
 def test_mask_logic_cpu():
-
     _, _, buf = _make_buffer()
 
     # manually set termination/truncation
     buf.terminated[0] = True
     buf.truncated[1] = True
-    mask = buf.mask
 
     # mask is (T, B) not scalar
     assert torch.all(buf.mask[0] == 0)
@@ -165,7 +168,6 @@ def test_mask_logic_cpu():
 
 
 def test_reset_clears_state():
-    
     _, _, buf = _make_buffer()
 
     buf.terminated[0] = True
@@ -196,8 +198,12 @@ def test_rollout_step_structure():
     hxs = torch.randn(B, H)
     cxs = torch.randn(B, H)
     gates = LSTMGates(
-        i_gates=hxs, f_gates=hxs, g_gates=hxs,
-        o_gates=hxs, c_gates=hxs, h_gates=hxs,
+        i_gates=hxs,
+        f_gates=hxs,
+        g_gates=hxs,
+        o_gates=hxs,
+        c_gates=hxs,
+        h_gates=hxs,
     )
 
     step = RolloutStep(

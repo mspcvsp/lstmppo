@@ -1,9 +1,9 @@
 # rl_dashboard.py
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
-from textual.widgets import Static
 from textual.reactive import reactive
-from rich.text import Text
+from textual.widgets import Static
 
 
 class MetricPanel(Static):

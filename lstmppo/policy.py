@@ -1,20 +1,14 @@
 import torch
 import torch.nn as nn
-from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
-from .types import Config, PolicyInput, PolicyOutput, LSTMCoreOutput
-from .types import PolicyEvalInput, PolicyEvalOutput, LSTMGates
+from torch.distributions.categorical import Categorical
+
 from .obs_encoder import build_obs_encoder
+from .types import Config, LSTMCoreOutput, LSTMGates, PolicyEvalInput, PolicyEvalOutput, PolicyInput, PolicyOutput
 
 
 class GateLSTMCell(nn.Module):
-
-    def __init__(self,
-                 input_size,
-                 hidden_size,
-                 dropconnect_p,
-                 **kwargs):
-        
+    def __init__(self, input_size, hidden_size, dropconnect_p, **kwargs):
         super().__init__()
 
         self.input_size = input_size
@@ -23,12 +17,10 @@ class GateLSTMCell(nn.Module):
         self.debug_mode = kwargs.get("debug_mode", False)
 
         # Input weights
-        self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size,
-                                                   input_size))
+        self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size, input_size))
 
         # Recurrent weights (raw)
-        self.weight_hh_raw = nn.Parameter(torch.Tensor(4 * hidden_size,
-                                                       hidden_size))
+        self.weight_hh_raw = nn.Parameter(torch.Tensor(4 * hidden_size, hidden_size))
 
         # Biases
         if kwargs.get("bias", True):
@@ -42,60 +34,56 @@ class GateLSTMCell(nn.Module):
         self.reset_parameters()
 
         self.register_parameter("weight_hh_raw", self.weight_hh_raw)
-        
-         # Temporary tensor, NOT a parameter
+
+        # Temporary tensor, NOT a parameter
         self.weight_hh = None
 
     def reset_parameters(self):
-
         if self.weight_ih.numel() > 0:
             nn.init.xavier_uniform_(self.weight_ih)
-        
+
         if self.weight_hh_raw.numel() > 0:
             nn.init.orthogonal_(self.weight_hh_raw)
 
         if self.bias_ih is not None and self.bias_ih.numel() > 0:
             nn.init.zeros_(self.bias_ih)
-        
+
             # Forget gate bias trick
             H = self.hidden_size
-            self.bias_ih.data[H:2*H] = 1.0
+            self.bias_ih.data[H : 2 * H] = 1.0
 
         if self.bias_hh is not None and self.bias_hh.numel() > 0:
             nn.init.zeros_(self.bias_hh)
 
     def _apply_dropconnect(self):
-
         if self.training and not self.debug_mode:
-    
             mask = torch.ones_like(self.weight_hh_raw)
-    
-            mask = F.dropout(mask,
-                             p=self.dropconnect_p,
-                             training=True)
+
+            mask = F.dropout(mask, p=self.dropconnect_p, training=True)
             self.weight_hh = self.weight_hh_raw * mask
 
         else:
             self.weight_hh = self.weight_hh_raw
 
     def forward(self, x, hx):
-
         h, c = hx  # each (B, H)
 
         self._apply_dropconnect()
 
-        gates = (
-            x @ self.weight_ih.t()
-            + h @ self.weight_hh.t()
-            + self.bias_ih
-            + self.bias_hh
-        )
+        assert isinstance(x, torch.Tensor)
+        assert isinstance(h, torch.Tensor)
+        assert isinstance(self.weight_ih, torch.Tensor)
+        assert isinstance(self.weight_hh, torch.Tensor)
+        assert isinstance(self.bias_ih, torch.Tensor)
+        assert isinstance(self.bias_hh, torch.Tensor)
+
+        gates = x @ self.weight_ih.t() + h @ self.weight_hh.t() + self.bias_ih + self.bias_hh
 
         H = self.hidden_size
         i = torch.sigmoid(gates[:, :H])
-        f = torch.sigmoid(gates[:, H:2*H])
-        g = torch.tanh(gates[:, 2*H:3*H])
-        o = torch.sigmoid(gates[:, 3*H:4*H])
+        f = torch.sigmoid(gates[:, H : 2 * H])
+        g = torch.tanh(gates[:, 2 * H : 3 * H])
+        o = torch.sigmoid(gates[:, 3 * H : 4 * H])
 
         new_c = f * c + i * g
         new_h = o * torch.tanh(new_c)
@@ -103,26 +91,45 @@ class GateLSTMCell(nn.Module):
         return new_h, new_c, (i, f, g, o)
 
 
+class LSTMCore(nn.Module):
+    def __init__(self, cell: GateLSTMCell):
+        super().__init__()
+        self.cell = cell
+        self.hidden_size = cell.hidden_size
+
+    def initial_state(self, batch_size: int, device):
+        h = torch.zeros(batch_size, self.hidden_size, device=device)
+        c = torch.zeros(batch_size, self.hidden_size, device=device)
+        return h, c
+
+    def forward(self, x, state):
+        # MUST return (h, c, gates)
+        return self.cell(x, state)
+
+
 class LSTMPPOPolicy(nn.Module):
-
-    def __init__(self,
-                 cfg: Config):
-
+    def __init__(self, cfg: Config):
         super().__init__()
 
         self.ar_coef = cfg.lstm.lstm_ar_coef
         self.tar_coef = cfg.lstm.lstm_tar_coef
 
-        self.obs_encoder = build_obs_encoder(cfg.env.obs_space,
-                                             cfg.obs_dim)
+        # If obs_space is None, rely on flat_obs_dim (tests do this intentionally)
+        if cfg.env.flat_obs_dim == 0:
+            self.obs_dim = 0
+        else:
+            self.obs_dim = cfg.env.flat_obs_dim
+
+        obs_space = cfg.env.obs_space
+        self.obs_encoder = build_obs_encoder(obs_space, self.obs_dim)
 
         # --- SiLU encoder ---
         if cfg.env.flat_obs_dim == 0:
             """
-            When obs_dim == 0, the environment provides no observation 
-            features. But the LSTM still needs an input vector of size 
+            When obs_dim == 0, the environment provides no observation
+            features. But the LSTM still needs an input vector of size
             enc_hidden_size. So the correct behavior is:
-            
+
             - Treat the encoder as a constant zero‑feature generator
             - Let the LSTM operate purely on its recurrent state
             - Preserve shape invariants everywhere
@@ -132,18 +139,15 @@ class LSTMPPOPolicy(nn.Module):
             self.encoder = ZeroFeatureEncoder(cfg.lstm.enc_hidden_size)
         else:
             self.encoder = nn.Sequential(
-                nn.Linear(cfg.obs_dim,
-                        cfg.lstm.enc_hidden_size),
+                nn.Linear(cfg.obs_dim, cfg.lstm.enc_hidden_size),
                 nn.SiLU(),
-                nn.Linear(cfg.lstm.enc_hidden_size,
-                        cfg.lstm.enc_hidden_size),
+                nn.Linear(cfg.lstm.enc_hidden_size, cfg.lstm.enc_hidden_size),
                 nn.SiLU(),
             )
 
         if isinstance(self.encoder, nn.Sequential):
             for m in self.encoder:
                 if isinstance(m, nn.Linear):
-
                     if m.weight.numel() > 0:
                         nn.init.xavier_uniform_(m.weight)
 
@@ -152,11 +156,14 @@ class LSTMPPOPolicy(nn.Module):
 
         # --- LN-LSTM with DropConnect ---
         self.lstm_cell = GateLSTMCell(
-            input_size=cfg.lstm.enc_hidden_size,    
+            input_size=cfg.lstm.enc_hidden_size,
             hidden_size=cfg.lstm.lstm_hidden_size,
             dropconnect_p=cfg.lstm.dropconnect_p,
-            debug_mode=cfg.trainer.debug_mode
+            debug_mode=cfg.trainer.debug_mode,
         )
+
+        # Wrap it so diagnostics can call policy.lstm.initial_state(...)
+        self.lstm = LSTMCore(self.lstm_cell)
 
         self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
 
@@ -164,13 +171,11 @@ class LSTMPPOPolicy(nn.Module):
         if cfg.env.action_dim == 0:
             self.actor = nn.Identity()
         else:
-            self.actor = nn.Linear(cfg.lstm.lstm_hidden_size,
-                                   cfg.env.action_dim)
+            self.actor = nn.Linear(cfg.lstm.lstm_hidden_size, cfg.env.action_dim)
 
         self.critic = nn.Linear(cfg.lstm.lstm_hidden_size, 1)
 
         if isinstance(self.actor, nn.Linear):
-
             if self.actor.weight.numel() > 0:
                 nn.init.xavier_uniform_(self.actor.weight)
 
@@ -179,9 +184,12 @@ class LSTMPPOPolicy(nn.Module):
 
         if self.critic.weight.numel() > 0:
             nn.init.xavier_uniform_(self.critic.weight)
-            
+
         if self.critic.bias.numel() > 0:
             nn.init.zeros_(self.critic.bias)
+
+    def initial_state(self, batch_size: int, device):
+        return self.lstm.initial_state(batch_size, device)
 
     # ---------------------------------------------------------
     # Core forward pass (returns activations + AR/TAR)
@@ -216,10 +224,10 @@ class LSTMPPOPolicy(nn.Module):
         obs_flat = self.obs_encoder(x)  # x may be dict/tuple/box
 
         if obs_flat.dim() == 2:
-            obs_flat = obs_flat.unsqueeze(1) # (B,1,F)
+            obs_flat = obs_flat.unsqueeze(1)  # (B,1,F)
 
         # (B,T,H) for both normal and zero encoder
-        enc = self.encoder(obs_flat) 
+        enc = self.encoder(obs_flat)
 
         # LSTM expects (B, T, F) with batch_first=True
         B, T, F = enc.shape
@@ -237,12 +245,12 @@ class LSTMPPOPolicy(nn.Module):
         h_list = []
 
         for t in range(T):
-            h, c, gates = self.lstm_cell(enc[:, t, :], (h, c))
+            h, c, gates = self.lstm(enc[:, t, :], (h, c))
             outputs.append(h.unsqueeze(1))
             gate_list.append(gates)
 
             # store per‑timestep hidden and cell states [B, H]
-            h_list.append(h) 
+            h_list.append(h)
             c_list.append(c)
 
         out = torch.cat(outputs, dim=1)  # (B, T, H)
@@ -262,26 +270,25 @@ class LSTMPPOPolicy(nn.Module):
 
         # --- Temporal Activation Regularization (TAR) ---
         if out.size(1) > 1:
-            tar_loss = (
-                (out[:, 1:, :] - out[:, :-1, :]).pow(2).mean()
-                * self.tar_coef
-            )
+            tar_loss = (out[:, 1:, :] - out[:, :-1, :]).pow(2).mean() * self.tar_coef
         else:
             tar_loss = torch.tensor(0.0, device=out.device)
-        
-        return LSTMCoreOutput(out=out,
-                              h=h,
-                              c=c,
-                              ar_loss=ar_loss,
-                              tar_loss=tar_loss,
-                              gates=LSTMGates(
-                                  i_gates=i_gates,
-                                  f_gates=f_gates,
-                                  g_gates=g_gates,
-                                  o_gates=o_gates,
-                                  c_gates=c_gates,
-                                  h_gates=h_gates,
-                              ))
+
+        return LSTMCoreOutput(
+            out=out,
+            h=h,
+            c=c,
+            ar_loss=ar_loss,
+            tar_loss=tar_loss,
+            gates=LSTMGates(
+                i_gates=i_gates,
+                f_gates=f_gates,
+                g_gates=g_gates,
+                o_gates=o_gates,
+                c_gates=c_gates,
+                h_gates=h_gates,
+            ),
+        )
 
     # ---------------------------------------------------------
     # Dataclass-based forward
@@ -292,7 +299,7 @@ class LSTMPPOPolicy(nn.Module):
         inp.hxs, inp.cxs: (B, H)
         """
         core_out = self._forward_core(inp.obs, inp.hxs, inp.cxs)
-        
+
         # core_out is ALWAYS (B, T, H)
         B, T, H = core_out.out.shape
         flat = core_out.out.reshape(B * T, H)
@@ -300,9 +307,9 @@ class LSTMPPOPolicy(nn.Module):
         if isinstance(self.actor, nn.Identity):
             logits = torch.zeros(B, T, 0, device=flat.device)
         else:
-            logits = self.actor(flat).view(B, T, -1)   # (B, T, A)
-        
-        values = self.critic(flat).view(B, T)      # (B, T)
+            logits = self.actor(flat).view(B, T, -1)  # (B, T, A)
+
+        values = self.critic(flat).view(B, T)  # (B, T)
 
         # If single-step, squeeze back to (B, A) and (B,)
         if T == 1:
@@ -318,12 +325,28 @@ class LSTMPPOPolicy(nn.Module):
             new_cxs=core_out.c,
             ar_loss=core_out.ar_loss,
             tar_loss=core_out.tar_loss,
-            gates=core_out.gates
+            gates=core_out.gates,
         )
 
-    def act(self,
-            policy_input: PolicyInput):
+    def cell(self, x, state):
+        # x: (B, H)
+        # state: (h, c)
+        h, c = state
+        gates = self.lstm_cell(x, (h, c))  # or however your cell is implemented
+        return gates  # must return (h_new, c_new)
 
+    def forward_step(self, obs, h, c):
+        """
+        Trainer requires step‑mode LSTM evaluation. LSTM-PPO must return the initial hidden state for each environment
+        atthe start of rollout, and the final hidden state after each step.
+        """
+        enc = self.encoder(self.obs_encoder(obs))  # (B, H)
+        h, c, gates = self.lstm(enc, (h, c))
+        logits = self.actor(h)
+        value = self.critic(h)
+        return logits, value, h, c, gates
+
+    def act(self, policy_input: PolicyInput):
         policy_output = self.forward(policy_input)
 
         dist = Categorical(logits=policy_output.logits)
@@ -332,8 +355,7 @@ class LSTMPPOPolicy(nn.Module):
 
         return actions, logprobs, policy_output
 
-    def evaluate_actions_sequence(self,
-                                  inp: PolicyEvalInput) -> PolicyEvalOutput:
+    def evaluate_actions_sequence(self, inp: PolicyEvalInput) -> PolicyEvalOutput:
         """
         Fully sequence-aware PPO evaluation.
 
@@ -348,9 +370,9 @@ class LSTMPPOPolicy(nn.Module):
         obs_bt = inp.obs.transpose(0, 1)  # (B, T, obs_dim)
 
         policy_input = PolicyInput(
-            obs=obs_bt,    # (B, T, obs_dim)
-            hxs=inp.hxs,   # (B, H)
-            cxs=inp.cxs,   # (B, H)
+            obs=obs_bt,  # (B, T, obs_dim)
+            hxs=inp.hxs,  # (B, H)
+            cxs=inp.cxs,  # (B, H)
         )
 
         # Forward through encoder + LSTM + heads
@@ -364,21 +386,19 @@ class LSTMPPOPolicy(nn.Module):
 
         # Actions: ensure shape (T, B)
         if inp.actions.dim() == 3 and inp.actions.size(-1) == 1:
-            actions = inp.actions.squeeze(-1)          # (T, B)
+            actions = inp.actions.squeeze(-1)  # (T, B)
         else:
-            actions = inp.actions                      # (T, B)
+            actions = inp.actions  # (T, B)
 
         dist = self._dist_from_logits(logits)
 
-        assert logits.dim() == 3,\
-            f"logits must be (T,B,A), got {logits.shape}"
-        
-        assert actions.shape == (T, B),\
-            f"actions must be (T,B), got {actions.shape}"
+        assert logits.dim() == 3, f"logits must be (T,B,A), got {logits.shape}"
+
+        assert actions.shape == (T, B), f"actions must be (T,B), got {actions.shape}"
 
         # Correct shape: (T, B)
-        logprobs = dist.log_prob(actions)     # (T, B)
-        entropy = dist.entropy()              # (T, B)
+        logprobs = dist.log_prob(actions)  # (T, B)
+        entropy = dist.entropy()  # (T, B)
 
         """
         _forward_core returns batch‑first tensors shaped (B, T, H).
@@ -432,19 +452,17 @@ class LSTMPPOPolicy(nn.Module):
         - tar_loss - LSTM temporal activation regularization
         """
         return PolicyEvalOutput(
-            values=values,          # (T, B)
-            logprobs=logprobs,      # (T, B)
-            entropy=entropy,        # (T, B)
-            new_hxs=new_hxs,        # (T, B, H)
-            new_cxs=new_cxs,        # (T, B, H)
+            values=values,  # (T, B)
+            logprobs=logprobs,  # (T, B)
+            entropy=entropy,  # (T, B)
+            new_hxs=new_hxs,  # (T, B, H)
+            new_cxs=new_cxs,  # (T, B, H)
             gates=gates,
             ar_loss=policy_output.ar_loss,
             tar_loss=policy_output.tar_loss,
         )
-    
-    def evaluate_actions(self,
-                         out,
-                         actions):
+
+    def evaluate_actions(self, out, actions):
         """
         Evaluate log-prob and entropy for a single timestep.
 
@@ -460,45 +478,34 @@ class LSTMPPOPolicy(nn.Module):
 
         dist = self._dist_from_logits(out.logits)  # (B, A)
 
-        logprobs = dist.log_prob(actions)          # (B,)
-        entropy = dist.entropy()                   # (B,)
+        logprobs = dist.log_prob(actions)  # (B,)
+        entropy = dist.entropy()  # (B,)
 
         return PolicyEvalOutput(
-            values=out.values,     # (B,)
-            logprobs=logprobs,     # (B,)
-            entropy=entropy,       # (B,)
-            new_hxs=out.new_hxs,   # (B, H)
-            new_cxs=out.new_cxs,   # (B, H)
-            gates=out.gates,       # (B, H) or (B, 1, H)
+            values=out.values,  # (B,)
+            logprobs=logprobs,  # (B,)
+            entropy=entropy,  # (B,)
+            new_hxs=out.new_hxs,  # (B, H)
+            new_cxs=out.new_cxs,  # (B, H)
+            gates=out.gates,  # (B, H) or (B, 1, H)
             ar_loss=out.ar_loss,
             tar_loss=out.tar_loss,
         )
 
-    def _dist_from_logits(self,
-                          logits):
-
+    def _dist_from_logits(self, logits):
         return Categorical(logits=logits)
 
 
-
 class ZeroFeatureEncoder(nn.Module):
-
     def __init__(self, out_dim):
         super().__init__()
         self.out_dim = out_dim
 
-    def forward(self,
-                obs):
-        
+    def forward(self, obs):
         # obs: (B, 0) or (B, T, 0)
         if obs.dim() == 2:
             B = obs.size(0)
-            return torch.zeros(B,
-                               self.out_dim,
-                               device=obs.device)      # (B, H)
+            return torch.zeros(B, self.out_dim, device=obs.device)  # (B, H)
         else:
             B, T, _ = obs.shape
-            return torch.zeros(B,
-                               T,
-                               self.out_dim,
-                               device=obs.device)   # (B, T, H)
+            return torch.zeros(B, T, self.out_dim, device=obs.device)  # (B, T, H)

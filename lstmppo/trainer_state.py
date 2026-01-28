@@ -1,38 +1,41 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .types import LSTMUnitPrev
+
 import io
 import json
-import torch
-from types import SimpleNamespace
+from dataclasses import dataclass, field
 from pathlib import Path
-from rich.console import Console
-from rich.panel import Panel
+
+import torch
 from rich.layout import Layout
-from rich.text import Text
-
-
+from rich.panel import Panel
 from torch.utils.tensorboard import SummaryWriter
-from .types import Config, MetricsHistory, PolicyUpdateInfo
-from .types import EpisodeStats, Metrics, MetricsHistory
-from .learning_sch import EntropySchdeduler, LearningRateScheduler
+
 from .buffer import RecurrentRolloutBuffer
+from .learning_sch import EntropySchdeduler, LearningRateScheduler
+from .types import Config, EpisodeStats, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
+
 
 @dataclass
 class TrainerState:
+    prev_lstm_unit_metrics: LSTMUnitPrev | None = None
     update_idx: int = 0
     lr: float = 0.0
     entropy_coef: float = 0.0
     clip_range: float = 0.0
     target_kl: float = 0.0
     early_stopping_kl: float = 0.0
-    writer: SummaryWriter | None = None
-    jsonl_file: str = ""
+    metrics: Metrics = field(default_factory=Metrics)
+    writer: SummaryWriter = field(init=False)
+    jsonl_file: Path | str = ""
     jsonl_fp: io.TextIOWrapper | None = None
     validation_mode: bool = False
 
-    def __init__(self,
-                 cfg: Config,
-                 validation_mode: bool = False):
-
+    def __init__(self, cfg: Config, validation_mode: bool = False):
         self.cfg = cfg
         self.validation_mode = validation_mode
         self.metrics = Metrics()
@@ -43,13 +46,11 @@ class TrainerState:
         self.prev_lstm_unit_metrics = None
 
         if self.validation_mode:
-
             self.cfg.env.num_envs = 1
             self.cfg.trainer.mini_batch_envs = 1
-            
-            self.cfg.trainer.tbptt_chunk_len =\
-                self.cfg.trainer.rollout_steps  # full sequence
-            
+
+            self.cfg.trainer.tbptt_chunk_len = self.cfg.trainer.rollout_steps  # full sequence
+
             self.cfg.sched.anneal_entropy_flag = False
             self.cfg.sched.start_entropy_coef = 0.0
             self.cfg.sched.end_entropy_coef = 0.0
@@ -59,15 +60,13 @@ class TrainerState:
 
         self.clip_range = self.cfg.ppo.initial_clip_range
         self.target_kl = self.cfg.ppo.target_kl
- 
-        self.early_stopping_kl =\
-            self.cfg.ppo.target_kl * cfg.ppo.early_stopping_kl_factor
+
+        self.early_stopping_kl = self.cfg.ppo.target_kl * cfg.ppo.early_stopping_kl_factor
 
         self._entropy_sch = EntropySchdeduler(self.cfg)
         self._lr_sch = LearningRateScheduler(self.cfg)
 
-        tb_logdir = Path(*[self.cfg.log.tb_logdir,
-                           self.cfg.log.run_name])
+        tb_logdir = Path(*[self.cfg.log.tb_logdir, self.cfg.log.run_name])
 
         self.writer = SummaryWriter(log_dir=tb_logdir)
 
@@ -75,12 +74,9 @@ class TrainerState:
 
         jsonl_path = Path(self.cfg.log.jsonl_path)
         if jsonl_path.exists() is False:
+            jsonl_path.mkdir(parents=True, exist_ok=True)
 
-            jsonl_path.mkdir(parents=True,
-                             exist_ok=True)
-
-        self.jsonl_file =\
-            jsonl_path.joinpath(self.cfg.log.run_name + ".json")
+        self.jsonl_file = jsonl_path.joinpath(self.cfg.log.run_name + ".json")
 
         self.prev_h_norm = None
         self.prev_c_norm = None
@@ -92,20 +88,14 @@ class TrainerState:
         self.avg_ep_len_ema: float = 0.0
         self.avg_ep_returns_ema: float = 0.0
 
-        self.history = MetricsHistory(
-            max_len=self.cfg.trainer.max_sparkline_history
-        )
+        self.history = MetricsHistory(max_len=self.cfg.trainer.max_sparkline_history)
 
-    def reset(self,
-              total_updates: int):
-
+    def reset(self, total_updates: int):
         self.update_idx = 0
         self._entropy_sch.reset(total_updates)
         self._lr_sch.reset(total_updates)
 
-    def update_stats(self,
-                     upd: PolicyUpdateInfo):
-
+    def update_stats(self, upd: PolicyUpdateInfo):
         """
         LSTM hidden‑state norm drift is one of the most powerful
         diagnostics for recurrent PPO. It tells you whether your LSTM is:
@@ -128,36 +118,25 @@ class TrainerState:
 
         self.history.update(upd, self.metrics)
 
-    def update_episode_stats(self,
-                             ep_stats: EpisodeStats):
-
+    def update_episode_stats(self, ep_stats: EpisodeStats):
         self.metrics.update_episode_stats(ep_stats)
-        
-        # ---- Exponential Moving Average 
+
+        # ---- Exponential Moving Average
         ema_alpha = self.cfg.trainer.avg_ep_stat_ema_alpha
 
-        self.avg_ep_len_ema = (
-            ema_alpha * self.avg_ep_len_ema +
-            (1.0 - ema_alpha) * ep_stats.avg_ep_len
-        )
+        self.avg_ep_len_ema = ema_alpha * self.avg_ep_len_ema + (1.0 - ema_alpha) * ep_stats.avg_ep_len
 
-        self.avg_ep_returns_ema = (
-            ema_alpha * self.avg_ep_returns_ema +
-            (1.0 - ema_alpha) * ep_stats.avg_ep_returns
-        )
+        self.avg_ep_returns_ema = ema_alpha * self.avg_ep_returns_ema + (1.0 - ema_alpha) * ep_stats.avg_ep_returns
 
         # ---- Sparkline history tracking ----
         self.history.push("ep_len", ep_stats.avg_ep_len)
         self.history.push("ep_return", ep_stats.avg_ep_returns)
 
     def compute_average_metrics(self):
-
         if self.metrics.steps > 0:
             self.metrics.normalize()
 
-    def compute_explained_variance(self,
-                                   buffer: RecurrentRolloutBuffer):
-
+    def compute_explained_variance(self, buffer: RecurrentRolloutBuffer):
         #  ----- Compute EV over the entire rollout  -----
         all_values = buffer.values.view(-1)
         all_returns = buffer.returns.view(-1)
@@ -167,21 +146,15 @@ class TrainerState:
         if valid.sum() == 0:
             setattr(self.metrics, "explained_var", 0.0)
         else:
-            ev = explained_variance(all_values[valid],
-                                    all_returns[valid])
+            ev = explained_variance(all_values[valid], all_returns[valid])
 
             setattr(self.metrics, "explained_var", ev.item())
 
-        self.history.push("explained_var",
-                          self.metrics.explained_var)
+        self.history.push("explained_var", self.metrics.explained_var)
 
     @property
     def global_step(self) -> int:
-        return (
-            self.update_idx *
-            self.cfg.trainer.rollout_steps *
-            self.cfg.env.num_envs
-        )
+        return self.update_idx * self.cfg.trainer.rollout_steps * self.cfg.env.num_envs
 
     def kl_watchdog(self):
         """
@@ -212,43 +185,36 @@ class TrainerState:
             setattr(self.metrics, "kl_watchdog_triggered", 0)
 
         # Clamp clip range to safe bounds
-        self.clip_range = float(
-            torch.clamp(torch.tensor(self.clip_range),
-                        0.05,
-                        0.3)
-        )
+        self.clip_range = float(torch.clamp(torch.tensor(self.clip_range), 0.05, 0.3))
 
     def log_metrics(self):
-
         record = self.metrics.to_dict()
+        assert self.writer is not None, "TensorBoard writer not initialized."
 
         for key, value in record.items():
-
-            self.writer.add_scalar(key,
-                                   value,
-                                   self.global_step)
+            self.writer.add_scalar(key, value, self.global_step)
 
         record["update"] = self.update_idx
         record["lr"] = float(self.lr)
         record["entropy_coef"] = float(self.entropy_coef)
         record["clip_range"] = float(self.clip_range)
 
-        self.jsonl_fp.write(json.dumps(record) + "\n")
-        self.jsonl_fp.flush()
+        fp = self.jsonl_fp
+        if fp is not None:
+            fp.write(json.dumps(record) + "\n")
+            fp.flush()
 
     def init_stats(self):
         self.metrics.initialize()
 
-    def apply_schedules(self,
-                        optimizer: torch.optim.Adam):
-
+    def apply_schedules(self, optimizer: torch.optim.Adam):
         """
-        Instead of decaying entropy on a fixed schedule, adaptive entropy 
+        Instead of decaying entropy on a fixed schedule, adaptive entropy
         adjusts itself based on KL divergence:
 
         • 	If KL is too low → policy isn’t changing → increase entropy
         (more exploration)
-        
+
         • 	If KL is too high → policy is changing too fast → decrease
         entropy (more caution)
 
@@ -256,7 +222,6 @@ class TrainerState:
         like Position‑Only CartPole.
         """
         if self.cfg.sched.anneal_entropy_flag:
-
             # Start with scheduled value
             scheduled = self._entropy_sch(self.update_idx)
             old_entropy = self.entropy_coef
@@ -272,99 +237,68 @@ class TrainerState:
             target = float(self.target_kl)
 
             if self.update_idx > 10:  # warmup
-                
                 if kl < 0.5 * target:
-
                     self.entropy_coef *= 1.02
                     setattr(self.metrics, "entropy_adjusted", 1)
                     setattr(self.metrics, "entropy_up", 1)
 
                 elif kl > 2.0 * target:
-    
                     self.entropy_coef *= 0.98
                     setattr(self.metrics, "entropy_adjusted", 1)
                     setattr(self.metrics, "entropy_down", 1)
 
             # Clamp entropy coefficient
-            self.entropy_coef = float(
-                torch.clamp(torch.tensor(self.entropy_coef),
-                            1e-4,
-                            1.0)
-            )
+            self.entropy_coef = float(torch.clamp(torch.tensor(self.entropy_coef), 1e-4, 1.0))
 
             # Log the delta (optional but very useful)
-            setattr(self.metrics,
-                    "entropy_delta",
-                    float(self.entropy_coef - old_entropy))
+            setattr(self.metrics, "entropy_delta", float(self.entropy_coef - old_entropy))
 
-            setattr(self.metrics,
-                    "entropy_scheduled",
-                    float(scheduled))
+            setattr(self.metrics, "entropy_scheduled", float(scheduled))
         else:
             self.entropy_coef = self.cfg.sched.start_entropy_coef
-            
-            setattr(self.metrics,
-                    "entropy_scheduled",
-                    self.entropy_coef)
+
+            setattr(self.metrics, "entropy_scheduled", self.entropy_coef)
 
         self.lr = self._lr_sch(self.update_idx)
 
-        self.writer.add_scalar("entropy_coef",
-                                self.entropy_coef,
-                                self.update_idx)
-
-        self.writer.add_scalar("learning_rate",
-                               self.lr,
-                               self.update_idx)
+        self.writer.add_scalar("entropy_coef", self.entropy_coef, self.update_idx)
+        self.writer.add_scalar("learning_rate", self.lr, self.update_idx)
 
         for param_group in optimizer.param_groups:
             param_group["lr"] = self.lr
 
     def adapt_clip_range(self):
-
         if self.cfg.trainer.debug_mode is False:
-
             avg_kl = self.metrics.approx_kl
 
             if avg_kl > 2.0 * self.cfg.ppo.target_kl:
-            
                 self.clip_range *= 0.9
-            
+
             elif avg_kl < 0.5 * self.cfg.ppo.target_kl:
-            
                 self.clip_range *= 1.05
 
-            self.clip_range = float(torch.clamp(
-                torch.tensor(self.clip_range),
-                0.05,
-                0.3
-            ))
+            self.clip_range = float(torch.clamp(torch.tensor(self.clip_range), 0.05, 0.3))
 
     @property
     def warmup_complete(self):
         # Use the same warmup_updates as your LR scheduler
+        assert self._lr_sch.warmup_updates is not None, (
+            "LearningRateScheduler not initialized. Call reset() before using."
+        )
         return self.update_idx >= self._lr_sch.warmup_updates
-        
+
     def render_dashboard(self):
-        
-        ppo_text = self.metrics.render_ppo_metrics(self.lr,
-                                                 self.entropy_coef,
-                                                 self.clip_range)
+        ppo_text = self.metrics.render_ppo_metrics(self.lr, self.entropy_coef, self.clip_range)
 
         self.history.render_ppo_history(ppo_text)
 
-        ppo_panel = Panel(ppo_text,
-                          title="PPO Metrics",
-                          border_style="bright_blue")
+        ppo_panel = Panel(ppo_text, title="PPO Metrics", border_style="bright_blue")
 
-        ep_text = self.metrics.render_episode_stats(self.avg_ep_len_ema,
-                                                    self.avg_ep_returns_ema)
+        ep_text = self.metrics.render_episode_stats(self.avg_ep_len_ema, self.avg_ep_returns_ema)
 
         self.history.render_episode_history(ep_text)
 
-        ep_panel = Panel(ep_text,
-                         title="Episode Stats",
-                         border_style="bright_green")
+        ep_panel = Panel(ep_text, title="Episode Stats", border_style="bright_green")
 
         # Layout
         layout = Layout()
@@ -376,12 +310,8 @@ class TrainerState:
         return layout
 
     def should_save_checkpoint(self):
+        return self.update_idx % self.cfg.trainer.updates_per_checkpoint == 0
 
-        return (
-            self.update_idx % 
-            self.cfg.trainer.updates_per_checkpoint == 0
-        )
-    
 
 def to_float(x):
     return x.item() if isinstance(x, torch.Tensor) else float(x)

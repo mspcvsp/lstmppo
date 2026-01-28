@@ -4,19 +4,21 @@
 • 	No environment creation
 • 	No torch backend mutation
 """
+
+from dataclasses import dataclass, field, fields
 from datetime import datetime
-from dataclasses import dataclass, field
-from typing import Any, List, Optional
-import torch
+from typing import Any, Optional
+
 import gymnasium as gym
-import popgym
+import torch
+from gymnasium.spaces import Discrete
 from rich.text import Text
+
 from .obs_encoder import get_flat_obs_dim
 
 
 @dataclass
 class PPOHyperparams:
-
     gamma: float = 0.99
     """ Discount factor"""
     gae_lambda: float = 0.95
@@ -37,7 +39,6 @@ class PPOHyperparams:
 
 @dataclass
 class LSTMConfig:
-
     enc_hidden_size: int = 128
     """Encoder hidden size"""
     lstm_hidden_size: int = 128
@@ -52,7 +53,6 @@ class LSTMConfig:
 
 @dataclass
 class ScheduleConfig:
-
     base_lr: float = 1e-4
     """ Base learning rate """
     lr_warmup_pct: float = 10.0
@@ -68,7 +68,6 @@ class ScheduleConfig:
 
 @dataclass
 class TrainerConfig:
-
     cuda: bool = True
     """ Whether to use CUDA """
     torch_deterministic: bool = True
@@ -93,12 +92,12 @@ class TrainerConfig:
     """ Maximum number of sparkline history points to keep """
     gate_sat_eps: float = 0.05
     """ LSTM gate saturation epsilon """
-    gate_ent_eps: float = 1E-6
+    gate_ent_eps: float = 1e-6
     """ LSTM gate entropy epsilon """
+
 
 @dataclass
 class LoggingConfig:
-
     tb_logdir: str = "./tb_logs"
     """ TensorBoard log directory """
     jsonl_path: str = "./jsonl"
@@ -111,7 +110,6 @@ class LoggingConfig:
 
 @dataclass
 class EnvironmentConfig:
-
     env_id: str = "CartPole-v1"
     """Environment identifier"""
     num_envs: int = 16
@@ -122,12 +120,13 @@ class EnvironmentConfig:
     """ Flattened observation dimension """
     action_dim: int = 0
     """ Action dimension """
-    max_episode_steps: int = None
+    max_episode_steps: int | None = None
     """ Maximum number of steps per episode """
     max_env_history: int = 30
     """ Maximum per env history length """
     ep_len_reward_bonus: float = 0.1
     """ Episode length reward bonus """
+
 
 @dataclass
 class BufferConfig:
@@ -141,7 +140,6 @@ class BufferConfig:
 
 @dataclass
 class Config:
-
     # field(default_factory=...) avoids the same instance of each sub‑config
     # from being shared across all Config() objects
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
@@ -153,14 +151,13 @@ class Config:
 
     @property
     def buffer_config(self) -> BufferConfig:
-
         return BufferConfig(
-            rollout_steps = self.trainer.rollout_steps,
-            num_envs = self.env.num_envs,
-            mini_batch_envs = self.trainer.mini_batch_envs,
+            rollout_steps=self.trainer.rollout_steps,
+            num_envs=self.env.num_envs,
+            mini_batch_envs=self.trainer.mini_batch_envs,
             gamma=self.ppo.gamma,
             lam=self.ppo.gae_lambda,
-            lstm_hidden_size=self.lstm.lstm_hidden_size
+            lstm_hidden_size=self.lstm.lstm_hidden_size,
         )
 
     @property
@@ -171,22 +168,19 @@ class Config:
     def action_dim(self):
         return self.env.action_dim
 
-    def init_run_name(self,
-                      datetime_str=None):
-
+    def init_run_name(self, datetime_str=None):
         if datetime_str is None:
             datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        self.log.run_name =\
-            f"{self.env.env_id}__{self.trainer.exp_name}_{datetime_str}"
+        self.log.run_name = f"{self.env.env_id}__{self.trainer.exp_name}_{datetime_str}"
 
 
 @dataclass
 class LSTMGates:
-    i_gates:torch.Tensor
-    f_gates:torch.Tensor
-    g_gates:torch.Tensor
-    o_gates:torch.Tensor
+    i_gates: torch.Tensor
+    f_gates: torch.Tensor
+    g_gates: torch.Tensor
+    o_gates: torch.Tensor
     c_gates: torch.Tensor
     h_gates: torch.Tensor
 
@@ -198,7 +192,7 @@ class LSTMGates:
             g_gates=self.g_gates.detach(),
             o_gates=self.o_gates.detach(),
             c_gates=self.c_gates.detach(),
-            h_gates=self.h_gates.detach()
+            h_gates=self.h_gates.detach(),
         )
 
     def to(self, device):
@@ -283,18 +277,17 @@ class RecurrentBatch:
             cxs0:           (B, H)
         """
         T = self.obs.size(0)
-        B = self.obs.size(1)
 
         for t0 in range(0, T, K):
             t1 = min(t0 + K, T)
 
             # Hidden state at the *start* of the chunk
-            hxs0 = self.hxs[t0]   # (B, H)
-            cxs0 = self.cxs[t0]   # (B, H)
+            hxs0 = self.hxs[t0]  # (B, H)
+            cxs0 = self.cxs[t0]  # (B, H)
 
             mb_terminated = self.terminated[t0:t1]
             mb_truncated = self.truncated[t0:t1]
-            mb_mask = 1.0 - (mb_terminated | mb_truncated).float() # (T, B)
+            mb_mask = 1.0 - (mb_terminated | mb_truncated).float()  # (T, B)
 
             yield RecurrentMiniBatch(
                 obs=self.obs[t0:t1],
@@ -307,45 +300,46 @@ class RecurrentBatch:
                 cxs0=cxs0,
                 mask=mb_mask,
                 t0=t0,
-                t1=t1
+                t1=t1,
             )
+
 
 @dataclass
 class PolicyInput:
-    obs: torch.Tensor # (N, *obs_shape)
-    hxs: torch.Tensor # (N,H)
-    cxs: torch.Tensor # (N,H)
+    obs: torch.Tensor  # (N, *obs_shape)
+    hxs: torch.Tensor  # (N,H)
+    cxs: torch.Tensor  # (N,H)
 
 
 @dataclass
 class VecEnvState:
-    obs: torch.Tensor        # (N, *obs_shape))
-    rewards: torch.Tensor    # (N,)
-    terminated: torch.Tensor # (N,)
+    obs: torch.Tensor  # (N, *obs_shape))
+    rewards: torch.Tensor  # (N,)
+    terminated: torch.Tensor  # (N,)
     truncated: torch.Tensor  # (N,)
-    info: List[Any]
-    hxs: torch.Tensor       # (N,H)
-    cxs: torch.Tensor       # (N,H)
+    info: dict[str, Any] | list[dict[str, Any]]
+    hxs: torch.Tensor  # (N,H)
+    cxs: torch.Tensor  # (N,H)
 
     @property
     def policy_input(self) -> PolicyInput:
         return PolicyInput(self.obs, self.hxs, self.cxs)
 
     """ Properties can't have parameters"""
+
     @property
     def detached_policy_input(self) -> PolicyInput:
-        return PolicyInput(self.obs,
-                           self.hxs.detach(),
-                           self.cxs.detach())
+        return PolicyInput(self.obs, self.hxs.detach(), self.cxs.detach())
+
 
 @dataclass
 class PolicyOutput:
-    logits: torch.Tensor       # (B,A) or (B,T,A)
-    values: torch.Tensor       # (B,) or (B,T)
-    new_hxs: torch.Tensor      # (B,H)
-    new_cxs: torch.Tensor      # (B,H)
-    ar_loss: torch.Tensor      # scalar
-    tar_loss: torch.Tensor     # scalar
+    logits: torch.Tensor  # (B,A) or (B,T,A)
+    values: torch.Tensor  # (B,) or (B,T)
+    new_hxs: torch.Tensor  # (B,H)
+    new_cxs: torch.Tensor  # (B,H)
+    ar_loss: torch.Tensor  # scalar
+    tar_loss: torch.Tensor  # scalar
     gates: LSTMGates
 
     @property
@@ -357,13 +351,25 @@ class PolicyOutput:
             new_cxs=self.new_cxs.detach(),
             ar_loss=self.ar_loss.detach(),
             tar_loss=self.tar_loss.detach(),
-            gates=self.gates.detached
+            gates=self.gates.detached,
         )
+
 
 @dataclass
 class LSTMStates:
     hxs: torch.Tensor
     cxs: torch.Tensor
+
+
+@dataclass
+class LSTMUnitPrev:
+    i_mean: torch.Tensor | None = None
+    f_mean: torch.Tensor | None = None
+    g_mean: torch.Tensor | None = None
+    o_mean: torch.Tensor | None = None
+    h_norm: torch.Tensor | None = None
+    c_norm: torch.Tensor | None = None
+
 
 @dataclass
 class LSTMCoreOutput:
@@ -377,9 +383,9 @@ class LSTMCoreOutput:
 
 @dataclass
 class PolicyEvalInput:
-    obs: torch.Tensor      # (N, *obs_shape)
-    hxs: torch.Tensor      # (N,H)
-    cxs: torch.Tensor      # (N,H)
+    obs: torch.Tensor  # (N, *obs_shape)
+    hxs: torch.Tensor  # (N,H)
+    cxs: torch.Tensor  # (N,H)
     actions: torch.Tensor  # (N,) or (N,1)
 
 
@@ -390,14 +396,14 @@ class PolicyEvalOutput:
     All tensors are (T, B, ...) except new_hxs/new_cxs which are (T, B, H).
     """
 
-    values: torch.Tensor          # (T, B)
-    logprobs: torch.Tensor        # (T, B)
-    entropy: torch.Tensor         # (T, B)
+    values: torch.Tensor  # (T, B)
+    logprobs: torch.Tensor  # (T, B)
+    entropy: torch.Tensor  # (T, B)
 
-    new_hxs: torch.Tensor         # (T, B, H)
-    new_cxs: torch.Tensor         # (T, B, H)
+    new_hxs: torch.Tensor  # (T, B, H)
+    new_cxs: torch.Tensor  # (T, B, H)
 
-    gates: LSTMGates              # i,f,g,o,c,h gates (T, B, H)
+    gates: LSTMGates  # i,f,g,o,c,h gates (T, B, H)
 
     ar_loss: Optional[torch.Tensor] = None
     tar_loss: Optional[torch.Tensor] = None
@@ -410,12 +416,8 @@ class PolicyEvalOutput:
             new_hxs=self.new_hxs.to(device),
             new_cxs=self.new_cxs.to(device),
             gates=self.gates.to(device),
-            ar_loss=(
-                None if self.ar_loss is None
-                else self.ar_loss.to(device)),
-            tar_loss=(
-                None if self.tar_loss is None
-                else self.tar_loss.to(device)),
+            ar_loss=(None if self.ar_loss is None else self.ar_loss.to(device)),
+            tar_loss=(None if self.tar_loss is None else self.tar_loss.to(device)),
         )
 
     @property
@@ -427,10 +429,8 @@ class PolicyEvalOutput:
             new_hxs=self.new_hxs.detach(),
             new_cxs=self.new_cxs.detach(),
             gates=self.gates.detached,
-            ar_loss=(None if self.ar_loss is None
-                     else self.ar_loss.detach()),
-            tar_loss=(None if self.tar_loss is None
-                      else self.tar_loss.detach()),
+            ar_loss=(None if self.ar_loss is None else self.ar_loss.detach()),
+            tar_loss=(None if self.tar_loss is None else self.tar_loss.detach()),
         )
 
 
@@ -601,19 +601,23 @@ class Metrics:
     c_entropy: float = 0.0
     h_entropy: float = 0.0
 
+    entropy_adjusted: float = 0.0
+    entropy_up: float = 0.0
+    entropy_down: float = 0.0
+    entropy_scheduled: float = 0.0
+    entropy_delta: float = 0.0
+
     explained_var: float = 0.0
     kl_watchdog_triggered: int = 0
     steps: int = 0
 
-    def accumulate(self,
-                   upd: PolicyUpdateInfo):
-        
+    def accumulate(self, upd: PolicyUpdateInfo):
         self.policy_loss += upd.policy_loss.item()
         self.value_loss += upd.value_loss.item()
         self.entropy += upd.entropy.item()
         self.approx_kl += upd.approx_kl.item()
         self.clip_frac += upd.clip_frac.item()
-        self.grad_norm += upd.grad_norm
+        self.grad_norm += float(upd.grad_norm)
 
         self.policy_drift += upd.policy_drift.item()
         self.value_drift += upd.value_drift.item()
@@ -625,53 +629,64 @@ class Metrics:
         # --- aggregate per-unit metrics as means ---
         if diag.h_norm is not None:
             self.h_norm += diag.h_norm.mean().item()
-        
+
         if diag.c_norm is not None:
             self.c_norm += diag.c_norm.mean().item()
-        
+
         if diag.h_drift is not None:
             self.h_drift += diag.h_drift.mean().item()
-        
+
         if diag.c_drift is not None:
             self.c_drift += diag.c_drift.mean().item()
 
         # Gate means
-        self.i_mean += diag.i_mean.mean().item()
-        self.f_mean += diag.f_mean.mean().item()
-        self.g_mean += diag.g_mean.mean().item()
-        self.o_mean += diag.o_mean.mean().item()
+        if diag.i_mean is not None:
+            self.i_mean += diag.i_mean.mean().item()
+
+        if diag.f_mean is not None:
+            self.f_mean += diag.f_mean.mean().item()
+
+        if diag.g_mean is not None:
+            self.g_mean += diag.g_mean.mean().item()
+
+        if diag.o_mean is not None:
+            self.o_mean += diag.o_mean.mean().item()
 
         # Gate drift
-        self.i_drift += diag.i_drift.mean().item()
-        self.f_drift += diag.f_drift.mean().item()
-        self.g_drift += diag.g_drift.mean().item()
-        self.o_drift += diag.o_drift.mean().item()
+        if diag.i_drift is not None:
+            self.i_drift += diag.i_drift.mean().item()
+        if diag.f_drift is not None:
+            self.f_drift += diag.f_drift.mean().item()
+        if diag.g_drift is not None:
+            self.g_drift += diag.g_drift.mean().item()
+        if diag.o_drift is not None:
+            self.o_drift += diag.o_drift.mean().item()
 
         # Gate saturation (fractions per unit → mean over units)
-        self.i_sat_low  += sat.i_sat_low.mean().item()
-        self.i_sat_high += sat.i_sat_high.mean().item()
-        self.f_sat_low  += sat.f_sat_low.mean().item()
-        self.f_sat_high += sat.f_sat_high.mean().item()
-        self.o_sat_low  += sat.o_sat_low.mean().item()
-        self.o_sat_high += sat.o_sat_high.mean().item()
-        self.g_sat      += sat.g_sat.mean().item()
-        self.c_sat      += sat.c_sat.mean().item()
-        self.h_sat      += sat.h_sat.mean().item()
+        if sat is not None:
+            self.i_sat_low += sat.i_sat_low.mean().item()
+            self.i_sat_high += sat.i_sat_high.mean().item()
+            self.f_sat_low += sat.f_sat_low.mean().item()
+            self.f_sat_high += sat.f_sat_high.mean().item()
+            self.o_sat_low += sat.o_sat_low.mean().item()
+            self.o_sat_high += sat.o_sat_high.mean().item()
+            self.g_sat += sat.g_sat.mean().item()
+            self.c_sat += sat.c_sat.mean().item()
+            self.h_sat += sat.h_sat.mean().item()
 
         # Gate entropy (per unit → mean over units)
-        self.i_entropy += ent.i_entropy.mean().item()
-        self.f_entropy += ent.f_entropy.mean().item()
-        self.o_entropy += ent.o_entropy.mean().item()
-        self.g_entropy += ent.g_entropy.mean().item()
-        self.c_entropy += ent.c_entropy.mean().item()
-        self.h_entropy += ent.h_entropy.mean().item()
+        if ent is not None:
+            self.i_entropy += ent.i_entropy.mean().item()
+            self.f_entropy += ent.f_entropy.mean().item()
+            self.o_entropy += ent.o_entropy.mean().item()
+            self.g_entropy += ent.g_entropy.mean().item()
+            self.c_entropy += ent.c_entropy.mean().item()
+            self.h_entropy += ent.h_entropy.mean().item()
 
-    def update_episode_stats(self,
-                             ep_stats: EpisodeStats):
-
+    def update_episode_stats(self, ep_stats: EpisodeStats):
         self.episodes = ep_stats.episodes
         self.alive_envs = ep_stats.alive_envs
-        
+
         self.max_ep_len = ep_stats.max_ep_len
         self.avg_ep_len = ep_stats.avg_ep_len
 
@@ -679,153 +694,100 @@ class Metrics:
         self.avg_ep_returns = ep_stats.avg_ep_returns
 
     def normalize(self):
-
         if self.steps == 0:
             return
 
         factor = 1.0 / self.steps
 
-        EXCLUDE = {
-            "steps",
-            "episodes",
-            "alive_envs",
-            "max_ep_len",
-            "avg_ep_len",
-            "max_ep_returns",
-            "avg_ep_returns"
-        }
+        EXCLUDE = {"steps", "episodes", "alive_envs", "max_ep_len", "avg_ep_len", "max_ep_returns", "avg_ep_returns"}
 
         # Normalize metrics accumulated across minibatches
-        for field in self.__dataclass_fields__:
-
-            if field not in EXCLUDE:
-                setattr(self, field, getattr(self, field) * factor)
+        for attr in self.__dataclass_fields__:
+            if attr not in EXCLUDE:
+                setattr(self, attr, getattr(self, attr) * factor)
 
     def initialize(self):
-
-        for field in self.__dataclass_fields__:
-
-            if field  in ("steps",):
-                setattr(self, field, 0)
+        for attr in self.__dataclass_fields__:
+            if attr in ("steps",):
+                setattr(self, attr, 0)
             else:
-                setattr(self, field, 0.0)
+                setattr(self, attr, 0.0)
 
     def to_dict(self):
+        return {k: float(getattr(self, k)) for k in self.__dataclass_fields__}
 
-        return {k: float(getattr(self, k))
-                for k in self.__dataclass_fields__}
-
-    def render_ppo_metrics(self,
-                           lr: float,
-                           entropy_coef: float,
-                           clip_range: float):
-
+    def render_ppo_metrics(self, lr: float, entropy_coef: float, clip_range: float):
         # PPO metrics panel
         ppo_text = Text()
-        
-        ppo_text.append(f" Return:     {self.avg_ep_returns:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" Length:     {self.avg_ep_len:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" Entropy:    {self.entropy:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" KL:         {self.approx_kl:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" ClipFrac:   {self.clip_frac:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" GradNorm:   {self.grad_norm:.1f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" ExplainedV: {self.explained_var:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" LR:         {lr:.2e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" EntCoef:    {entropy_coef:.2e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" ClipRange:  {clip_range:.2e}\n",
-                        style="bold yellow")
-                
-        ppo_text.append(f" PolDrift:  {self.policy_drift:.3e}\n",
-                        style="bold yellow")
 
-        ppo_text.append(f" ValDrift:  {self.value_drift:.3e}\n",
-                        style="bold yellow")
+        ppo_text.append(f" Return:     {self.avg_ep_returns:.3f}\n", style="bold yellow")
 
-        ppo_text.append(f" h-norm:     {self.h_norm:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" c-norm:     {self.c_norm:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" h-drift:    {self.h_drift:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" c-drift:    {self.c_drift:.3e}\n",
-                        style="bold yellow")
+        ppo_text.append(f" Length:     {self.avg_ep_len:.3f}\n", style="bold yellow")
 
-        ppo_text.append(f" i-mean:     {self.i_mean:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" f-mean:     {self.f_mean:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" g-mean:     {self.g_mean:.3f}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" o-mean:     {self.o_mean:.3f}\n",
-                        style="bold yellow")
+        ppo_text.append(f" Entropy:    {self.entropy:.3f}\n", style="bold yellow")
 
-        ppo_text.append(f" i-drift:    {self.i_drift:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" f-drift:    {self.f_drift:.3e}\n",
-                        style="bold yellow")
+        ppo_text.append(f" KL:         {self.approx_kl:.3f}\n", style="bold yellow")
 
-        ppo_text.append(f" g-drift:    {self.g_drift:.3e}\n",
-                        style="bold yellow")
-        
-        ppo_text.append(f" o-drift:    {self.o_drift:.3e}\n",
-                        style="bold yellow")
+        ppo_text.append(f" ClipFrac:   {self.clip_frac:.3f}\n", style="bold yellow")
+
+        ppo_text.append(f" GradNorm:   {self.grad_norm:.1f}\n", style="bold yellow")
+
+        ppo_text.append(f" ExplainedV: {self.explained_var:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" LR:         {lr:.2e}\n", style="bold yellow")
+
+        ppo_text.append(f" EntCoef:    {entropy_coef:.2e}\n", style="bold yellow")
+
+        ppo_text.append(f" ClipRange:  {clip_range:.2e}\n", style="bold yellow")
+
+        ppo_text.append(f" PolDrift:  {self.policy_drift:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" ValDrift:  {self.value_drift:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" h-norm:     {self.h_norm:.3f}\n", style="bold yellow")
+
+        ppo_text.append(f" c-norm:     {self.c_norm:.3f}\n", style="bold yellow")
+
+        ppo_text.append(f" h-drift:    {self.h_drift:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" c-drift:    {self.c_drift:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" i-mean:     {self.i_mean:.3f}\n", style="bold yellow")
+
+        ppo_text.append(f" f-mean:     {self.f_mean:.3f}\n", style="bold yellow")
+
+        ppo_text.append(f" g-mean:     {self.g_mean:.3f}\n", style="bold yellow")
+
+        ppo_text.append(f" o-mean:     {self.o_mean:.3f}\n", style="bold yellow")
+
+        ppo_text.append(f" i-drift:    {self.i_drift:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" f-drift:    {self.f_drift:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" g-drift:    {self.g_drift:.3e}\n", style="bold yellow")
+
+        ppo_text.append(f" o-drift:    {self.o_drift:.3e}\n", style="bold yellow")
 
         return ppo_text
-    
-    def render_episode_stats(self,
-                             avg_ep_len_ema: float,
-                             avg_ep_returns_ema: float):
 
+    def render_episode_stats(self, avg_ep_len_ema: float, avg_ep_returns_ema: float):
         ep_text = Text()
 
-        ep_text.append(f" Episodes:   {self.episodes}\n",
-                       style="bold green")
+        ep_text.append(f" Episodes:   {self.episodes}\n", style="bold green")
 
-        ep_text.append(f" AliveEnv:   {self.alive_envs}\n",
-                       style="bold green")
-        
-        ep_text.append(f" MaxEpLen:   {self.max_ep_len:.1f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" AvgEpLen:   {self.avg_ep_len:.1f}\n",
-                       style="bold green")
+        ep_text.append(f" AliveEnv:   {self.alive_envs}\n", style="bold green")
 
-        ep_text.append(f" EMA Len:    {avg_ep_len_ema:.1f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" MaxReturn:  {self.max_ep_returns:.2f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" AvgReturn:  {self.avg_ep_returns:.2f}\n",
-                       style="bold green")
-        
-        ep_text.append(f" EMA Return: {avg_ep_returns_ema:.2f}\n",
-                       style="bold green")
+        ep_text.append(f" MaxEpLen:   {self.max_ep_len:.1f}\n", style="bold green")
+
+        ep_text.append(f" AvgEpLen:   {self.avg_ep_len:.1f}\n", style="bold green")
+
+        ep_text.append(f" EMA Len:    {avg_ep_len_ema:.1f}\n", style="bold green")
+
+        ep_text.append(f" MaxReturn:  {self.max_ep_returns:.2f}\n", style="bold green")
+
+        ep_text.append(f" AvgReturn:  {self.avg_ep_returns:.2f}\n", style="bold green")
+
+        ep_text.append(f" EMA Return: {avg_ep_returns_ema:.2f}\n", style="bold green")
 
         return ep_text
 
@@ -866,118 +828,94 @@ class MetricsHistory:
     c_entropy: list = field(default_factory=list)
     h_entropy: list = field(default_factory=list)
 
-    def update(self,
-               upd: PolicyUpdateInfo,
-               stats: Metrics):
-
+    def update(self, upd: PolicyUpdateInfo, stats: Metrics):
         self.push("kl", upd.approx_kl.item())
 
         diag = upd.lstm_unit_diag
         sat = diag.saturation
         ent = diag.entropy
 
-        mapping = {
-            "i_mean": diag.i_mean.mean(),
-            "f_mean": diag.f_mean.mean(),
-            "g_mean": diag.g_mean.mean(),
-            "o_mean": diag.o_mean.mean(),
+        mapping = {}
 
-            "i_drift": diag.i_drift.mean(),
-            "f_drift": diag.f_drift.mean(),
-            "g_drift": diag.g_drift.mean(),
-            "o_drift": diag.o_drift.mean(),
+        # Handle all simple Optional[Tensor] fields in LSTMUnitDiagnostics
+        for f in fields(diag):
+            name = f.name
+            value = getattr(diag, name)
 
-            "h_norm": (diag.h_norm.mean() if diag.h_norm
-                       is not None else stats.h_norm),
-            "c_norm": (diag.c_norm.mean() if diag.c_norm
-                       is not None else stats.c_norm),
-            "h_drift": (diag.h_drift.mean() if diag.h_drift
-                        is not None else stats.h_drift),
-            "c_drift": (diag.c_drift.mean() if diag.c_drift
-                        is not None else stats.c_drift),
+            # Skip nested objects; handle them separately
+            if name in ("saturation", "entropy", "hidden_size"):
+                continue
 
-            "i_entropy": ent.i_entropy.mean(),
-            "f_entropy": ent.f_entropy.mean(),
-            "g_entropy": ent.g_entropy.mean(),
-            "o_entropy": ent.o_entropy.mean(),
-            "c_entropy": ent.c_entropy.mean(),
-            "h_entropy": ent.h_entropy.mean(),
+            if isinstance(value, torch.Tensor):
+                mapping[name] = value.mean().item()
+            elif value is None:
+                # fallback to stats if available
+                if hasattr(stats, name):
+                    mapping[name] = getattr(stats, name)
 
-            "i_sat_low":  sat.i_sat_low.mean(),
-            "i_sat_high": sat.i_sat_high.mean(),
-            "f_sat_low":  sat.f_sat_low.mean(),
-            "f_sat_high": sat.f_sat_high.mean(),
-            "o_sat_low":  sat.o_sat_low.mean(),
-            "o_sat_high": sat.o_sat_high.mean(),
-            "g_sat":      sat.g_sat.mean(),
-            "c_sat":      sat.c_sat.mean(),
-            "h_sat":      sat.h_sat.mean(),
+        # Handle entropy
+        if diag.entropy is not None:
+            ent = diag.entropy
+            for f in fields(ent):
+                name = f.name
+                value = getattr(ent, name)
+                if isinstance(value, torch.Tensor):
+                    mapping[name] = value.mean().item()
 
-            "explained_var": stats.explained_var,
-            "ep_return": stats.avg_ep_returns,
-            "ep_len": stats.avg_ep_len,
-        }
-        
+        # Handle saturation
+        if diag.saturation is not None:
+            sat = diag.saturation
+            for f in fields(sat):
+                name = f.name
+                value = getattr(sat, name)
+                if isinstance(value, torch.Tensor):
+                    mapping[name] = value.mean().item()
+
+        mapping["explained_var"] = stats.explained_var
+        mapping["ep_return"] = stats.avg_ep_returns
+        mapping["ep_len"] = stats.avg_ep_len
+
         for name, tensor in mapping.items():
             self.push(name, tensor.item())
 
-    def push(self,
-             name: str,
-             value: float):
-
+    def push(self, name: str, value: float):
         hist = getattr(self, name)
         hist.append(value)
 
         if len(hist) > self.max_len:
             hist.pop(0)
 
-    def render_ppo_history(self,
-                           ppo_text: Text):
+    def render_ppo_history(self, ppo_text: Text):
+        ppo_text.append("\n Return Trend: ", style="bold cyan")
 
-        ppo_text.append("\n Return Trend: ",
-                        style="bold cyan")
-        
-        ppo_text.append(sparkline(self.ep_return),
-                        style="cyan")
+        ppo_text.append(sparkline(self.ep_return), style="cyan")
 
         ppo_text.append("\n KL Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.kl,
-                                  width=20),
-                                  style="cyan")
+        ppo_text.append(sparkline(self.kl, width=20), style="cyan")
 
         ppo_text.append("\n Entropy Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.entropy,
-                                  width=20),
-                                  style="magenta")
+        ppo_text.append(sparkline(self.entropy, width=20), style="magenta")
 
         ppo_text.append("\n EV Trend:    ", style="bold cyan")
-        ppo_text.append(sparkline(self.explained_var,
-                                  width=20),
-                                  style="green")
+        ppo_text.append(sparkline(self.explained_var, width=20), style="green")
 
         ppo_text.append("\n PolDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.policy_drift),
-                        style="cyan")
+        ppo_text.append(sparkline(self.policy_drift), style="cyan")
 
         ppo_text.append("\n ValDrift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.value_drift),
-                        style="green")
+        ppo_text.append(sparkline(self.value_drift), style="green")
 
         ppo_text.append("\n h-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.h_norm),
-                        style="cyan")
+        ppo_text.append(sparkline(self.h_norm), style="cyan")
 
         ppo_text.append("\n c-norm Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.c_norm),
-                        style="cyan")
+        ppo_text.append(sparkline(self.c_norm), style="cyan")
 
         ppo_text.append("\n h-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.h_drift),
-                        style="green")
+        ppo_text.append(sparkline(self.h_drift), style="green")
 
         ppo_text.append("\n c-drift Tr.: ", style="bold cyan")
-        ppo_text.append(sparkline(self.c_drift),
-                        style="green")
+        ppo_text.append(sparkline(self.c_drift), style="green")
 
         ppo_text.append("\n i-mean Tr.: ", style="bold cyan")
         ppo_text.append(sparkline(self.i_mean), style="cyan")
@@ -1002,18 +940,13 @@ class MetricsHistory:
         ppo_text.append("\n o-drift Tr.: ", style="bold cyan")
         ppo_text.append(sparkline(self.o_drift), style="green")
 
-    def render_episode_history(self,
-                               ep_text: Text):
+    def render_episode_history(self, ep_text: Text):
+        ep_text.append("\n Length Trend: ", style="bold cyan")
 
-        ep_text.append("\n Length Trend: ",
-                       style="bold cyan")
+        ep_text.append(sparkline(self.ep_len), style="cyan")
 
-        ep_text.append(sparkline(self.ep_len),
-                       style="cyan")
 
-def initialize_config(cfg: Config,
-                      **kwargs):
-
+def initialize_config(cfg: Config, **kwargs):
     # Set torch flags
     torch.backends.cudnn.deterministic = cfg.trainer.torch_deterministic
 
@@ -1024,8 +957,18 @@ def initialize_config(cfg: Config,
     dummy_env = gym.make(cfg.env.env_id)
 
     cfg.env.obs_space = dummy_env.observation_space
-    cfg.env.action_dim = dummy_env.action_space.n
-    cfg.env.max_episode_steps = dummy_env.spec.max_episode_steps
+
+    action_space = dummy_env.action_space
+    if isinstance(action_space, Discrete):
+        cfg.env.action_dim = int(action_space.n)
+    else:
+        raise TypeError("Environment must have a Discrete action space")
+
+    spec = dummy_env.spec
+    if spec is not None:
+        cfg.env.max_episode_steps = spec.max_episode_steps
+    else:
+        cfg.env.max_episode_steps = None
 
     cfg.env.flat_obs_dim = get_flat_obs_dim(cfg.env.obs_space)
 
@@ -1047,3 +990,7 @@ def sparkline(data, width=20):
     scaled = [(x - mn) / (mx - mn) for x in data[-width:]]
     idx = [int(s * (len(blocks) - 1)) for s in scaled]
     return "".join(blocks[i] for i in idx)
+
+
+def safe_mean(x: torch.Tensor | None) -> float:
+    return x.mean().item() if x is not None else 0.0

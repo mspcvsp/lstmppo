@@ -1,5 +1,5 @@
 # Invariant Hierarchy
-
+```text
 LSTM‑PPO Diagnostics Suite
 │
 ├── Gate‑Level Invariants

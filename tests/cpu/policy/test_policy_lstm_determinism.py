@@ -13,10 +13,12 @@ This test catches regressions in:
 This test ensures that PPO runs are reproducible, which is essential for
 debugging, ablation studies, and scientific rigor
 """
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
-import pytest
+
 pytestmark = pytest.mark.policy
 
 

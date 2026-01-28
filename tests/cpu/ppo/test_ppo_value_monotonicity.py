@@ -11,11 +11,15 @@ This tiny test protects from subtle but catastrophic regressions:
 - returns accidentally normalized or clipped
 
 """
-import torch
-from lstmppo.types import Config
-from lstmppo.trainer import LSTMPPOTrainer
+
 import pytest
+import torch
+
+from lstmppo.trainer import LSTMPPOTrainer
+from lstmppo.types import Config
+
 pytestmark = pytest.mark.ppo
+
 
 def test_ppo_value_monotonicity():
     """
@@ -24,9 +28,9 @@ def test_ppo_value_monotonicity():
     """
 
     cfg = Config()
-    device = torch.device("cpu")
+    cfg.trainer.cuda = False
 
-    trainer = LSTMPPOTrainer(cfg, device)
+    trainer = LSTMPPOTrainer(cfg)
 
     T = cfg.trainer.rollout_steps
     B = cfg.env.num_envs

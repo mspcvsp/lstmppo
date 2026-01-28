@@ -1,6 +1,5 @@
-import torch
 import pytest
-from lstmppo.trainer import LSTMPPOTrainer
+import torch
 
 pytestmark = pytest.mark.gpu
 
@@ -22,7 +21,7 @@ def test_rollout_replay_determinism(deterministic_trainer):
 
 
 def test_hidden_state_alignment(deterministic_trainer):
-    
+
     trainer = deterministic_trainer
     trainer.collect_rollout()
     batch = next(trainer.buffer.get_recurrent_minibatches())

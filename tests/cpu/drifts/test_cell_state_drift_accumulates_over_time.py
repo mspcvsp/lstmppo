@@ -1,7 +1,7 @@
 """
 Over longer horizons, the LSTM cell state accumulates more magnitude/drift
-than over short horizons. This test is important because the cell state 
-c_t is the true “memory” of the LSTM, and drift accumulation is a strong 
+than over short horizons. This test is important because the cell state
+c_t is the true “memory” of the LSTM, and drift accumulation is a strong
 signal that your diagnostics are wired correctly.
 
 This test protects a subtle but crucial invariant:
@@ -17,11 +17,13 @@ This test protects a subtle but crucial invariant:
 
 This test catches regressions that no other test will.
 """
+
+import pytest
 import torch
+
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import Config, PolicyInput
 
-import pytest
 pytestmark = pytest.mark.drift
 
 
