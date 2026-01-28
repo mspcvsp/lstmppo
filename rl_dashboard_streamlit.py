@@ -1,4 +1,5 @@
 import threading
+from typing import Sequence
 
 import numpy as np
 import streamlit as st
@@ -13,7 +14,7 @@ def get_trainer():
     return LSTMPPOTrainer(cfg)
 
 
-def sparkline(data, width=80):
+def sparkline(data: Sequence[float], width=80):
     if not data:
         return ""
     arr = np.array(data[-width:])
