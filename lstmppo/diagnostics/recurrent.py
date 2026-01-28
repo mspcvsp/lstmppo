@@ -34,8 +34,8 @@ def compute_drift_sequence(policy, T: int = 64):
         # encoded: (B, enc_dim)
         encoded = policy.encoder(obs[t])  # obs[t]: (1, obs_dim) → encoded: (1, enc_dim)
 
-        # GateLSTMCell expects x: (B, input_size), h,c: (B, H)
-        h, c = policy.lstm(encoded, (h, c))  # returns (h_new, c_new), both (B, H)
+        # GateLSTMCell returns (h_new, c_new, extra)
+        h, c, _ = policy.lstm(encoded, (h, c))
 
         # L2 drift per batch element, then average over batch (B=1 here)
         drift[t] = (h - prev_h).norm(dim=-1).mean()
