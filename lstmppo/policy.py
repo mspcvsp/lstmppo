@@ -328,6 +328,13 @@ class LSTMPPOPolicy(nn.Module):
             gates=core_out.gates,
         )
 
+    def cell(self, x, state):
+        # x: (B, H)
+        # state: (h, c)
+        h, c = state
+        gates = self.lstm_cell(x, (h, c))  # or however your cell is implemented
+        return gates  # must return (h_new, c_new)
+
     def forward_step(self, obs, h, c):
         """
         Trainer requires step‑mode LSTM evaluation. LSTM-PPO must return the initial hidden state for each environment
