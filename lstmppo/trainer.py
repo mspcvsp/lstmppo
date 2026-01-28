@@ -1104,6 +1104,22 @@ class LSTMPPOTrainer:
             print(" recomputed logp:", logprobs_rec[t, 0].item())
             print(" |diff|         :", logp_diff[t, 0].item())
 
+        # -----------------------------------------------------
+        # 5. Persist final LSTM state for future rollouts
+        # -----------------------------------------------------
+
+        # stored_hxs/cxs: (T, B, H)
+        final_hxs = stored_hxs[-1]
+        final_cxs = stored_cxs[-1]
+
+        # Ensure (B, H)
+        if final_hxs.dim() == 1:
+            final_hxs = final_hxs.unsqueeze(0)
+            final_cxs = final_cxs.unsqueeze(0)
+
+        self.buffer.last_hxs = final_hxs.detach()
+        self.buffer.last_cxs = final_cxs.detach()
+
         print("=== Validation complete ===")
 
 
