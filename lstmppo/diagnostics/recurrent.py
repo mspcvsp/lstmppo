@@ -21,22 +21,24 @@ def compute_drift_sequence(policy, T: int = 64):
 
     # Create a dummy observation sequence
     obs_dim = policy.obs_dim
-    obs = torch.zeros(T, 1, obs_dim, device=device)
+    obs = torch.zeros(T, 1, obs_dim, device=device)  # (T, B=1, obs_dim)
 
-    # Reset hidden state
+    # Reset hidden state: (B, H)
     h, c = policy.lstm.initial_state(batch_size=1, device=device)
 
     drift = torch.zeros(T, device=device)
 
-    prev_h = h.clone()
+    prev_h = h.clone()  # (B, H)
 
     for t in range(T):
-        encoded = policy.encoder(obs[t])
-        h, c = policy.lstm(encoded, (h, c))
+        # encoded: (B, enc_dim)
+        encoded = policy.encoder(obs[t])  # obs[t]: (1, obs_dim) → encoded: (1, enc_dim)
 
-        # Compute drift magnitude
-        diff = h - prev_h
-        drift[t] = diff.norm(p=2)
+        # GateLSTMCell expects x: (B, input_size), h,c: (B, H)
+        h, c = policy.lstm(encoded, (h, c))  # returns (h_new, c_new), both (B, H)
+
+        # L2 drift per batch element, then average over batch (B=1 here)
+        drift[t] = (h - prev_h).norm(dim=-1).mean()
 
         prev_h = h.clone()
 
