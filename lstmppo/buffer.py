@@ -100,9 +100,17 @@ class RecurrentRolloutBuffer:
             • last_hxs/cxs always being 2-D
             • representing the state at time t BEFORE env.step()
         """
-        # last timestep hidden state (B, H)
-        self.last_hxs = last_policy_output.new_hxs[-1].detach()
-        self.last_cxs = last_policy_output.new_cxs[-1].detach()
+        # Typically new_hxs/new_cxs are (T, B, H) or (T, H) when B=1
+        hxs = last_policy_output.new_hxs[-1]
+        cxs = last_policy_output.new_cxs[-1]
+
+        # 🔒 Invariant: always store as (B, H)
+        if hxs.dim() == 1:
+            hxs = hxs.unsqueeze(0)
+            cxs = cxs.unsqueeze(0)
+
+        self.last_hxs = hxs.detach()
+        self.last_cxs = cxs.detach()
 
     # ---------------------------------------------------------
     # GAE-Lambda
