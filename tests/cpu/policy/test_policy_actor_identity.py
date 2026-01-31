@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 
 from lstmppo.policy import LSTMPPOPolicy
+from lstmppo.trainer_state import TrainerState
 from lstmppo.types import Config, PolicyInput
 
 
-def test_policy_actor_identity_path():
+def test_policy_actor_identity_path(trainer_state: TrainerState):
     """
     Smoke test: when action_dim == 0, the policy must:
       - use nn.Identity() as the actor head
@@ -16,12 +17,12 @@ def test_policy_actor_identity_path():
     cfg = Config()
 
     # Force actor identity path
-    cfg.env.action_dim = 0
-    cfg.env.flat_obs_dim = 4          # nonzero so encoder is normal
+    trainer_state.action_dim = 0
+    trainer_state.flat_obs_dim = 4  # nonzero so encoder is normal
     cfg.lstm.enc_hidden_size = 16
     cfg.lstm.lstm_hidden_size = 8
 
-    policy = LSTMPPOPolicy(cfg)
+    policy = LSTMPPOPolicy(trainer_state)
 
     # --- Actor must be Identity ---
     assert isinstance(policy.actor, nn.Identity)
@@ -30,13 +31,11 @@ def test_policy_actor_identity_path():
     B = 4
     H = cfg.lstm.lstm_hidden_size
 
-    obs = torch.zeros(B, cfg.env.flat_obs_dim)
+    obs = torch.zeros(B, trainer_state.flat_obs_dim)
     hxs = torch.zeros(B, H)
     cxs = torch.zeros(B, H)
 
-    out = policy.forward(
-        PolicyInput(obs=obs, hxs=hxs, cxs=cxs)
-    )
+    out = policy.forward(PolicyInput(obs=obs, hxs=hxs, cxs=cxs))
 
     # --- Output sanity checks ---
     assert out.logits.shape == (B, 0)

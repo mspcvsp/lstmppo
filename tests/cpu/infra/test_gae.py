@@ -5,18 +5,19 @@ This test catches:
 - dtype issues
 - shape mismatches
 """
+
 import torch
 
 from lstmppo.buffer import RecurrentRolloutBuffer
-from lstmppo.types import Config
+from lstmppo.trainer_state import TrainerState
 
 
-def test_gae_computation_basic():
-    cfg = Config()
+def test_gae_computation_basic(trainer_state: TrainerState):
+    cfg = trainer_state.cfg
     buf_cfg = cfg.buffer_config
     device = torch.device("cpu")
 
-    buf = RecurrentRolloutBuffer(cfg, device)
+    buf = RecurrentRolloutBuffer(trainer_state, device)
 
     T = buf_cfg.rollout_steps
     B = buf_cfg.num_envs
