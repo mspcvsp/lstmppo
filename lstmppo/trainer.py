@@ -182,6 +182,21 @@ class LSTMPPOTrainer:
 
                 self.log_scalars()
 
+                """
+                Histograms reflect distribution of per‑unit values across the LSTM:
+                - gate means
+                - drift
+                - norms
+                - entropy
+                - saturation
+                """
+                if self.state.current_lstm_unit_diag is not None:
+                    if self.state.update_idx % self.state.cfg.trainer.upd_between_per_unit_hist_upds == 0:
+                        self.tb_logger.log_lstm_histograms(
+                            step=self.state.global_step,
+                            diag=self.state.current_lstm_unit_diag,
+                        )
+
                 live.update(self.state.render_dashboard())
 
                 if self.state.should_save_checkpoint():
@@ -330,6 +345,26 @@ class LSTMPPOTrainer:
         ep_stats = self.env.get_episode_stats()
 
         self.state.update_episode_stats(ep_stats)
+
+        """
+        Heatmaps visualize temporal structure across the rollout:
+
+        - i-gate over time
+        - f-gate over time
+        - g-gate over time
+        - o-gate over time
+        - c-state over time
+        - h-state over time
+
+        These require the full (T, B, H) gate tensors, which only exist after a rollout.
+        """
+        if self.state.update_idx % self.state.cfg.trainer.rollouts_per_heatmap_upd == 0:
+            full_eval = self.replay_policy_on_rollout()
+
+            self.tb_logger.log_lstm_heatmaps(
+                step=self.state.global_step,
+                gates=full_eval.gates,
+            )
 
         return last_value
 

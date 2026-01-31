@@ -94,6 +94,10 @@ class TrainerConfig:
     """ LSTM gate saturation epsilon """
     gate_ent_eps: float = 1e-6
     """ LSTM gate entropy epsilon """
+    upd_between_per_unit_hist_upds: int = 10
+    """ Number of updates between per-unit histogram updates """
+    rollouts_per_heatmap_upd: int = 5
+    """ Number of rollouts between heatmap updates """
 
 
 @dataclass
