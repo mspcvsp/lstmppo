@@ -20,9 +20,8 @@ class RuntimeEnvInfo:
         flat_obs_dim = get_flat_obs_dim(obs_space)
 
         if isinstance(env.action_space, Discrete):
-            action_dim = env.action_space.n
-            assert isinstance(action_dim, int)
-
+            # Gymnasium may return np.int64 here — cast to Python int
+            action_dim = int(env.action_space.n)
         else:
             raise ValueError("Only discrete action spaces supported")
 
