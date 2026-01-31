@@ -1,6 +1,7 @@
 from typing import Sequence, cast
 
 import gymnasium as gym
+import popgym  # noqa: F401  # required to register POPGym environments
 import torch
 from gymnasium.vector import SyncVectorEnv
 from numpy.random import MT19937, Generator, SeedSequence
@@ -23,7 +24,6 @@ class RecurrentVecEnvWrapper:
     """
 
     def __init__(self, cfg: Config, device):
-        print(cfg.env.env_id)
         self.venv = SyncVectorEnv([make_env(cfg.env.env_id) for _ in range(cfg.env.num_envs)])
 
         self.num_envs = cfg.env.num_envs

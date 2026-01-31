@@ -17,7 +17,7 @@ def get_trainer():
 def sparkline(data: Sequence[float], width=80):
     if not data:
         return ""
-    arr = np.array(data[-width:])
+    arr = np.array(data[-width:], dtype=np.float32)
     mn, mx = arr.min(), arr.max()
     rng = mx - mn if mx != mn else 1.0
     norm = (arr - mn) / rng
