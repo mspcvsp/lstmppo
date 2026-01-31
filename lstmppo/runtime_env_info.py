@@ -10,7 +10,7 @@ from .obs_encoder import get_flat_obs_dim
 
 @dataclass
 class RuntimeEnvInfo:
-    obs_space: gym.Space
+    obs_space: gym.Space | None
     flat_obs_dim: int
     action_dim: int
 

@@ -36,8 +36,7 @@ class TrainerState:
         self.metrics = Metrics()
 
         # Runtime environment info (populated by trainer)
-        self.env_info: RuntimeEnvInfo | None = None
-        self.obs_space = None
+        self.env_info = RuntimeEnvInfo(flat_obs_dim=0, action_dim=0, obs_space=None)
 
         # Stores current diagnostics for TensorBoard logging
         self.current_lstm_unit_diag: LSTMUnitDiagnostics | None = None
@@ -159,6 +158,28 @@ class TrainerState:
     def obs_dim(self):
         assert self.env_info is not None
         return self.env_info.flat_obs_dim
+
+    @property
+    def flat_obs_dim(self):
+        assert self.env_info is not None, "env_info must be set before accessing flat_obs_dim"
+        return self.env_info.flat_obs_dim
+
+    @flat_obs_dim.setter
+    def flat_obs_dim(self, value):
+        if self.env_info is None:
+            raise ValueError("env_info must be initialized before setting flat_obs_dim")
+        self.env_info.flat_obs_dim = value
+
+    @property
+    def action_dim(self):
+        assert self.env_info is not None, "env_info must be set before accessing action_dim"
+        return self.env_info.action_dim
+
+    @action_dim.setter
+    def action_dim(self, value):
+        if self.env_info is None:
+            raise ValueError("env_info must be initialized before setting action_dim")
+        self.env_info.action_dim = value
 
     def kl_watchdog(self):
         """

@@ -1,423 +1,18 @@
-...FF.F.F.FFFF..FF................F.F...FFFF                             [100%]
+.F................................F......FFF                             [100%]
 =================================== FAILURES ===================================
-______________________ test_drift_saturation_correlation _______________________
+____________________________ test_drift_growth_rate ____________________________
 
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
+    def test_drift_growth_rate():
+        cfg = Config()
+        cfg.trainer.debug_mode = True
+    
+        state = TrainerState(cfg)
+    
+>       assert state.env_info is not None
+E       assert None is not None
+E        +  where None = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False).env_info
 
-    def test_drift_saturation_correlation(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B = 3
-        H = trainer_state.cfg.lstm.lstm_hidden_size
-        obs = torch.randn(B, 50, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, H)
-        c0 = torch.zeros(B, H)
-    
-        out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-    
-        drift = out.gates.h_gates.pow(2).mean(dim=(0, 2))  # (T,)
-    
-        sat = torch.minimum(out.gates.i_gates, 1 - out.gates.i_gates).mean(dim=(0, 2))  # (T,)
-    
-        corr = torch.corrcoef(torch.stack([drift, -sat]))[0, 1]
-    
->       assert corr > 0
-E       assert tensor(nan) > 0
-
-tests/cpu/drifts/test_drift_saturation_correlation.py:35: AssertionError
-________________________ test_drift_saturation_coupling ________________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_drift_saturation_coupling(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 60
-        H = trainer_state.cfg.lstm.lstm_hidden_size
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, H)
-        c0 = torch.zeros(B, H)
-    
-        out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-    
-        drift = out.gates.h_gates.pow(2).mean(dim=(0, 2))  # (T,)
-        sat = torch.minimum(out.gates.i_gates, 1 - out.gates.i_gates).mean(dim=(0, 2))  # (T,)
-    
-        corr = torch.corrcoef(torch.stack([drift, -sat]))[0, 1]
-    
-        # Drift ↑ should correspond to saturation ↑ (i.e., sat ↓)
->       assert corr > 0.2
-E       assert tensor(nan) > 0.2
-
-tests/cpu/drifts/test_drift_saturation_coupling.py:36: AssertionError
-_________________________ test_gate_drift_monotonicity _________________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_gate_drift_monotonicity(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-    
-        B, T = 3, 5
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        # Baseline
-        out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-        drift1 = out1.gates.h_gates.pow(2).mean()
-    
-        # Synthetic drift: scale obs
-        out2 = policy.forward(PolicyInput(obs=obs * 3.0, hxs=h0, cxs=c0))
-        drift2 = out2.gates.h_gates.pow(2).mean()
-    
->       assert drift2 > drift1
-E       assert tensor(0.) > tensor(0.)
-
-tests/cpu/drifts/test_gate_drift_monotonicity.py:35: AssertionError
-_______________________ test_hidden_vs_cell_drift_ratio ________________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_hidden_vs_cell_drift_ratio(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 40
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-    
-        h_drift = out.gates.h_gates.pow(2).mean()
-        c_drift = out.gates.c_gates.pow(2).mean()
-    
-        """
-        LSTM cell state update is: c_t = f_t * c_{t-1} +i_t * g_t
-        This is an accumulator. It is designed to drift.
-    
-        Hidden state is: h_t = o_t * tanh(c_t)
-        This is a squashed version of the cell state.
-    
-        Because:
-        - tanh compresses large values
-        - o_t (sigmoid) further scales them
-        - LayerNorm stabilizes hidden activations
-    
-        The hidden state cannot drift as fast as the cell state.
-        So the correct invariant is: Cell drift ≥ Hidden drift
-        """
->       assert c_drift > h_drift
-E       assert tensor(0.) > tensor(0.)
-
-tests/cpu/drifts/test_hidden_vs_cell_drift_ratio.py:49: AssertionError
-_________ test_combined_gate_saturation_increases_with_extreme_inputs __________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_combined_gate_saturation_increases_with_extreme_inputs(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 5
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-        out2 = policy.forward(PolicyInput(obs=obs * 5.0, hxs=h0, cxs=c0))
-    
-        gates1 = out1.gates
-        gates2 = out2.gates
-    
-        # Sigmoid gates
-        sig1 = torch.minimum(gates1.i_gates, 1 - gates1.i_gates)
-        sig2 = torch.minimum(gates2.i_gates, 1 - gates2.i_gates)
-    
-        # Tanh gates
-        tanh1 = 1 - gates1.g_gates.abs()
-        tanh2 = 1 - gates2.g_gates.abs()
-    
-        sat1 = torch.cat([sig1, tanh1], dim=-1).mean()
-        sat2 = torch.cat([sig2, tanh2], dim=-1).mean()
-    
->       assert sat2 < sat1
-E       assert tensor(0.7500) < tensor(0.7500)
-
-tests/cpu/gates/test_combined_gate_saturation_increases_with_extreme_inputs.py:41: AssertionError
-_______________ test_gate_diagnostics_time_major_vs_batch_major ________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_gate_diagnostics_time_major_vs_batch_major(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 5
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        obs_tm = obs.transpose(0, 1)  # (T, B, F)
-    
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        # Batch-major
-        out_bm = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-    
-        # Time-major → convert to batch-major inside
->       out_tm = policy.evaluate_actions_sequence(
-            PolicyEvalInput(
-                obs=obs_tm,
-                actions=torch.zeros(T, B, dtype=torch.long),
-                hxs=h0,
-                cxs=c0,
-            )
-        )
-
-tests/cpu/gates/test_gate_diagnostics_time_major_vs_batch_major.py:34: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-lstmppo/policy.py:401: in evaluate_actions_sequence
-    logprobs = dist.log_prob(actions)  # (T, B)
-../../miniconda/envs/cage2_env/lib/python3.10/site-packages/torch/distributions/categorical.py:148: in log_prob
-    self._validate_sample(value)
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-
-self = Categorical(logits: torch.Size([5, 3, 0]))
-value = tensor([[0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0]])
-
-    def _validate_sample(self, value: Tensor) -> None:
-        """
-        Argument validation for distribution methods such as `log_prob`,
-        `cdf` and `icdf`. The rightmost dimensions of a value to be
-        scored via these methods must agree with the distribution's batch
-        and event shapes.
-    
-        Args:
-            value (Tensor): the tensor whose log probability is to be
-                computed by the `log_prob` method.
-        Raises
-            ValueError: when the rightmost dimensions of `value` do not match the
-                distribution's batch and event shapes.
-        """
-        if not isinstance(value, torch.Tensor):
-            raise ValueError("The value argument to log_prob must be a Tensor")
-    
-        event_dim_start = len(value.size()) - len(self._event_shape)
-        if value.size()[event_dim_start:] != self._event_shape:
-            raise ValueError(
-                f"The right-most size of value must match event_shape: {value.size()} vs {self._event_shape}."
-            )
-    
-        actual_shape = value.size()
-        expected_shape = self._batch_shape + self._event_shape
-        for i, j in zip(reversed(actual_shape), reversed(expected_shape)):
-            if i != 1 and j != 1 and i != j:
-                raise ValueError(
-                    f"Value is not broadcastable with batch_shape+event_shape: {actual_shape} vs {expected_shape}."
-                )
-        try:
-            support = self.support
-        except NotImplementedError:
-            warnings.warn(
-                f"{self.__class__} does not define `support` to enable "
-                + "sample validation. Please initialize the distribution with "
-                + "`validate_args=False` to turn off validation."
-            )
-            return
-        assert support is not None
-        valid = support.check(value)
-        if not torch._is_all_true(valid):
->           raise ValueError(
-                "Expected value argument "
-                f"({type(value).__name__} of shape {tuple(value.shape)}) "
-                f"to be within the support ({repr(support)}) "
-                f"of the distribution {repr(self)}, "
-                f"but found invalid values:\n{value}"
-            )
-E           ValueError: Expected value argument (Tensor of shape (5, 3)) to be within the support (IntegerInterval(lower_bound=0, upper_bound=-1)) of the distribution Categorical(logits: torch.Size([5, 3, 0])), but found invalid values:
-E           tensor([[0, 0, 0],
-E                   [0, 0, 0],
-E                   [0, 0, 0],
-E                   [0, 0, 0],
-E                   [0, 0, 0]])
-
-../../miniconda/envs/cage2_env/lib/python3.10/site-packages/torch/distributions/distribution.py:322: ValueError
-_________________ test_gate_entropy_decreases_with_saturation __________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_gate_entropy_decreases_with_saturation(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 5
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-        out2 = policy.forward(PolicyInput(obs=obs * 5.0, hxs=h0, cxs=c0))
-    
-        i1 = out1.gates.i_gates
-        i2 = out2.gates.i_gates
-    
-        eps = 1e-8
-    
-        ent1 = -(i1 * torch.log(i1 + eps) + (1 - i1) * torch.log(1 - i1 + eps)).mean()
-    
-        ent2 = -(i2 * torch.log(i2 + eps) + (1 - i2) * torch.log(1 - i2 + eps)).mean()
-    
->       assert ent2 < ent1
-E       assert tensor(0.6931) < tensor(0.6931)
-
-tests/cpu/gates/test_gate_entropy_decreases_with_saturation.py:40: AssertionError
-________________________ test_gate_to_cell_correlation _________________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_gate_to_cell_correlation(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 30
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-    
-        f = out.gates.f_gates.reshape(-1)
-        c = out.gates.c_gates.abs().reshape(-1)
-    
-        corr = torch.corrcoef(torch.stack([f, c]))[0, 1]
-    
-        """
-        The correlation between forget gate and cell magnitude should be small
-        near zero).
-    
-        Why?
-        - The forget gate is initialized near 0.73 (bias=1.0)
-        - The cell state is unnormalized and accumulates drift
-        - The hidden state is normalized (LayerNorm)
-        - The recurrent dynamics do not enforce a monotonic relationship
-        - The LSTM equations do not imply a sign constraint
-        - The sample size is tiny, so correlation estimates are noisy
-    
-        Therefore:
-        - The sign is not stable
-        - The magnitude should be small
-        - The correlation should not be strongly positive or strongly negative
-    
-        This is the real invariant.
-        """
->       assert corr.abs() < 0.2
-E       assert tensor(nan) < 0.2
-E        +  where tensor(nan) = <built-in method abs of Tensor object at 0xfb3b444b5580>()
-E        +    where <built-in method abs of Tensor object at 0xfb3b444b5580> = tensor(nan).abs
-
-tests/cpu/gates/test_gate_to_cell_correlation.py:55: AssertionError
-______________ test_gate_saturation_increases_with_extreme_inputs ______________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_gate_saturation_increases_with_extreme_inputs(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 5
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        # Baseline
-        out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-        i1 = out1.gates.i_gates  # (B,T,H)
-    
-        # Extreme inputs
-        out2 = policy.forward(PolicyInput(obs=obs * 5.0, hxs=h0, cxs=c0))
-        i2 = out2.gates.i_gates
-    
-        # Sigmoid saturation metric: closer to 0 or 1 = more saturated
-        sat1 = torch.minimum(i1, 1 - i1).mean()
-        sat2 = torch.minimum(i2, 1 - i2).mean()
-    
-        # More extreme inputs → more saturation → LOWER sat metric
->       assert sat2 < sat1
-E       assert tensor(0.5000) < tensor(0.5000)
-
-tests/cpu/gates/test_sigmoid_gate_saturation_increases_with_extreme_inputs.py:60: AssertionError
-___________ test_tanh_gate_saturation_increases_with_extreme_inputs ____________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_tanh_gate_saturation_increases_with_extreme_inputs(trainer_state: TrainerState):
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        policy = LSTMPPOPolicy(trainer_state)
-        policy.eval()
-    
-        B, T = 3, 5
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-        c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    
-        out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-        out2 = policy.forward(PolicyInput(obs=obs * 5.0, hxs=h0, cxs=c0))
-    
-        g1 = out1.gates.g_gates
-        g2 = out2.gates.g_gates
-    
-        # Tanh saturation metric: 1 - |g| decreases as saturation increases
-        sat1 = (1 - g1.abs()).mean()
-        sat2 = (1 - g2.abs()).mean()
-    
->       assert sat2 < sat1
-E       assert tensor(1.) < tensor(1.)
-
-tests/cpu/gates/test_tanh_gate_saturation_increases_with_extreme_inputs.py:34: AssertionError
+tests/cpu/drifts/test_drift_growth_rate.py:19: AssertionError
 _______________________ test_policy_actor_identity_path ________________________
 
 trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
@@ -429,12 +24,13 @@ trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, 
           - avoid constructing Linear(H, 0)
           - produce correctly shaped outputs for a dummy forward pass
         """
+        assert trainer_state.env_info is not None
     
         cfg = Config()
     
         # Force actor identity path
-        trainer_state.action_dim = 0
-        trainer_state.flat_obs_dim = 4  # nonzero so encoder is normal
+        trainer_state.env_info.action_dim = 0
+        trainer_state.env_info.flat_obs_dim = 4  # nonzero so encoder is normal
         cfg.lstm.enc_hidden_size = 16
         cfg.lstm.lstm_hidden_size = 8
     
@@ -447,17 +43,17 @@ trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, 
         B = 4
         H = cfg.lstm.lstm_hidden_size
     
-        obs = torch.zeros(B, trainer_state.flat_obs_dim)
+        obs = torch.zeros(B, trainer_state.env_info.flat_obs_dim)
         hxs = torch.zeros(B, H)
         cxs = torch.zeros(B, H)
     
 >       out = policy.forward(PolicyInput(obs=obs, hxs=hxs, cxs=cxs))
 
-tests/cpu/policy/test_policy_actor_identity.py:38: 
+tests/cpu/policy/test_policy_actor_identity.py:39: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-lstmppo/policy.py:302: in forward
+lstmppo/policy.py:303: in forward
     core_out = self._forward_core(inp.obs, inp.hxs, inp.cxs)
-lstmppo/policy.py:249: in _forward_core
+lstmppo/policy.py:250: in _forward_core
     h, c, gates = self.lstm(enc[:, t, :], (h, c))
 ../../miniconda/envs/cage2_env/lib/python3.10/site-packages/torch/nn/modules/module.py:1775: in _wrapped_call_impl
     return self._call_impl(*args, **kwargs)
@@ -497,154 +93,6 @@ hx = (tensor([[0., 0., 0., 0., 0., 0., 0., 0.],
 E       RuntimeError: mat1 and mat2 shapes cannot be multiplied (4x8 and 128x512)
 
 lstmppo/policy.py:81: RuntimeError
-______________________ test_policy_encoder_identity_path _______________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_policy_encoder_identity_path(trainer_state: TrainerState):
-        """
-        Smoke test: when obs_dim == 0, the policy must:
-          - use nn.Identity() as the encoder
-          - avoid constructing Linear(0, H)
-          - produce correctly shaped outputs for a dummy forward pass
-        """
-    
-        # Narrow Optional for Pylance
-        assert trainer_state.env_info is not None
-    
-        # Force identity encoder path
-        trainer_state.env_info.flat_obs_dim = 0
-        trainer_state.env_info.action_dim = 2  # keep actor valid
-    
-        trainer_state.cfg.lstm.enc_hidden_size = 16
-        trainer_state.cfg.lstm.lstm_hidden_size = 8
-    
-        policy = LSTMPPOPolicy(trainer_state)
-    
-        # --- Encoder must be Identity ---
-        assert isinstance(policy.encoder, ZeroFeatureEncoder)
-    
-        # --- Forward pass must work with obs_dim == 0 ---
-        B = 4
-        H = trainer_state.cfg.lstm.lstm_hidden_size
-    
-        obs = torch.zeros(B, 0)  # shape matches obs_dim == 0
-        hxs = torch.zeros(B, H)
-        cxs = torch.zeros(B, H)
-    
-        out = policy.forward(inp=PolicyInput(obs=obs, hxs=hxs, cxs=cxs))
-    
-        # --- Output sanity checks ---
->       assert out.logits.shape == (B, trainer_state.env_info.action_dim)
-E       assert torch.Size([4, 0]) == (4, 2)
-E         
-E         At index 1 diff: 0 != 2
-E         Use -v to get more diff
-
-tests/cpu/policy/test_policy_encoder_identity.py:42: AssertionError
-______________________ test_policy_minibatch_consistency _______________________
-
-trainer_state = TrainerState(prev_lstm_unit_metrics=None, update_idx=0, lr=0.0, entropy_coef=0.0, clip_range=0.15, target_kl=0.005, ea... entropy_scheduled=0.0, entropy_delta=0.0, explained_var=0.0, kl_watchdog_triggered=0, steps=0), validation_mode=False)
-
-    def test_policy_minibatch_consistency(trainer_state: TrainerState):
-        """
-        Smoke test: step-mode and sequence-mode evaluation must produce
-        identical values and log-probs when given the same inputs and
-        initial hidden state.
-        """
-    
-        assert trainer_state.env_info is not None
-        trainer_state.env_info.flat_obs_dim = 4
-        trainer_state.env_info.action_dim = 3
-    
-        trainer_state.cfg.lstm.enc_hidden_size = 16
-        trainer_state.cfg.lstm.lstm_hidden_size = 8
-    
-        policy = LSTMPPOPolicy(trainer_state)
-    
-        B = 4
-        T = 5
-        H = trainer_state.cfg.lstm.lstm_hidden_size
-        # Random observations and actions
-        obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-        actions = torch.randint(0, trainer_state.env_info.action_dim, (B, T))
-    
-        # Initial hidden state
-        h0 = torch.zeros(B, H)
-        c0 = torch.zeros(B, H)
-    
-        # --- Step-mode unroll ---
-        h_step, c_step = h0.clone(), c0.clone()
-        logps_step = []
-        values_step = []
-    
-        for t in range(T):
-            out = policy.forward(PolicyInput(obs=obs[:, t], hxs=h_step, cxs=c_step))
->           logps_step.append(policy.evaluate_actions(out, actions[:, t]).logprobs)
-
-tests/cpu/policy/test_policy_minibatch_consistency.py:45: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-lstmppo/policy.py:482: in evaluate_actions
-    logprobs = dist.log_prob(actions)  # (B,)
-../../miniconda/envs/cage2_env/lib/python3.10/site-packages/torch/distributions/categorical.py:148: in log_prob
-    self._validate_sample(value)
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-
-self = Categorical(logits: torch.Size([4, 0])), value = tensor([1, 2, 0, 1])
-
-    def _validate_sample(self, value: Tensor) -> None:
-        """
-        Argument validation for distribution methods such as `log_prob`,
-        `cdf` and `icdf`. The rightmost dimensions of a value to be
-        scored via these methods must agree with the distribution's batch
-        and event shapes.
-    
-        Args:
-            value (Tensor): the tensor whose log probability is to be
-                computed by the `log_prob` method.
-        Raises
-            ValueError: when the rightmost dimensions of `value` do not match the
-                distribution's batch and event shapes.
-        """
-        if not isinstance(value, torch.Tensor):
-            raise ValueError("The value argument to log_prob must be a Tensor")
-    
-        event_dim_start = len(value.size()) - len(self._event_shape)
-        if value.size()[event_dim_start:] != self._event_shape:
-            raise ValueError(
-                f"The right-most size of value must match event_shape: {value.size()} vs {self._event_shape}."
-            )
-    
-        actual_shape = value.size()
-        expected_shape = self._batch_shape + self._event_shape
-        for i, j in zip(reversed(actual_shape), reversed(expected_shape)):
-            if i != 1 and j != 1 and i != j:
-                raise ValueError(
-                    f"Value is not broadcastable with batch_shape+event_shape: {actual_shape} vs {expected_shape}."
-                )
-        try:
-            support = self.support
-        except NotImplementedError:
-            warnings.warn(
-                f"{self.__class__} does not define `support` to enable "
-                + "sample validation. Please initialize the distribution with "
-                + "`validate_args=False` to turn off validation."
-            )
-            return
-        assert support is not None
-        valid = support.check(value)
-        if not torch._is_all_true(valid):
->           raise ValueError(
-                "Expected value argument "
-                f"({type(value).__name__} of shape {tuple(value.shape)}) "
-                f"to be within the support ({repr(support)}) "
-                f"of the distribution {repr(self)}, "
-                f"but found invalid values:\n{value}"
-            )
-E           ValueError: Expected value argument (Tensor of shape (4,)) to be within the support (IntegerInterval(lower_bound=0, upper_bound=-1)) of the distribution Categorical(logits: torch.Size([4, 0])), but found invalid values:
-E           tensor([1, 2, 0, 1])
-
-../../miniconda/envs/cage2_env/lib/python3.10/site-packages/torch/distributions/distribution.py:322: ValueError
 _____________________________ test_ppo_kl_watchdog _____________________________
 
     def test_ppo_kl_watchdog():
@@ -741,20 +189,9 @@ E           AssertionError
 
 lstmppo/runtime_env_info.py:24: AssertionError
 =========================== short test summary info ============================
-FAILED tests/cpu/drifts/test_drift_saturation_correlation.py::test_drift_saturation_correlation
-FAILED tests/cpu/drifts/test_drift_saturation_coupling.py::test_drift_saturation_coupling
-FAILED tests/cpu/drifts/test_gate_drift_monotonicity.py::test_gate_drift_monotonicity
-FAILED tests/cpu/drifts/test_hidden_vs_cell_drift_ratio.py::test_hidden_vs_cell_drift_ratio
-FAILED tests/cpu/gates/test_combined_gate_saturation_increases_with_extreme_inputs.py::test_combined_gate_saturation_increases_with_extreme_inputs
-FAILED tests/cpu/gates/test_gate_diagnostics_time_major_vs_batch_major.py::test_gate_diagnostics_time_major_vs_batch_major
-FAILED tests/cpu/gates/test_gate_entropy_decreases_with_saturation.py::test_gate_entropy_decreases_with_saturation
-FAILED tests/cpu/gates/test_gate_to_cell_correlation.py::test_gate_to_cell_correlation
-FAILED tests/cpu/gates/test_sigmoid_gate_saturation_increases_with_extreme_inputs.py::test_gate_saturation_increases_with_extreme_inputs
-FAILED tests/cpu/gates/test_tanh_gate_saturation_increases_with_extreme_inputs.py::test_tanh_gate_saturation_increases_with_extreme_inputs
+FAILED tests/cpu/drifts/test_drift_growth_rate.py::test_drift_growth_rate - a...
 FAILED tests/cpu/policy/test_policy_actor_identity.py::test_policy_actor_identity_path
-FAILED tests/cpu/policy/test_policy_encoder_identity.py::test_policy_encoder_identity_path
-FAILED tests/cpu/policy/test_policy_minibatch_consistency.py::test_policy_minibatch_consistency
 FAILED tests/cpu/ppo/test_ppo_kl_watchdog.py::test_ppo_kl_watchdog - Assertio...
 FAILED tests/cpu/ppo/test_ppo_losses.py::test_ppo_loss_shapes - AssertionError
 FAILED tests/cpu/ppo/test_ppo_value_monotonicity.py::test_ppo_value_monotonicity
-16 failed, 28 passed in 1.62s
+5 failed, 39 passed in 1.53s
