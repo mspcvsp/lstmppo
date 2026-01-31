@@ -1,11 +1,10 @@
 import torch
 
-from .trainer_state import TrainerState
 from .types import LSTMStates, RecurrentBatch, RolloutStep
 
 
 class RecurrentRolloutBuffer:
-    def __init__(self, state: TrainerState, device):
+    def __init__(self, state, device):
         self.device = device
 
         self.cfg = state.cfg.buffer_config

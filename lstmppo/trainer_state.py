@@ -41,11 +41,9 @@ class TrainerState:
         # Runtime environment info (populated by trainer)
         self.env_info: RuntimeEnvInfo | None = None
 
-        env_metadata = get_env_metadata(cfg)
-
-        self.obs_space = env_metadata["obs_space"]
-        self.flat_obs_dim = env_metadata["flat_obs_dim"]
-        self.action_dim = env_metadata["action_dim"]
+        self.obs_space = None
+        self.flat_obs_dim = 0
+        self.action_dim = 0
 
         # Stores current diagnostics for TensorBoard logging
         self.current_lstm_unit_diag: LSTMUnitDiagnostics | None = None
@@ -311,32 +309,3 @@ def to_float(x):
 def explained_variance(y_pred, y_true):
     var_y = torch.var(y_true)
     return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)
-
-
-def get_env_metadata(cfg: Config):
-    # Build dummy env
-    dummy_env = gym.make(cfg.env.env_id)
-
-    obs_space = dummy_env.observation_space
-
-    action_space = dummy_env.action_space
-    if isinstance(action_space, Discrete):
-        action_dim = int(action_space.n)
-    else:
-        raise TypeError("Environment must have a Discrete action space")
-
-    spec = dummy_env.spec
-    if spec is not None:
-        max_episode_steps = spec.max_episode_steps
-    else:
-        max_episode_steps = None
-
-    flat_obs_dim = get_flat_obs_dim(obs_space)
-    dummy_env.close()
-
-    return {
-        "obs_space": obs_space,
-        "flat_obs_dim": flat_obs_dim,
-        "action_dim": action_dim,
-        "max_episode_steps": max_episode_steps,
-    }
