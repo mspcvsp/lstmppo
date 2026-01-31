@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.trainer_state import TrainerState
-from lstmppo.types import Config, PolicyInput
+from lstmppo.types import PolicyInput
 
 
 def test_policy_actor_identity_path(trainer_state: TrainerState):
@@ -15,13 +15,13 @@ def test_policy_actor_identity_path(trainer_state: TrainerState):
     """
     assert trainer_state.env_info is not None
 
-    cfg = Config()
-
     # Force actor identity path
     trainer_state.env_info.action_dim = 0
     trainer_state.env_info.flat_obs_dim = 4  # nonzero so encoder is normal
-    cfg.lstm.enc_hidden_size = 16
-    cfg.lstm.lstm_hidden_size = 8
+
+    # Mutate the *trainer_state* config, since policy reads state.cfg
+    trainer_state.cfg.lstm.enc_hidden_size = 16
+    trainer_state.cfg.lstm.lstm_hidden_size = 8
 
     policy = LSTMPPOPolicy(trainer_state)
 
@@ -30,7 +30,7 @@ def test_policy_actor_identity_path(trainer_state: TrainerState):
 
     # --- Forward pass must work with action_dim == 0 ---
     B = 4
-    H = cfg.lstm.lstm_hidden_size
+    H = trainer_state.cfg.lstm.lstm_hidden_size
 
     obs = torch.zeros(B, trainer_state.env_info.flat_obs_dim)
     hxs = torch.zeros(B, H)
