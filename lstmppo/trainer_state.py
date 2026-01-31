@@ -37,10 +37,7 @@ class TrainerState:
 
         # Runtime environment info (populated by trainer)
         self.env_info: RuntimeEnvInfo | None = None
-
         self.obs_space = None
-        self.flat_obs_dim = 0
-        self.action_dim = 0
 
         # Stores current diagnostics for TensorBoard logging
         self.current_lstm_unit_diag: LSTMUnitDiagnostics | None = None
@@ -160,7 +157,8 @@ class TrainerState:
 
     @property
     def obs_dim(self):
-        return self.flat_obs_dim
+        assert self.env_info is not None
+        return self.env_info.flat_obs_dim
 
     def kl_watchdog(self):
         """

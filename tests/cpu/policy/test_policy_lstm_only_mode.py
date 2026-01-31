@@ -51,7 +51,7 @@ def test_policy_lstm_only_mode_unroll(trainer_state: TrainerState):
         )
 
         # Check shapes at each step
-        assert out.logits.shape == (B, trainer_state.action_dim)
+        assert out.logits.shape == (B, trainer_state.env_info.action_dim)
         assert out.values.shape == (B,)
         assert out.new_hxs.shape == (B, H)
         assert out.new_cxs.shape == (B, H)

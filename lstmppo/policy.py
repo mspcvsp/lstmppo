@@ -4,8 +4,8 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .obs_encoder import build_obs_encoder
-from .types import Config, LSTMCoreOutput, LSTMGates, PolicyEvalInput, PolicyEvalOutput, PolicyInput, PolicyOutput
 from .trainer_state import TrainerState
+from .types import LSTMCoreOutput, LSTMGates, PolicyEvalInput, PolicyEvalOutput, PolicyInput, PolicyOutput
 
 
 class GateLSTMCell(nn.Module):
@@ -111,21 +111,22 @@ class LSTMCore(nn.Module):
 class LSTMPPOPolicy(nn.Module):
     def __init__(self, state: TrainerState):
         super().__init__()
+        assert state.env_info is not None
 
         self.ar_coef = state.cfg.lstm.lstm_ar_coef
         self.tar_coef = state.cfg.lstm.lstm_tar_coef
 
         # If obs_space is None, rely on flat_obs_dim (tests do this intentionally)
-        if state.flat_obs_dim == 0:
+        if state.env_info.obs_space is None:
             self.obs_dim = 0
         else:
-            self.obs_dim = state.flat_obs_dim
+            self.obs_dim = state.env_info.flat_obs_dim
 
-        obs_space = state.obs_space
+        obs_space = state.env_info.obs_space
         self.obs_encoder = build_obs_encoder(obs_space, self.obs_dim)
 
         # --- SiLU encoder ---
-        if state.flat_obs_dim == 0:
+        if state.env_info.flat_obs_dim == 0:
             """
             When obs_dim == 0, the environment provides no observation
             features. But the LSTM still needs an input vector of size
@@ -140,7 +141,7 @@ class LSTMPPOPolicy(nn.Module):
             self.encoder = ZeroFeatureEncoder(state.cfg.lstm.enc_hidden_size)
         else:
             self.encoder = nn.Sequential(
-                nn.Linear(state.flat_obs_dim, state.cfg.lstm.enc_hidden_size),
+                nn.Linear(state.env_info.flat_obs_dim, state.cfg.lstm.enc_hidden_size),
                 nn.SiLU(),
                 nn.Linear(state.cfg.lstm.enc_hidden_size, state.cfg.lstm.enc_hidden_size),
                 nn.SiLU(),
@@ -169,10 +170,10 @@ class LSTMPPOPolicy(nn.Module):
         self.ln = nn.LayerNorm(state.cfg.lstm.lstm_hidden_size)
 
         # --- Heads ---
-        if state.action_dim == 0:
+        if state.env_info.action_dim == 0:
             self.actor = nn.Identity()
         else:
-            self.actor = nn.Linear(state.cfg.lstm.lstm_hidden_size, state.action_dim)
+            self.actor = nn.Linear(state.cfg.lstm.lstm_hidden_size, state.env_info.action_dim)
 
         self.critic = nn.Linear(state.cfg.lstm.lstm_hidden_size, 1)
 

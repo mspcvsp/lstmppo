@@ -47,7 +47,7 @@ def test_cell_state_drift_accumulates_over_time(trainer_state: TrainerState):
     for L in lengths:
         drifts = []
         for _ in range(num_samples):
-            obs = torch.randn(B, L, trainer_state.flat_obs_dim)
+            obs = torch.randn(B, L, trainer_state.env_info.flat_obs_dim)
             h0 = torch.zeros(B, H)
             c0 = torch.zeros(B, H)
             out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))

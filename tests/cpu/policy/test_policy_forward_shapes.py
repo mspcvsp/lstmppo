@@ -20,14 +20,14 @@ def test_policy_forward_shapes(trainer_state: TrainerState):
     B = 3
 
     inp = PolicyInput(
-        obs=torch.randn(B, trainer_state.flat_obs_dim),
+        obs=torch.randn(B, trainer_state.env_info.flat_obs_dim),
         hxs=torch.randn(B, trainer_state.cfg.lstm.lstm_hidden_size),
         cxs=torch.randn(B, trainer_state.cfg.lstm.lstm_hidden_size),
     )
 
     outp = model(inp)
 
-    assert outp.logits.shape == (B, trainer_state.action_dim)
+    assert outp.logits.shape == (B, trainer_state.env_info.action_dim)
     assert outp.values.shape == (B,)
     assert outp.new_hxs.shape == (B, trainer_state.cfg.lstm.lstm_hidden_size)
     assert outp.new_cxs.shape == (B, trainer_state.cfg.lstm.lstm_hidden_size)

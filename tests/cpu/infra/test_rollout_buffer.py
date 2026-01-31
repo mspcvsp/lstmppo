@@ -33,7 +33,7 @@ def test_buffer_initialization_shapes(trainer_state: TrainerState):
 
     T = trainer_state.cfg.trainer.rollout_steps
     B = trainer_state.cfg.env.num_envs
-    D = trainer_state.flat_obs_dim
+    D = trainer_state.env_info.flat_obs_dim
     H = trainer_state.cfg.lstm.lstm_hidden_size
 
     assert buf.obs.shape == (T, B, D)
@@ -65,10 +65,11 @@ def test_buffer_device_and_dtype(trainer_state: TrainerState):
 
 
 def test_add_increments_pointer_and_writes_data(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
     cfg, _, buf = _make_buffer(trainer_state)
 
     B = cfg.env.num_envs
-    D = trainer_state.flat_obs_dim
+    D = trainer_state.env_info.flat_obs_dim
     H = cfg.lstm.lstm_hidden_size
 
     obs = torch.randn(B, D)
@@ -111,10 +112,11 @@ def test_add_increments_pointer_and_writes_data(trainer_state: TrainerState):
 
 
 def test_fill_buffer_reaches_full_pointer(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
     cfg, _, buf = _make_buffer(trainer_state)
 
     B = cfg.env.num_envs
-    D = trainer_state.flat_obs_dim
+    D = trainer_state.env_info.flat_obs_dim
     H = cfg.lstm.lstm_hidden_size
 
     for _ in range(cfg.trainer.rollout_steps):
@@ -183,10 +185,11 @@ def test_reset_clears_state(trainer_state: TrainerState):
 
 
 def test_rollout_step_structure(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
     cfg, _, buf = _make_buffer(trainer_state)
 
     B = cfg.env.num_envs
-    D = trainer_state.flat_obs_dim
+    D = trainer_state.env_info.flat_obs_dim
     H = cfg.lstm.lstm_hidden_size
 
     obs = torch.randn(B, D)
