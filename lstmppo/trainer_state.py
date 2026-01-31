@@ -8,15 +8,12 @@ if TYPE_CHECKING:
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import gymnasium as gym
 import torch
-from gymnasium.spaces import Discrete
 from rich.layout import Layout
 from rich.panel import Panel
 
 from .buffer import RecurrentRolloutBuffer
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
-from .obs_encoder import get_flat_obs_dim
 from .runtime_env_info import RuntimeEnvInfo
 from .types import Config, EpisodeStats, LSTMUnitDiagnostics, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
 
