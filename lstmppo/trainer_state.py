@@ -14,7 +14,7 @@ from rich.panel import Panel
 
 from .buffer import RecurrentRolloutBuffer
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
-from .types import Config, EpisodeStats, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
+from .types import Config, EpisodeStats, LSTMUnitDiagnostics, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
 
 
 @dataclass
@@ -34,11 +34,10 @@ class TrainerState:
         self.validation_mode = validation_mode
         self.metrics = Metrics()
 
-        self.tb_logdir = Path(*[self.cfg.log.tb_logdir, self.cfg.log.run_name])
+        # Stores current diagnostics for TensorBoard logging
+        self.current_lstm_unit_diag: LSTMUnitDiagnostics | None = None
 
-        # Can’t have a non‑default field after default fields. Easiest
-        # solution is don’t make prev_lstm_unit_metrics a dataclass field
-        # at all — treat it as a plain attribute
+        # Previous metrics for drift computation
         self.prev_lstm_unit_metrics = None
 
         if self.validation_mode:
@@ -57,7 +56,7 @@ class TrainerState:
         self.clip_range = self.cfg.ppo.initial_clip_range
         self.target_kl = self.cfg.ppo.target_kl
 
-        self.early_stopping_kl = self.cfg.ppo.target_kl * cfg.ppo.early_stopping_kl_factor
+        self.early_stopping_kl = self.cfg.ppo.target_kl * self.cfg.ppo.early_stopping_kl_factor
 
         self._entropy_sch = EntropySchdeduler(self.cfg)
         self._lr_sch = LearningRateScheduler(self.cfg)
@@ -109,6 +108,9 @@ class TrainerState:
         self.metrics.accumulate(upd)
 
         self.history.update(upd, self.metrics)
+
+        # NEW: store current diagnostics for logging
+        self.current_lstm_unit_diag = upd.lstm_unit_diag
 
     def update_episode_stats(self, ep_stats: EpisodeStats):
         self.metrics.update_episode_stats(ep_stats)

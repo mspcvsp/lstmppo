@@ -88,8 +88,10 @@ class LSTMPPOTrainer:
 
         self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
 
+        tb_logdir = str(Path(*[self.state.cfg.log.tb_logdir, self.state.cfg.log.run_name]))
+
         self.tb_logger = TensorboardLogger(
-            logdir=self.state.cfg.log.tb_logdir,
+            logdir=tb_logdir,
             run_name=self.state.cfg.log.run_name,
         )
 
@@ -177,6 +179,8 @@ class LSTMPPOTrainer:
                 self.buffer.compute_returns_and_advantages(last_value)
 
                 self.optimize_policy()
+
+                self.log_scalars()
 
                 live.update(self.state.render_dashboard())
 
@@ -447,6 +451,21 @@ class LSTMPPOTrainer:
         value_loss = (value_loss * mask).sum() / mask.sum()
 
         return policy_loss, value_loss, approx_kl, clip_frac
+
+    def log_scalars(self):
+        self.tb_logger.log_ppo_scalars(
+            step=self.state.global_step,
+            metrics=self.state.metrics,
+            lr=self.state.lr,
+            entropy_coef=self.state.entropy_coef,
+            clip_range=self.state.clip_range,
+        )
+
+        if self.state.current_lstm_unit_diag is not None:
+            self.tb_logger.log_lstm_scalars(
+                step=self.state.global_step,
+                diag=self.state.current_lstm_unit_diag,
+            )
 
     def compute_lstm_unit_diagnostics(
         self, eval_output: PolicyEvalOutput, mask: Optional[torch.Tensor]
