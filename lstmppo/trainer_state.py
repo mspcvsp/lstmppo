@@ -5,15 +5,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .types import LSTMUnitPrev
 
-import io
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
 from rich.layout import Layout
 from rich.panel import Panel
-from torch.utils.tensorboard import SummaryWriter
 
 from .buffer import RecurrentRolloutBuffer
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
@@ -30,15 +27,14 @@ class TrainerState:
     target_kl: float = 0.0
     early_stopping_kl: float = 0.0
     metrics: Metrics = field(default_factory=Metrics)
-    writer: SummaryWriter = field(init=False)
-    jsonl_file: Path | str = ""
-    jsonl_fp: io.TextIOWrapper | None = None
     validation_mode: bool = False
 
     def __init__(self, cfg: Config, validation_mode: bool = False):
         self.cfg = cfg
         self.validation_mode = validation_mode
         self.metrics = Metrics()
+
+        self.tb_logdir = Path(*[self.cfg.log.tb_logdir, self.cfg.log.run_name])
 
         # Can’t have a non‑default field after default fields. Easiest
         # solution is don’t make prev_lstm_unit_metrics a dataclass field
@@ -65,10 +61,6 @@ class TrainerState:
 
         self._entropy_sch = EntropySchdeduler(self.cfg)
         self._lr_sch = LearningRateScheduler(self.cfg)
-
-        tb_logdir = Path(*[self.cfg.log.tb_logdir, self.cfg.log.run_name])
-
-        self.writer = SummaryWriter(log_dir=tb_logdir)
 
         self.jsonl_fp = None
 
@@ -187,23 +179,6 @@ class TrainerState:
         # Clamp clip range to safe bounds
         self.clip_range = float(torch.clamp(torch.tensor(self.clip_range), 0.05, 0.3))
 
-    def log_metrics(self):
-        record = self.metrics.to_dict()
-        assert self.writer is not None, "TensorBoard writer not initialized."
-
-        for key, value in record.items():
-            self.writer.add_scalar(key, value, self.global_step)
-
-        record["update"] = self.update_idx
-        record["lr"] = float(self.lr)
-        record["entropy_coef"] = float(self.entropy_coef)
-        record["clip_range"] = float(self.clip_range)
-
-        fp = self.jsonl_fp
-        if fp is not None:
-            fp.write(json.dumps(record) + "\n")
-            fp.flush()
-
     def init_stats(self):
         self.metrics.initialize()
 
@@ -260,9 +235,6 @@ class TrainerState:
             setattr(self.metrics, "entropy_scheduled", self.entropy_coef)
 
         self.lr = self._lr_sch(self.update_idx)
-
-        self.writer.add_scalar("entropy_coef", self.entropy_coef, self.update_idx)
-        self.writer.add_scalar("learning_rate", self.lr, self.update_idx)
 
         for param_group in optimizer.param_groups:
             param_group["lr"] = self.lr

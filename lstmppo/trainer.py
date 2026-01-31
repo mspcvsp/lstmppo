@@ -45,6 +45,7 @@ from torch.distributions.categorical import Categorical
 
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .env import RecurrentVecEnvWrapper
+from .logging.tensorboard_logger import TensorboardLogger
 from .policy import LSTMPPOPolicy
 
 # https://realpython.com/python-mixin/
@@ -86,6 +87,11 @@ class LSTMPPOTrainer:
         self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
 
         self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
+
+        self.tb_logger = TensorboardLogger(
+            logdir=self.state.cfg.log.tb_logdir,
+            run_name=self.state.cfg.log.run_name,
+        )
 
         if self.state.validation_mode:
             self.policy.eval()
@@ -159,7 +165,6 @@ class LSTMPPOTrainer:
         console = Console()
 
         with (
-            open(self.state.jsonl_file, "w") as self.state.jsonl_fp,
             Live(console=console, refresh_per_second=4) as live,
         ):
             for self.state.update_idx in range(total_updates):
@@ -337,8 +342,6 @@ class LSTMPPOTrainer:
         self.state.adapt_clip_range()
 
         self.state.kl_watchdog()
-
-        self.state.log_metrics()
 
     def optimize_chunk(self, mb: RecurrentMiniBatch):
         # ------- Forward pass -------
