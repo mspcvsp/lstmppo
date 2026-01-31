@@ -5,6 +5,7 @@ from torch.distributions.categorical import Categorical
 
 from .obs_encoder import build_obs_encoder
 from .types import Config, LSTMCoreOutput, LSTMGates, PolicyEvalInput, PolicyEvalOutput, PolicyInput, PolicyOutput
+from .trainer_state import TrainerState
 
 
 class GateLSTMCell(nn.Module):
@@ -108,23 +109,23 @@ class LSTMCore(nn.Module):
 
 
 class LSTMPPOPolicy(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, state: TrainerState):
         super().__init__()
 
-        self.ar_coef = cfg.lstm.lstm_ar_coef
-        self.tar_coef = cfg.lstm.lstm_tar_coef
+        self.ar_coef = state.cfg.lstm.lstm_ar_coef
+        self.tar_coef = state.cfg.lstm.lstm_tar_coef
 
         # If obs_space is None, rely on flat_obs_dim (tests do this intentionally)
-        if cfg.env.flat_obs_dim == 0:
+        if state.flat_obs_dim == 0:
             self.obs_dim = 0
         else:
-            self.obs_dim = cfg.env.flat_obs_dim
+            self.obs_dim = state.flat_obs_dim
 
-        obs_space = cfg.env.obs_space
+        obs_space = state.obs_space
         self.obs_encoder = build_obs_encoder(obs_space, self.obs_dim)
 
         # --- SiLU encoder ---
-        if cfg.env.flat_obs_dim == 0:
+        if state.flat_obs_dim == 0:
             """
             When obs_dim == 0, the environment provides no observation
             features. But the LSTM still needs an input vector of size
@@ -136,12 +137,12 @@ class LSTMPPOPolicy(nn.Module):
 
             This is exactly how RL libraries handle “no observation” cases.
             """
-            self.encoder = ZeroFeatureEncoder(cfg.lstm.enc_hidden_size)
+            self.encoder = ZeroFeatureEncoder(state.cfg.lstm.enc_hidden_size)
         else:
             self.encoder = nn.Sequential(
-                nn.Linear(cfg.obs_dim, cfg.lstm.enc_hidden_size),
+                nn.Linear(state.flat_obs_dim, state.cfg.lstm.enc_hidden_size),
                 nn.SiLU(),
-                nn.Linear(cfg.lstm.enc_hidden_size, cfg.lstm.enc_hidden_size),
+                nn.Linear(state.cfg.lstm.enc_hidden_size, state.cfg.lstm.enc_hidden_size),
                 nn.SiLU(),
             )
 
@@ -156,24 +157,24 @@ class LSTMPPOPolicy(nn.Module):
 
         # --- LN-LSTM with DropConnect ---
         self.lstm_cell = GateLSTMCell(
-            input_size=cfg.lstm.enc_hidden_size,
-            hidden_size=cfg.lstm.lstm_hidden_size,
-            dropconnect_p=cfg.lstm.dropconnect_p,
-            debug_mode=cfg.trainer.debug_mode,
+            input_size=state.cfg.lstm.enc_hidden_size,
+            hidden_size=state.cfg.lstm.lstm_hidden_size,
+            dropconnect_p=state.cfg.lstm.dropconnect_p,
+            debug_mode=state.cfg.trainer.debug_mode,
         )
 
         # Wrap it so diagnostics can call policy.lstm.initial_state(...)
         self.lstm = LSTMCore(self.lstm_cell)
 
-        self.ln = nn.LayerNorm(cfg.lstm.lstm_hidden_size)
+        self.ln = nn.LayerNorm(state.cfg.lstm.lstm_hidden_size)
 
         # --- Heads ---
-        if cfg.env.action_dim == 0:
+        if state.action_dim == 0:
             self.actor = nn.Identity()
         else:
-            self.actor = nn.Linear(cfg.lstm.lstm_hidden_size, cfg.env.action_dim)
+            self.actor = nn.Linear(state.cfg.lstm.lstm_hidden_size, state.action_dim)
 
-        self.critic = nn.Linear(cfg.lstm.lstm_hidden_size, 1)
+        self.critic = nn.Linear(state.cfg.lstm.lstm_hidden_size, 1)
 
         if isinstance(self.actor, nn.Linear):
             if self.actor.weight.numel() > 0:

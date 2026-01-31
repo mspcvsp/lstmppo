@@ -1,16 +1,17 @@
 import torch
 
-from .types import Config, LSTMStates, RecurrentBatch, RolloutStep
+from .trainer_state import TrainerState
+from .types import LSTMStates, RecurrentBatch, RolloutStep
 
 
 class RecurrentRolloutBuffer:
-    def __init__(self, cfg: Config, device):
+    def __init__(self, state: TrainerState, device):
         self.device = device
 
-        self.cfg = cfg.buffer_config
+        self.cfg = state.cfg.buffer_config
 
         # --- Storage ---
-        self.obs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, cfg.env.flat_obs_dim, device=self.device)
+        self.obs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, state.flat_obs_dim, device=self.device)
 
         self.actions = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, 1, device=self.device)
 

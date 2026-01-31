@@ -9,11 +9,11 @@ import torch
 
 from lstmppo.diagnostics.recurrent import compute_drift_sequence
 from lstmppo.policy import LSTMPPOPolicy
-from lstmppo.types import Config, initialize_config
+from lstmppo.trainer_state import TrainerState
 
 
 @pytest.mark.drift
-def test_drift_growth_smoothness():
+def test_drift_growth_smoothness(trainer_state: TrainerState):
     """
     Drift should grow smoothly on average across multiple sequences.
     Individual sequences may fluctuate due to float32 noise, so we test
@@ -22,18 +22,18 @@ def test_drift_growth_smoothness():
 
     torch.manual_seed(0)
 
+    assert trainer_state.env_info is not None
+
+    trainer_state.env_info.flat_obs_dim = 8
+    trainer_state.env_info.action_dim = 4
+
     # Number of independent drift rollouts to average over
     num_sequences = 32
     T = 64  # sequence length
 
-    cfg = Config()
-    cfg = initialize_config(cfg)
+    trainer_state.cfg.lstm.lstm_hidden_size = 32
 
-    cfg.env.flat_obs_dim = 8
-    cfg.env.action_dim = 4
-    cfg.lstm.lstm_hidden_size = 32
-
-    policy = LSTMPPOPolicy(cfg)
+    policy = LSTMPPOPolicy(trainer_state)
 
     drifts = []
 

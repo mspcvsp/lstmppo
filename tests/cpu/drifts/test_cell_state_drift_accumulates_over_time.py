@@ -22,22 +22,22 @@ import pytest
 import torch
 
 from lstmppo.policy import LSTMPPOPolicy
-from lstmppo.types import Config, PolicyInput
+from lstmppo.trainer_state import TrainerState
+from lstmppo.types import PolicyInput
 
 pytestmark = pytest.mark.drift
 
 
-def test_cell_state_drift_accumulates_over_time():
-    cfg = Config()
-    cfg.env.flat_obs_dim = 4
-    cfg.env.action_dim = 3
-    cfg.trainer.debug_mode = True
+def test_cell_state_drift_accumulates_over_time(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
+    assert trainer_state.env_info.flat_obs_dim == 4
+    assert trainer_state.env_info.action_dim == 3
 
-    policy = LSTMPPOPolicy(cfg)
+    policy = LSTMPPOPolicy(trainer_state)
     policy.eval()
 
     B = 3
-    H = cfg.lstm.lstm_hidden_size
+    H = trainer_state.cfg.lstm.lstm_hidden_size
 
     lengths = [5, 50]
     num_samples = 20  # average over multiple sequences
@@ -47,7 +47,7 @@ def test_cell_state_drift_accumulates_over_time():
     for L in lengths:
         drifts = []
         for _ in range(num_samples):
-            obs = torch.randn(B, L, cfg.env.flat_obs_dim)
+            obs = torch.randn(B, L, trainer_state.flat_obs_dim)
             h0 = torch.zeros(B, H)
             c0 = torch.zeros(B, H)
             out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))

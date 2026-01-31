@@ -47,6 +47,7 @@ from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .env import RecurrentVecEnvWrapper
 from .logging.tensorboard_logger import TensorboardLogger
 from .policy import LSTMPPOPolicy
+from .runtime_env_info import RuntimeEnvInfo
 
 # https://realpython.com/python-mixin/
 from .trainer_renderers import (
@@ -84,9 +85,12 @@ class LSTMPPOTrainer:
 
         self.env = RecurrentVecEnvWrapper(self.state.cfg, self.device)
 
-        self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
+        # Populate runtime environment info
+        self.state.env_info = RuntimeEnvInfo.from_env(self.env.venv.envs[0])
 
-        self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
+        self.policy = LSTMPPOPolicy(self.state).to(self.device)
+
+        self.buffer = RecurrentRolloutBuffer(self.state, self.device)
 
         tb_logdir = str(Path(*[self.state.cfg.log.tb_logdir, self.state.cfg.log.run_name]))
 

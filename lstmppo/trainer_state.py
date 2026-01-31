@@ -8,12 +8,16 @@ if TYPE_CHECKING:
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import gymnasium as gym
 import torch
+from gymnasium.spaces import Discrete
 from rich.layout import Layout
 from rich.panel import Panel
 
 from .buffer import RecurrentRolloutBuffer
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
+from .obs_encoder import get_flat_obs_dim
+from .runtime_env_info import RuntimeEnvInfo
 from .types import Config, EpisodeStats, LSTMUnitDiagnostics, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
 
 
@@ -33,6 +37,15 @@ class TrainerState:
         self.cfg = cfg
         self.validation_mode = validation_mode
         self.metrics = Metrics()
+
+        # Runtime environment info (populated by trainer)
+        self.env_info: RuntimeEnvInfo | None = None
+
+        env_metadata = get_env_metadata(cfg)
+
+        self.obs_space = env_metadata["obs_space"]
+        self.flat_obs_dim = env_metadata["flat_obs_dim"]
+        self.action_dim = env_metadata["action_dim"]
 
         # Stores current diagnostics for TensorBoard logging
         self.current_lstm_unit_diag: LSTMUnitDiagnostics | None = None
@@ -149,6 +162,10 @@ class TrainerState:
     @property
     def global_step(self) -> int:
         return self.update_idx * self.cfg.trainer.rollout_steps * self.cfg.env.num_envs
+
+    @property
+    def obs_dim(self):
+        return self.flat_obs_dim
 
     def kl_watchdog(self):
         """
@@ -294,3 +311,32 @@ def to_float(x):
 def explained_variance(y_pred, y_true):
     var_y = torch.var(y_true)
     return 1.0 - torch.var(y_true - y_pred) / (var_y + 1e-8)
+
+
+def get_env_metadata(cfg: Config):
+    # Build dummy env
+    dummy_env = gym.make(cfg.env.env_id)
+
+    obs_space = dummy_env.observation_space
+
+    action_space = dummy_env.action_space
+    if isinstance(action_space, Discrete):
+        action_dim = int(action_space.n)
+    else:
+        raise TypeError("Environment must have a Discrete action space")
+
+    spec = dummy_env.spec
+    if spec is not None:
+        max_episode_steps = spec.max_episode_steps
+    else:
+        max_episode_steps = None
+
+    flat_obs_dim = get_flat_obs_dim(obs_space)
+    dummy_env.close()
+
+    return {
+        "obs_space": obs_space,
+        "flat_obs_dim": flat_obs_dim,
+        "action_dim": action_dim,
+        "max_episode_steps": max_episode_steps,
+    }
