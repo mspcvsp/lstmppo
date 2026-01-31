@@ -110,7 +110,7 @@ class LoggingConfig:
 
 @dataclass
 class EnvironmentConfig:
-    env_id: str = "popgym-PositionOnlyCartPole-v0"
+    env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
     """Environment identifier"""
     num_envs: int = 64
     """ Number of environments """

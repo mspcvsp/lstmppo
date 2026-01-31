@@ -23,6 +23,7 @@ class RecurrentVecEnvWrapper:
     """
 
     def __init__(self, cfg: Config, device):
+        print(cfg.env.env_id)
         self.venv = SyncVectorEnv([make_env(cfg.env.env_id) for _ in range(cfg.env.num_envs)])
 
         self.num_envs = cfg.env.num_envs
