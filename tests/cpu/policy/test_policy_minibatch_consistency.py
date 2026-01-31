@@ -3,7 +3,7 @@ import torch
 
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.trainer_state import TrainerState
-from lstmppo.types import Config, PolicyEvalInput, PolicyInput
+from lstmppo.types import PolicyEvalInput, PolicyInput
 
 pytestmark = pytest.mark.policy
 
@@ -14,8 +14,6 @@ def test_policy_minibatch_consistency(trainer_state: TrainerState):
     identical values and log-probs when given the same inputs and
     initial hidden state.
     """
-
-    cfg = Config()
 
     assert trainer_state.env_info is not None
     trainer_state.env_info.flat_obs_dim = 4
