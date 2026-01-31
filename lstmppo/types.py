@@ -74,7 +74,7 @@ class TrainerConfig:
     """ Sets the value of torch.backends.cudnn.deterministic """
     rollout_steps: int = 256
     """ Horizon"""
-    mini_batch_envs: int = 4
+    mini_batch_envs: int = 8
     """ Number of environments / minibatch"""
     updates_per_checkpoint: int = 10
     """ Number of updates / checkpoint """
@@ -114,15 +114,15 @@ class LoggingConfig:
 
 @dataclass
 class EnvironmentConfig:
-    env_id: str = "CartPole-v1"
+    env_id: str = "popgym-PositionOnlyCartPole-v0"
     """Environment identifier"""
-    num_envs: int = 16
+    num_envs: int = 64
     """ Number of environments """
-    obs_space: gym.Space | None = None
+    obs_space: gym.Space | None = field(default=None, metadata={"tyro": "suppress"})
     """ Observation space """
-    flat_obs_dim: int = 0
+    flat_obs_dim: int = field(default=0, metadata={"tyro": "suppress"})
     """ Flattened observation dimension """
-    action_dim: int = 0
+    action_dim: int = field(default=0, metadata={"tyro": "suppress"})
     """ Action dimension """
     max_episode_steps: int | None = None
     """ Maximum number of steps per episode """
