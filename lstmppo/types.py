@@ -814,6 +814,17 @@ class MetricsHistory:
     c_entropy: list = field(default_factory=list)
     h_entropy: list = field(default_factory=list)
 
+    i_sat_low: list = field(default_factory=list)
+    i_sat_high: list = field(default_factory=list)
+    f_sat_low: list = field(default_factory=list)
+    f_sat_high: list = field(default_factory=list)
+    o_sat_low: list = field(default_factory=list)
+    o_sat_high: list = field(default_factory=list)
+
+    g_sat: list = field(default_factory=list)
+    c_sat: list = field(default_factory=list)
+    h_sat: list = field(default_factory=list)
+
     def update(self, upd: PolicyUpdateInfo, stats: Metrics):
         self.push("kl", upd.approx_kl.item())
 
