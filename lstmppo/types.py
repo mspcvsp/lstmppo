@@ -861,8 +861,12 @@ class MetricsHistory:
         mapping["ep_return"] = stats.avg_ep_returns
         mapping["ep_len"] = stats.avg_ep_len
 
-        for name, tensor in mapping.items():
-            self.push(name, tensor.item())
+        for name, value in mapping.items():
+            if isinstance(value, torch.Tensor):
+                self.push(name, value.item())
+            else:
+                # Already a float
+                self.push(name, float(value))
 
     def push(self, name: str, value: float):
         hist = getattr(self, name)
