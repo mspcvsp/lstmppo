@@ -9,12 +9,8 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Any, Optional
 
-import gymnasium as gym
 import torch
-from gymnasium.spaces import Discrete
 from rich.text import Text
-
-from .obs_encoder import get_flat_obs_dim
 
 
 @dataclass
@@ -74,7 +70,7 @@ class TrainerConfig:
     """ Sets the value of torch.backends.cudnn.deterministic """
     rollout_steps: int = 256
     """ Horizon"""
-    mini_batch_envs: int = 4
+    mini_batch_envs: int = 8
     """ Number of environments / minibatch"""
     updates_per_checkpoint: int = 10
     """ Number of updates / checkpoint """
@@ -94,6 +90,10 @@ class TrainerConfig:
     """ LSTM gate saturation epsilon """
     gate_ent_eps: float = 1e-6
     """ LSTM gate entropy epsilon """
+    upd_between_per_unit_hist_upds: int = 10
+    """ Number of updates between per-unit histogram updates """
+    rollouts_per_heatmap_upd: int = 5
+    """ Number of rollouts between heatmap updates """
 
 
 @dataclass
@@ -110,16 +110,10 @@ class LoggingConfig:
 
 @dataclass
 class EnvironmentConfig:
-    env_id: str = "CartPole-v1"
+    env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
     """Environment identifier"""
-    num_envs: int = 16
+    num_envs: int = 64
     """ Number of environments """
-    obs_space: gym.Space | None = None
-    """ Observation space """
-    flat_obs_dim: int = 0
-    """ Flattened observation dimension """
-    action_dim: int = 0
-    """ Action dimension """
     max_episode_steps: int | None = None
     """ Maximum number of steps per episode """
     max_env_history: int = 30
@@ -159,14 +153,6 @@ class Config:
             lam=self.ppo.gae_lambda,
             lstm_hidden_size=self.lstm.lstm_hidden_size,
         )
-
-    @property
-    def obs_dim(self):
-        return self.env.flat_obs_dim
-
-    @property
-    def action_dim(self):
-        return self.env.action_dim
 
     def init_run_name(self, datetime_str=None):
         if datetime_str is None:
@@ -952,27 +938,6 @@ def initialize_config(cfg: Config, **kwargs):
 
     if cfg.trainer.debug_mode:
         torch.autograd.set_detect_anomaly(True)
-
-    # Build dummy env
-    dummy_env = gym.make(cfg.env.env_id)
-
-    cfg.env.obs_space = dummy_env.observation_space
-
-    action_space = dummy_env.action_space
-    if isinstance(action_space, Discrete):
-        cfg.env.action_dim = int(action_space.n)
-    else:
-        raise TypeError("Environment must have a Discrete action space")
-
-    spec = dummy_env.spec
-    if spec is not None:
-        cfg.env.max_episode_steps = spec.max_episode_steps
-    else:
-        cfg.env.max_episode_steps = None
-
-    cfg.env.flat_obs_dim = get_flat_obs_dim(cfg.env.obs_space)
-
-    dummy_env.close()
 
     # Build run name
     cfg.init_run_name(kwargs.get("datetime_str", None))

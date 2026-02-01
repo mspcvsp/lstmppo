@@ -5,19 +5,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .types import LSTMUnitPrev
 
-import io
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
 from rich.layout import Layout
 from rich.panel import Panel
-from torch.utils.tensorboard import SummaryWriter
 
 from .buffer import RecurrentRolloutBuffer
 from .learning_sch import EntropySchdeduler, LearningRateScheduler
-from .types import Config, EpisodeStats, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
+from .runtime_env_info import RuntimeEnvInfo
+from .types import Config, EpisodeStats, LSTMUnitDiagnostics, LSTMUnitPrev, Metrics, MetricsHistory, PolicyUpdateInfo
 
 
 @dataclass
@@ -30,9 +28,6 @@ class TrainerState:
     target_kl: float = 0.0
     early_stopping_kl: float = 0.0
     metrics: Metrics = field(default_factory=Metrics)
-    writer: SummaryWriter = field(init=False)
-    jsonl_file: Path | str = ""
-    jsonl_fp: io.TextIOWrapper | None = None
     validation_mode: bool = False
 
     def __init__(self, cfg: Config, validation_mode: bool = False):
@@ -40,9 +35,13 @@ class TrainerState:
         self.validation_mode = validation_mode
         self.metrics = Metrics()
 
-        # Can’t have a non‑default field after default fields. Easiest
-        # solution is don’t make prev_lstm_unit_metrics a dataclass field
-        # at all — treat it as a plain attribute
+        # Runtime environment info (populated by trainer)
+        self.env_info = RuntimeEnvInfo(flat_obs_dim=0, action_dim=0, obs_space=None)
+
+        # Stores current diagnostics for TensorBoard logging
+        self.current_lstm_unit_diag: LSTMUnitDiagnostics | None = None
+
+        # Previous metrics for drift computation
         self.prev_lstm_unit_metrics = None
 
         if self.validation_mode:
@@ -61,14 +60,10 @@ class TrainerState:
         self.clip_range = self.cfg.ppo.initial_clip_range
         self.target_kl = self.cfg.ppo.target_kl
 
-        self.early_stopping_kl = self.cfg.ppo.target_kl * cfg.ppo.early_stopping_kl_factor
+        self.early_stopping_kl = self.cfg.ppo.target_kl * self.cfg.ppo.early_stopping_kl_factor
 
         self._entropy_sch = EntropySchdeduler(self.cfg)
         self._lr_sch = LearningRateScheduler(self.cfg)
-
-        tb_logdir = Path(*[self.cfg.log.tb_logdir, self.cfg.log.run_name])
-
-        self.writer = SummaryWriter(log_dir=tb_logdir)
 
         self.jsonl_fp = None
 
@@ -118,6 +113,9 @@ class TrainerState:
 
         self.history.update(upd, self.metrics)
 
+        # NEW: store current diagnostics for logging
+        self.current_lstm_unit_diag = upd.lstm_unit_diag
+
     def update_episode_stats(self, ep_stats: EpisodeStats):
         self.metrics.update_episode_stats(ep_stats)
 
@@ -156,6 +154,33 @@ class TrainerState:
     def global_step(self) -> int:
         return self.update_idx * self.cfg.trainer.rollout_steps * self.cfg.env.num_envs
 
+    @property
+    def obs_dim(self):
+        assert self.env_info is not None
+        return self.env_info.flat_obs_dim
+
+    @property
+    def flat_obs_dim(self):
+        assert self.env_info is not None, "env_info must be set before accessing flat_obs_dim"
+        return self.env_info.flat_obs_dim
+
+    @flat_obs_dim.setter
+    def flat_obs_dim(self, value):
+        if self.env_info is None:
+            raise ValueError("env_info must be initialized before setting flat_obs_dim")
+        self.env_info.flat_obs_dim = value
+
+    @property
+    def action_dim(self):
+        assert self.env_info is not None, "env_info must be set before accessing action_dim"
+        return self.env_info.action_dim
+
+    @action_dim.setter
+    def action_dim(self, value):
+        if self.env_info is None:
+            raise ValueError("env_info must be initialized before setting action_dim")
+        self.env_info.action_dim = value
+
     def kl_watchdog(self):
         """
         KL is only meaningful after:
@@ -186,23 +211,6 @@ class TrainerState:
 
         # Clamp clip range to safe bounds
         self.clip_range = float(torch.clamp(torch.tensor(self.clip_range), 0.05, 0.3))
-
-    def log_metrics(self):
-        record = self.metrics.to_dict()
-        assert self.writer is not None, "TensorBoard writer not initialized."
-
-        for key, value in record.items():
-            self.writer.add_scalar(key, value, self.global_step)
-
-        record["update"] = self.update_idx
-        record["lr"] = float(self.lr)
-        record["entropy_coef"] = float(self.entropy_coef)
-        record["clip_range"] = float(self.clip_range)
-
-        fp = self.jsonl_fp
-        if fp is not None:
-            fp.write(json.dumps(record) + "\n")
-            fp.flush()
 
     def init_stats(self):
         self.metrics.initialize()
@@ -260,9 +268,6 @@ class TrainerState:
             setattr(self.metrics, "entropy_scheduled", self.entropy_coef)
 
         self.lr = self._lr_sch(self.update_idx)
-
-        self.writer.add_scalar("entropy_coef", self.entropy_coef, self.update_idx)
-        self.writer.add_scalar("learning_rate", self.lr, self.update_idx)
 
         for param_group in optimizer.param_groups:
             param_group["lr"] = self.lr

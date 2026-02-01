@@ -45,7 +45,9 @@ from torch.distributions.categorical import Categorical
 
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .env import RecurrentVecEnvWrapper
+from .logging.tensorboard_logger import TensorboardLogger
 from .policy import LSTMPPOPolicy
+from .runtime_env_info import RuntimeEnvInfo
 
 # https://realpython.com/python-mixin/
 from .trainer_renderers import (
@@ -83,9 +85,19 @@ class LSTMPPOTrainer:
 
         self.env = RecurrentVecEnvWrapper(self.state.cfg, self.device)
 
-        self.policy = LSTMPPOPolicy(self.state.cfg).to(self.device)
+        # Populate runtime environment info
+        self.state.env_info = RuntimeEnvInfo.from_env(self.env.venv.envs[0])
 
-        self.buffer = RecurrentRolloutBuffer(self.state.cfg, self.device)
+        self.policy = LSTMPPOPolicy(self.state).to(self.device)
+
+        self.buffer = RecurrentRolloutBuffer(self.state, self.device)
+
+        tb_logdir = str(Path(*[self.state.cfg.log.tb_logdir, self.state.cfg.log.run_name]))
+
+        self.tb_logger = TensorboardLogger(
+            logdir=tb_logdir,
+            run_name=self.state.cfg.log.run_name,
+        )
 
         if self.state.validation_mode:
             self.policy.eval()
@@ -159,7 +171,6 @@ class LSTMPPOTrainer:
         console = Console()
 
         with (
-            open(self.state.jsonl_file, "w") as self.state.jsonl_fp,
             Live(console=console, refresh_per_second=4) as live,
         ):
             for self.state.update_idx in range(total_updates):
@@ -172,6 +183,23 @@ class LSTMPPOTrainer:
                 self.buffer.compute_returns_and_advantages(last_value)
 
                 self.optimize_policy()
+
+                self.log_scalars()
+
+                """
+                Histograms reflect distribution of per‑unit values across the LSTM:
+                - gate means
+                - drift
+                - norms
+                - entropy
+                - saturation
+                """
+                if self.state.current_lstm_unit_diag is not None:
+                    if self.state.update_idx % self.state.cfg.trainer.upd_between_per_unit_hist_upds == 0:
+                        self.tb_logger.log_lstm_histograms(
+                            step=self.state.global_step,
+                            diag=self.state.current_lstm_unit_diag,
+                        )
 
                 live.update(self.state.render_dashboard())
 
@@ -322,6 +350,26 @@ class LSTMPPOTrainer:
 
         self.state.update_episode_stats(ep_stats)
 
+        """
+        Heatmaps visualize temporal structure across the rollout:
+
+        - i-gate over time
+        - f-gate over time
+        - g-gate over time
+        - o-gate over time
+        - c-state over time
+        - h-state over time
+
+        These require the full (T, B, H) gate tensors, which only exist after a rollout.
+        """
+        if self.state.update_idx % self.state.cfg.trainer.rollouts_per_heatmap_upd == 0:
+            full_eval = self.replay_policy_on_rollout()
+
+            self.tb_logger.log_lstm_heatmaps(
+                step=self.state.global_step,
+                gates=full_eval.gates,
+            )
+
         return last_value
 
     def optimize_policy(self):
@@ -337,8 +385,6 @@ class LSTMPPOTrainer:
         self.state.adapt_clip_range()
 
         self.state.kl_watchdog()
-
-        self.state.log_metrics()
 
     def optimize_chunk(self, mb: RecurrentMiniBatch):
         # ------- Forward pass -------
@@ -444,6 +490,21 @@ class LSTMPPOTrainer:
         value_loss = (value_loss * mask).sum() / mask.sum()
 
         return policy_loss, value_loss, approx_kl, clip_frac
+
+    def log_scalars(self):
+        self.tb_logger.log_ppo_scalars(
+            step=self.state.global_step,
+            metrics=self.state.metrics,
+            lr=self.state.lr,
+            entropy_coef=self.state.entropy_coef,
+            clip_range=self.state.clip_range,
+        )
+
+        if self.state.current_lstm_unit_diag is not None:
+            self.tb_logger.log_lstm_scalars(
+                step=self.state.global_step,
+                diag=self.state.current_lstm_unit_diag,
+            )
 
     def compute_lstm_unit_diagnostics(
         self, eval_output: PolicyEvalOutput, mask: Optional[torch.Tensor]

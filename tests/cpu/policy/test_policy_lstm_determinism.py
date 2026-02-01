@@ -13,16 +13,18 @@ This test catches regressions in:
 This test ensures that PPO runs are reproducible, which is essential for
 debugging, ablation studies, and scientific rigor
 """
+
 import pytest
 import torch
 
 from lstmppo.policy import LSTMPPOPolicy
-from lstmppo.types import Config, PolicyInput
+from lstmppo.trainer_state import TrainerState
+from lstmppo.types import PolicyInput
 
 pytestmark = pytest.mark.policy
 
 
-def test_policy_lstm_determinism():
+def test_policy_lstm_determinism(trainer_state: TrainerState):
     """
     Smoke test: the policy must produce identical outputs when:
       - the same seed is set
@@ -35,22 +37,21 @@ def test_policy_lstm_determinism():
     # Fix global RNG state
     torch.manual_seed(123)
 
-    cfg = Config()
-    cfg.env.obs_space = None
-    cfg.env.flat_obs_dim = 0          # ZeroFeatureEncoder path
-    cfg.env.action_dim = 3            # actor active
+    assert trainer_state.env_info is not None
+    trainer_state.env_info.flat_obs_dim = 0  # ZeroFeatureEncoder path
+    trainer_state.env_info.action_dim = 3  # actor active
 
-    cfg.lstm.enc_hidden_size = 16
-    cfg.lstm.lstm_hidden_size = 8
+    trainer_state.cfg.lstm.enc_hidden_size = 16
+    trainer_state.cfg.lstm.lstm_hidden_size = 8
 
     # Build two identical policies under the same seed
-    policy1 = LSTMPPOPolicy(cfg)
+    policy1 = LSTMPPOPolicy(trainer_state)
     torch.manual_seed(123)
-    policy2 = LSTMPPOPolicy(cfg)
+    policy2 = LSTMPPOPolicy(trainer_state)
 
     B = 4
     T = 5
-    H = cfg.lstm.lstm_hidden_size
+    H = trainer_state.cfg.lstm.lstm_hidden_size
 
     obs = torch.zeros(B, T, 0)
     h0 = torch.zeros(B, H)
@@ -75,5 +76,5 @@ def test_policy_lstm_determinism():
 
     # Compare all outputs
     for (log1, val1), (log2, val2) in zip(outputs1, outputs2):
-        assert torch.allclose(log1, log2)
-        assert torch.allclose(val1, val2)
+        assert torch.allclose(log1, log2, atol=1e-7, rtol=1e-7)
+        assert torch.allclose(val1, val2, atol=1e-7, rtol=1e-7)

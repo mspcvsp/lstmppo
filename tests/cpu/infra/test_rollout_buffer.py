@@ -14,26 +14,27 @@ import pytest
 import torch
 
 from lstmppo.buffer import RecurrentRolloutBuffer
-from lstmppo.types import Config, LSTMGates, RolloutStep
+from lstmppo.trainer_state import TrainerState
+from lstmppo.types import LSTMGates, RolloutStep
 
 pytestmark = pytest.mark.infra
 
 
-def _make_buffer():
-    cfg = Config()
-    cfg.trainer.cuda = False  # ← force CPU for tests
+def _make_buffer(trainer_state: TrainerState):
+    trainer_state.cfg.trainer.cuda = False  # ← force CPU for tests
     device = torch.device("cpu")
 
-    return cfg, device, RecurrentRolloutBuffer(cfg, device)
+    return trainer_state.cfg, device, RecurrentRolloutBuffer(trainer_state, device)
 
 
-def test_buffer_initialization_shapes():
-    cfg, _, buf = _make_buffer()
+def test_buffer_initialization_shapes(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
+    cfg, _, buf = _make_buffer(trainer_state)
 
-    T = cfg.trainer.rollout_steps
-    B = cfg.env.num_envs
-    D = cfg.env.flat_obs_dim
-    H = cfg.lstm.lstm_hidden_size
+    T = trainer_state.cfg.trainer.rollout_steps
+    B = trainer_state.cfg.env.num_envs
+    D = trainer_state.env_info.flat_obs_dim
+    H = trainer_state.cfg.lstm.lstm_hidden_size
 
     assert buf.obs.shape == (T, B, D)
     assert buf.actions.shape == (T, B, 1)
@@ -46,8 +47,8 @@ def test_buffer_initialization_shapes():
     assert buf.cxs.shape == (T, B, H)
 
 
-def test_buffer_device_and_dtype():
-    _, device, buf = _make_buffer()
+def test_buffer_device_and_dtype(trainer_state: TrainerState):
+    _, device, buf = _make_buffer(trainer_state)
 
     for t in [
         buf.obs,
@@ -63,11 +64,12 @@ def test_buffer_device_and_dtype():
         assert t.dtype in (torch.float32, torch.bool, torch.int64)
 
 
-def test_add_increments_pointer_and_writes_data():
-    cfg, _, buf = _make_buffer()
+def test_add_increments_pointer_and_writes_data(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
+    cfg, _, buf = _make_buffer(trainer_state)
 
     B = cfg.env.num_envs
-    D = cfg.env.flat_obs_dim
+    D = trainer_state.env_info.flat_obs_dim
     H = cfg.lstm.lstm_hidden_size
 
     obs = torch.randn(B, D)
@@ -109,11 +111,12 @@ def test_add_increments_pointer_and_writes_data():
     assert torch.allclose(buf.actions[0].squeeze(-1), act)
 
 
-def test_fill_buffer_reaches_full_pointer():
-    cfg, _, buf = _make_buffer()
+def test_fill_buffer_reaches_full_pointer(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
+    cfg, _, buf = _make_buffer(trainer_state)
 
     B = cfg.env.num_envs
-    D = cfg.env.flat_obs_dim
+    D = trainer_state.env_info.flat_obs_dim
     H = cfg.lstm.lstm_hidden_size
 
     for _ in range(cfg.trainer.rollout_steps):
@@ -154,8 +157,8 @@ def test_fill_buffer_reaches_full_pointer():
     assert buf.step == cfg.trainer.rollout_steps
 
 
-def test_mask_logic_cpu():
-    _, _, buf = _make_buffer()
+def test_mask_logic_cpu(trainer_state: TrainerState):
+    _, _, buf = _make_buffer(trainer_state)
 
     # manually set termination/truncation
     buf.terminated[0] = True
@@ -167,8 +170,8 @@ def test_mask_logic_cpu():
     assert torch.all(buf.mask[2] == 1)
 
 
-def test_reset_clears_state():
-    _, _, buf = _make_buffer()
+def test_reset_clears_state(trainer_state: TrainerState):
+    _, _, buf = _make_buffer(trainer_state)
 
     buf.terminated[0] = True
     buf.truncated[0] = True
@@ -181,11 +184,12 @@ def test_reset_clears_state():
     assert torch.all(buf.mask == 1)
 
 
-def test_rollout_step_structure():
-    cfg, _, buf = _make_buffer()
+def test_rollout_step_structure(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
+    cfg, _, buf = _make_buffer(trainer_state)
 
     B = cfg.env.num_envs
-    D = cfg.obs_dim
+    D = trainer_state.env_info.flat_obs_dim
     H = cfg.lstm.lstm_hidden_size
 
     obs = torch.randn(B, D)

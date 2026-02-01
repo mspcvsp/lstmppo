@@ -1,6 +1,7 @@
 from typing import Sequence, cast
 
 import gymnasium as gym
+import popgym  # noqa: F401  # required to register POPGym environments
 import torch
 from gymnasium.vector import SyncVectorEnv
 from numpy.random import MT19937, Generator, SeedSequence

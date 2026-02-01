@@ -13,26 +13,26 @@ import pytest
 import torch
 
 from lstmppo.policy import LSTMPPOPolicy
-from lstmppo.types import Config, PolicyInput
+from lstmppo.trainer_state import TrainerState
+from lstmppo.types import PolicyInput
 
 pytestmark = pytest.mark.drift
 
 
-def test_hidden_state_drift_accumulates_over_time():
-    cfg = Config()
-    cfg.env.flat_obs_dim = 4
-    cfg.env.action_dim = 3
-    cfg.trainer.debug_mode = True
+def test_hidden_state_drift_accumulates_over_time(trainer_state: TrainerState):
+    assert trainer_state.env_info is not None
+    trainer_state.env_info.flat_obs_dim = 4
+    trainer_state.env_info.action_dim = 3
 
-    policy = LSTMPPOPolicy(cfg)
+    policy = LSTMPPOPolicy(trainer_state)
     policy.eval()
 
     B = 3
-    H = cfg.lstm.lstm_hidden_size
+    H = trainer_state.cfg.lstm.lstm_hidden_size
 
     # Short vs long sequence
-    obs_short = torch.randn(B, 5, cfg.env.flat_obs_dim)
-    obs_long = torch.randn(B, 50, cfg.env.flat_obs_dim)
+    obs_short = torch.randn(B, 5, trainer_state.env_info.flat_obs_dim)
+    obs_long = torch.randn(B, 50, trainer_state.env_info.flat_obs_dim)
 
     h0 = torch.zeros(B, H)
     c0 = torch.zeros(B, H)
