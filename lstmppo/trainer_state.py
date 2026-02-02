@@ -35,7 +35,7 @@ class TrainerState:
         self.validation_mode = validation_mode
         self.metrics = Metrics()
 
-        self.last_update_walltime = 0.0
+        self.update_walltime = 0.0
         self.rollout_time = 0.0
         self.optimize_time = 0.0
 

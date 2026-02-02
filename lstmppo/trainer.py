@@ -44,6 +44,8 @@ from rich.live import Live
 from torch import nn
 from torch.distributions.categorical import Categorical
 
+import wandb
+
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .env import RecurrentVecEnvWrapper
 from .logging.jsonl_logger import JSONLLogger
@@ -201,8 +203,10 @@ class LSTMPPOTrainer:
                 self.optimize_policy()
                 self.state.optimize_time = time.time() - t0
 
+                # Total walltime for THIS update
+                self.state.update_walltime = time.time() - update_start
+
                 self.log_scalars()
-                self.log_runtime(update_start)
 
                 """
                 Histograms reflect distribution of per‑unit values across the LSTM:
@@ -526,7 +530,6 @@ class LSTMPPOTrainer:
                 diag=self.state.current_lstm_unit_diag,
             )
 
-    def log_runtime(self, update_start):
         if hasattr(self, "jsonl_logger"):
             self.jsonl_logger.log(
                 {
@@ -534,10 +537,23 @@ class LSTMPPOTrainer:
                     "update_idx": self.state.update_idx,
                     "rollout_time": self.state.rollout_time,
                     "optimize_time": self.state.optimize_time,
-                    "update_walltime": time.time() - update_start,
+                    "update_walltime": self.state.update_walltime,
                     **self.state.metrics.to_dict(),
                 }
             )
+
+        self.tb_logger.writer.add_scalar("runtime/rollout_time", self.state.rollout_time, self.state.global_step)
+        self.tb_logger.writer.add_scalar("runtime/optimize_time", self.state.optimize_time, self.state.global_step)
+        self.tb_logger.writer.add_scalar("runtime/update_walltime", self.state.update_walltime, self.state.global_step)
+
+        wandb.log(
+            {
+                "runtime/rollout_time": self.state.rollout_time,
+                "runtime/optimize_time": self.state.optimize_time,
+                "runtime/update_walltime": self.state.update_walltime,
+            },
+            step=self.state.global_step,
+        )
 
     def compute_lstm_unit_diagnostics(
         self, eval_output: PolicyEvalOutput, mask: Optional[torch.Tensor]
