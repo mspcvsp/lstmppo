@@ -561,7 +561,6 @@ class LSTMPPOTrainer:
         """
         Computes per-unit LSTM diagnostics (shape [H]) instead of scalars.
         """
-
         # (T, B, H)
         i_g = eval_output.gates.i_gates
         f_g = eval_output.gates.f_gates
