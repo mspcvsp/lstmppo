@@ -45,6 +45,7 @@ from torch.distributions.categorical import Categorical
 
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .env import RecurrentVecEnvWrapper
+from .logging.jsonl_logger import JSONLLogger
 from .logging.tensorboard_logger import TensorboardLogger
 from .policy import LSTMPPOPolicy
 from .runtime_env_info import RuntimeEnvInfo
@@ -99,6 +100,9 @@ class LSTMPPOTrainer:
             run_name=self.state.cfg.log.run_name,
         )
 
+        jsonl_path = Path(cfg.log.jsonl_path) / f"{cfg.log.run_name}.jsonl"
+        self.jsonl_logger = JSONLLogger(str(jsonl_path))
+
         if self.state.validation_mode:
             self.policy.eval()
 
@@ -150,6 +154,11 @@ class LSTMPPOTrainer:
             cfg.ppo.target_kl = 0.005
             cfg.sched.start_entropy_coef = 0.1
             cfg.sched.end_entropy_coef = 0.0
+        elif preset_name == "repeat_previous_easy":
+            cfg.env.env_id = "popgym-RepeatPreviousEasy-v0"
+            cfg.ppo.target_kl = 0.005
+            cfg.sched.start_entropy_coef = 0.1
+            cfg.sched.end_entropy_coef = 0.0
 
         cfg = initialize_config(cfg, **kwargs)
 
@@ -186,6 +195,14 @@ class LSTMPPOTrainer:
 
                 self.log_scalars()
 
+                self.jsonl_logger.log(
+                    {
+                        "global_step": self.state.global_step,
+                        "update_idx": self.state.update_idx,
+                        **self.state.metrics.to_dict(),
+                    }
+                )
+
                 """
                 Histograms reflect distribution of per‑unit values across the LSTM:
                 - gate means
@@ -205,6 +222,8 @@ class LSTMPPOTrainer:
 
                 if self.state.should_save_checkpoint():
                     self.save_checkpoint()
+
+        self.jsonl_logger.close()
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)

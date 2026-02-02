@@ -22,8 +22,8 @@ import copy
 from typing import List
 
 import tyro
-import wandb
 
+import wandb
 from lstmppo.seed import set_global_seeds
 from lstmppo.trainer import LSTMPPOTrainer
 from lstmppo.types import Config
