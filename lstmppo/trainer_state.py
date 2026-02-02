@@ -114,6 +114,7 @@ class TrainerState:
         - DropConnect issues
         """
         self.metrics.accumulate(upd)
+        self.metrics.steps += 1
 
         self.history.update(upd, self.metrics)
 
