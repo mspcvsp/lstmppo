@@ -33,6 +33,7 @@ PPO loss
 """
 
 import random
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -183,25 +184,25 @@ class LSTMPPOTrainer:
             Live(console=console, refresh_per_second=4) as live,
         ):
             for self.state.update_idx in range(total_updates):
+                update_start = time.time()
+
                 self.state.init_stats()
 
                 self.state.apply_schedules(self.optimizer)
 
+                # ---- Rollout timing ----
+                t0 = time.time()
                 last_value = self.collect_rollout()
+                self.state.rollout_time = time.time() - t0
 
+                # ---- Optimization timing ----
+                t0 = time.time()
                 self.buffer.compute_returns_and_advantages(last_value)
-
                 self.optimize_policy()
+                self.state.optimize_time = time.time() - t0
 
                 self.log_scalars()
-
-                self.jsonl_logger.log(
-                    {
-                        "global_step": self.state.global_step,
-                        "update_idx": self.state.update_idx,
-                        **self.state.metrics.to_dict(),
-                    }
-                )
+                self.log_runtime(update_start)
 
                 """
                 Histograms reflect distribution of per‑unit values across the LSTM:
@@ -523,6 +524,19 @@ class LSTMPPOTrainer:
             self.tb_logger.log_lstm_scalars(
                 step=self.state.global_step,
                 diag=self.state.current_lstm_unit_diag,
+            )
+
+    def log_runtime(self, update_start):
+        if hasattr(self, "jsonl_logger"):
+            self.jsonl_logger.log(
+                {
+                    "global_step": self.state.global_step,
+                    "update_idx": self.state.update_idx,
+                    "rollout_time": self.state.rollout_time,
+                    "optimize_time": self.state.optimize_time,
+                    "update_walltime": time.time() - update_start,
+                    **self.state.metrics.to_dict(),
+                }
             )
 
     def compute_lstm_unit_diagnostics(
