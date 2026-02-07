@@ -1,5 +1,25 @@
 """
-Ensures diagnostics match regardless of input layout.
+This test MUST use the real LSTMPPOPolicy and real TrainerState.
+
+Why:
+-----
+Gate diagnostics must be invariant to input layout. Whether observations
+arrive as batch‑major (B, T, F) or time‑major (T, B, F), the underlying
+LSTM dynamics and gate activations must be identical after appropriate
+transposition.
+
+This invariant ensures:
+    • correct encoder → LSTM integration
+    • consistent gate extraction in both forward() and evaluate_actions_sequence()
+    • correct time/batch transposition logic
+    • stable diagnostics across rollout and evaluation paths
+    • no silent shape‑related regressions
+
+Any fake state, fake policy, or synthetic rollout would bypass the real
+LSTM math and invalidate this consistency check.
+
+This is a sentinel test for gate‑diagnostic correctness. Do not replace
+the real model here.
 """
 
 import pytest
@@ -21,16 +41,19 @@ def test_gate_diagnostics_time_major_vs_batch_major(trainer_state: TrainerState)
     policy.eval()
 
     B, T = 3, 5
-    obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-    obs_tm = obs.transpose(0, 1)  # (T, B, F)
+    H = trainer_state.cfg.lstm.lstm_hidden_size
+    D = trainer_state.env_info.flat_obs_dim
 
-    h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
+    obs_bm = torch.randn(B, T, D)
+    obs_tm = obs_bm.transpose(0, 1)  # (T, B, F)
 
-    # Batch-major
-    out_bm = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
+    h0 = torch.zeros(B, H)
+    c0 = torch.zeros(B, H)
 
-    # Time-major → convert to batch-major inside
+    # Batch‑major path
+    out_bm = policy.forward(PolicyInput(obs=obs_bm, hxs=h0, cxs=c0))
+
+    # Time‑major path (policy converts internally to batch‑major)
     out_tm = policy.evaluate_actions_sequence(
         PolicyEvalInput(
             obs=obs_tm,
@@ -40,7 +63,7 @@ def test_gate_diagnostics_time_major_vs_batch_major(trainer_state: TrainerState)
         )
     )
 
-    # Compare gate tensors (transpose time-major to batch-major)
+    # Compare gate tensors (transpose time‑major to batch‑major)
     for g_bm, g_tm in [
         (out_bm.gates.i_gates, out_tm.gates.i_gates.transpose(0, 1)),
         (out_bm.gates.f_gates, out_tm.gates.f_gates.transpose(0, 1)),
