@@ -1,11 +1,10 @@
 import torch
 
 from lstmppo.buffer import RecurrentRolloutBuffer
+from tests.cpu.aux_pred.conftest import FakeState
 
-from .conftest import fake_state
 
-
-def test_aux_targets_alignment():
+def test_aux_targets_alignment(fake_state: FakeState):
     # Create fake rollout
     T, B, obs_dim = 5, 2, 3
     buf = RecurrentRolloutBuffer(fake_state, device="cpu")

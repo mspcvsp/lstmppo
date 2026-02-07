@@ -1,11 +1,10 @@
 import torch
 
 from lstmppo.buffer import RecurrentRolloutBuffer
+from tests.cpu.aux_pred.conftest import FakeState
 
-from .conftest import fake_state
 
-
-def test_aux_targets_tbptt_chunks():
+def test_aux_targets_tbptt_chunks(fake_state: FakeState):
     T = 8
     K = 3  # chunk length
 
