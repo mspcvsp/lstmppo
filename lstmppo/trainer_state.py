@@ -35,6 +35,10 @@ class TrainerState:
         self.validation_mode = validation_mode
         self.metrics = Metrics()
 
+        self.update_walltime = 0.0
+        self.rollout_time = 0.0
+        self.optimize_time = 0.0
+
         # Runtime environment info (populated by trainer)
         self.env_info = RuntimeEnvInfo(flat_obs_dim=0, action_dim=0, obs_space=None)
 
@@ -110,6 +114,7 @@ class TrainerState:
         - DropConnect issues
         """
         self.metrics.accumulate(upd)
+        self.metrics.steps += 1
 
         self.history.update(upd, self.metrics)
 

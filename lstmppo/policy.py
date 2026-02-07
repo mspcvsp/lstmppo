@@ -177,6 +177,9 @@ class LSTMPPOPolicy(nn.Module):
 
         self.critic = nn.Linear(state.cfg.lstm.lstm_hidden_size, 1)
 
+        self.obs_pred_head = nn.Linear(state.cfg.lstm.lstm_hidden_size, self.obs_dim)
+        self.rew_pred_head = nn.Linear(state.cfg.lstm.lstm_hidden_size, 1)
+
         if isinstance(self.actor, nn.Linear):
             if self.actor.weight.numel() > 0:
                 nn.init.xavier_uniform_(self.actor.weight)
@@ -190,6 +193,18 @@ class LSTMPPOPolicy(nn.Module):
         if self.critic.bias.numel() > 0:
             nn.init.zeros_(self.critic.bias)
 
+        if self.obs_pred_head.weight.numel() > 0:
+            nn.init.xavier_uniform_(self.obs_pred_head.weight)
+
+        if self.obs_pred_head.bias.numel() > 0:
+            nn.init.zeros_(self.obs_pred_head.bias)
+
+        if self.rew_pred_head.weight.numel() > 0:
+            nn.init.xavier_uniform_(self.rew_pred_head.weight)
+
+        if self.rew_pred_head.bias.numel() > 0:
+            nn.init.zeros_(self.rew_pred_head.bias)
+
     def initial_state(self, batch_size: int, device):
         return self.lstm.initial_state(batch_size, device)
 
@@ -198,30 +213,51 @@ class LSTMPPOPolicy(nn.Module):
     # ---------------------------------------------------------
     def _forward_core(self, x, hxs, cxs):
         """
-        _forward_core performs the actual LSTM unroll and therefore produces
-        batch‑first tensors shaped (B, T, H). This is the natural format for:
+        Core LSTM unroll over a full (B, T, ...) sequence.
 
-        - the encoder (batch-first)
-        - the LSTM cell (batch-first)
-        - the policy/value heads (batch-first)
+        _forward_core Invariants:
+        -------------------------
+        This function defines the authoritative recurrent computation used by both rollout-time action selection and
+        PPO training-time evaluation. Any change here must preserve the following invariants:
 
-        During the unroll we also record the full per‑timestep sequences of:
+        1. PRE‑STEP hidden state semantics
+        ----------------------------------
+        The input hxs/cxs must represent the PRE‑STEP state for timestep 0. This ensures that rollout-time behavior and
+        training-time evaluation produce identical logprobs, values, and hidden-state transitions.
 
-        - gate activations  (i, f, g, o)
-        - hidden states     (h_t)
-        - cell states       (c_t)
+        2. Full LSTM unroll (no truncation)
+        -----------------------------------
+        The LSTM must be unrolled across the entire sequence so that:
+            • h_{t+1}, c_{t+1} reflect the true temporal dynamics
+            • gate activations (i, f, g, o) are aligned with timestep t
+            • evaluate_actions_sequence() can reproduce rollout behavior
+            • TBPTT chunking remains correct
 
-        These sequences are required for LSTM diagnostics such as:
+        3. Batch‑first internal format
+        ------------------------------
+        Internally, the model operates in batch‑first format (B, T, H), even though the rollout buffer stores
+        everything in time‑major format (T, B, ...). All outputs must be transposed back to time‑major before
+        returning.
 
-        - gate drift
-        - gate saturation
-        - gate entropy
-        - hidden/cell state drift
-        - hidden/cell saturation
+        4. No gradient detachment inside the unroll
+        ---------------------------------------
+        PPO requires gradients through:
+            • logits → logprobs → policy loss
+            • values → value loss
+            • entropy → entropy bonus
 
-        All tensors returned here remain batch‑first (B, T, H). They will be
-        transposed later in evaluate_actions_sequence to match PPO’s
-        time‑major (T, B, ...) rollout format.
+        Only the returned hidden states (new_hxs/new_cxs) and diagnostics may be detached to prevent gradients across
+        rollout boundaries.
+
+        5. Diagnostic alignment
+        -----------------------
+        Gate activations, cell states, hidden states, and any auxiliary metrics must be recorded in (T, B, ...) format
+        so that drift, saturation, and entropy diagnostics remain temporally aligned with rollout data.
+
+        If any of these invariants are violated, PPO training becomes nondeterministic, TBPTT breaks, and LSTM
+        diagnostics become invalid.
+
+        => Never modify this function without re-running all LSTM state-flow and TBPTT validation tests.
         """
         obs_flat = self.obs_encoder(x)  # x may be dict/tuple/box
 
@@ -256,6 +292,44 @@ class LSTMPPOPolicy(nn.Module):
             c_list.append(c)
 
         out = torch.cat(outputs, dim=1)  # (B, T, H)
+
+        """
+        Auxiliary Prediction Intent
+        ---------------------------
+        Auxiliary tasks (next‑observation and next‑reward prediction) provide additional supervised learning signals
+        that help the LSTM learn a richer, more stable internal representation of the environment’s dynamics.
+
+        Why this matters:
+        -----------------
+        • PPO’s policy gradient signal is sparse, noisy, and delayed.
+        • LSTMs benefit from dense, timestep‑level supervision.
+        • Predicting next_obs and next_rewards forces the recurrent state to
+        encode information that is actually predictive of the future.
+        • This improves memory, stabilizes hidden‑state dynamics, and reduces
+        drift across updates.
+
+        Effect on learning:
+        -------------------
+        Auxiliary prediction acts as a self‑supervised regularizer:
+            - strengthens temporal representations
+            - improves credit assignment in POMDPs
+            - reduces overfitting to short‑term correlations
+            - encourages the LSTM to model latent dynamics, not just react
+
+        Training‑time only:
+        -------------------
+        These predictions are used *only* during PPO training to compute auxiliary losses. They are not used during
+        rollout or action selection, which keeps the inference path lightweight and deterministic.
+
+        In short:
+        ---------
+        Auxiliary prediction teaches the LSTM to understand the world it is acting in, not just to optimize the policy
+        loss. It provides dense, future‑predictive supervision that dramatically improves stability and memory in
+        recurrent PPO.
+        """
+        pred_obs = self.obs_pred_head(out)  # (B, T, obs_dim)
+        pred_rew = self.rew_pred_head(out)  # (B, T, 1)
+
         i_gates, f_gates, g_gates, o_gates = zip(*gate_list)
 
         # Stack into (B, T, H)
@@ -278,6 +352,8 @@ class LSTMPPOPolicy(nn.Module):
 
         return LSTMCoreOutput(
             out=out,
+            pred_obs=pred_obs,
+            pred_raw=pred_rew,
             h=h,
             c=c,
             ar_loss=ar_loss,
@@ -323,6 +399,8 @@ class LSTMPPOPolicy(nn.Module):
         return PolicyOutput(
             logits=logits,
             values=values,
+            pred_obs=core_out.pred_obs,
+            pred_raw=core_out.pred_raw,
             new_hxs=core_out.h,
             new_cxs=core_out.c,
             ar_loss=core_out.ar_loss,
@@ -339,8 +417,49 @@ class LSTMPPOPolicy(nn.Module):
 
     def forward_step(self, obs, h, c):
         """
-        Trainer requires step‑mode LSTM evaluation. LSTM-PPO must return the initial hidden state for each environment
-        atthe start of rollout, and the final hidden state after each step.
+        Single‑step recurrent policy evaluation used during rollout.
+
+        forward_step Invariants:
+        ------------------------
+        This function must reproduce the exact PRE‑STEP → POST‑STEP LSTM transition that occurs inside `_forward_core`,
+        but for a single timestep (B, ...) instead of a full sequence (B, T, ...).
+
+        Critical invariants:
+
+        1. PRE‑STEP hidden state semantics
+        ----------------------------------
+        The input hxs/cxs must be the PRE‑STEP state (h_t, c_t) used to produce action[t]. This ensures that
+        rollout‑time behavior matches the sequence unroll performed during PPO training.
+
+        2. Exact LSTM transition
+        ------------------------
+        The update (h_{t+1}, c_{t+1}) computed here must be bit‑identical to the transition computed inside
+        `_forward_core` for the same input. Any drift breaks:
+
+            • state‑flow validation
+            • evaluate_actions_sequence() alignment
+            • TBPTT correctness
+
+        3. No gradient detachment inside the step
+        -----------------------------------------
+        The logits, values, and entropy must retain gradients so PPO can compute correct losses during training. Only
+        the returned hidden states (new_hxs/new_cxs) may be detached to prevent gradients from spanning across rollout
+        boundaries.
+
+        4. Batch‑first consistency
+        --------------------------
+        Even though rollout uses single steps, the internal LSTM expects batch‑first format. Shapes must match the
+        conventions used in `_forward_core` so that both paths remain interchangeable.
+
+        5. Diagnostic alignment
+        -----------------------
+        Any gate activations or auxiliary metrics produced here must match the shapes and semantics of those produced
+        in `_forward_core`, ensuring that drift/saturation/entropy diagnostics remain valid.
+
+        If any of these invariants are violated, rollout‑time behavior will diverge from training‑time evaluation,
+        breaking PPO, TBPTT, and all LSTM state‑flow diagnostics.
+
+        => Never modify this function without re‑running all LSTM validation tests.
         """
         enc = self.encoder(self.obs_encoder(obs))  # (B, H)
         h, c, gates = self.lstm(enc, (h, c))
@@ -365,6 +484,48 @@ class LSTMPPOPolicy(nn.Module):
         inp.hxs:     (B, H)
         inp.cxs:     (B, H)
         inp.actions: (T, B) or (T, B, 1)
+
+        ---------------------------------------------------------------------------------
+        Sequence‑aware PPO evaluation (training‑time only)
+        ---------------------------------------------------------------------------------
+
+        LSTM Evaluation Invariant:
+        --------------------------
+        This function must reproduce the exact recurrent state‑flow and logprob/value computation that occurred during
+        rollout, but over entire (T, B, ...) sequences instead of single steps.
+
+        Critical invariants enforced here:
+
+        1. Batch‑first → Time‑major alignment
+
+            The policy forward pass operates in batch‑first format (B, T, H), while the rollout buffer stores
+            everything in time‑major format (T, B, ...). All tensors (logits, values, gates, hxs, cxs) must be
+            transposed back to (T, B, ...) to remain aligned with PPO’s minibatch slicing and masking.
+
+        2. PRE‑STEP hidden state consistency
+
+            The initial hxs/cxs passed in must be the PRE‑STEP states stored during rollout. This guarantees that
+            evaluate_actions_sequence() produces logprobs/values identical to rollout‑time behavior.
+
+        3. Full LSTM unroll (no truncation)
+
+            Unlike act(), which performs a single‑step transition, this method must unroll the LSTM over the entire
+            sequence so that:
+
+            • logprobs[t] match the correct logits[t]
+            • values[t] match the correct critic outputs
+            • gate diagnostics (i,f,g,o,h,c) reflect the true temporal
+                structure of the rollout
+
+        4. No detaching of logprobs/values - PPO requires gradients through:
+
+            • logprobs → policy gradient
+            • values   → value loss
+            • entropy  → entropy bonus
+
+            Only hidden states (new_hxs/new_cxs) and gate diagnostics are detached to prevent gradients across rollout
+            boundaries. If any of these invariants are violated, PPO training becomes nondeterministic, TBPTT breaks,
+            and LSTM diagnostics become misaligned or meaningless.
         """
         T, B = inp.obs.shape[0], inp.obs.shape[1]
 
@@ -381,6 +542,28 @@ class LSTMPPOPolicy(nn.Module):
         policy_output = self.forward(policy_input)
         # policy_output.logits: (B, T, A)
         # policy_output.values: (B, T)
+
+        """
+        Why pred_obs and pred_rew are returned here:
+        -------------------------------------------
+        Auxiliary prediction (next‑observation and next‑reward prediction) is a training‑time feature. PPO computes
+        these auxiliary losses over full (T, B, ...) sequences, so evaluate_actions_sequence() must expose the
+        model’s predicted next‑state and next‑reward tensors in time‑major format.
+
+        During rollout, evaluate_actions() is single‑step and does not use auxiliary predictions, so pred_obs and
+        pred_rew are omitted there to avoid unnecessary computation and keep the rollout path lightweight.
+
+        In short:
+
+        - evaluate_actions() → rollout‑time, single‑step, no auxiliary predictions
+        - evaluate_actions_sequence() → training‑time, full‑sequence, returns
+
+        => pred_obs and pred_rew for auxiliary losses
+
+        This separation keeps the rollout path fast and the training path fully supervised without mixing concerns.
+        """
+        pred_obs = policy_output.pred_obs.transpose(0, 1)  # (T, B, obs_dim)
+        pred_raw = policy_output.pred_raw.transpose(0, 1)  # (T, B, 1)
 
         # Back to (T, B, ...)
         logits = policy_output.logits.transpose(0, 1)  # (T, B, A)
@@ -462,6 +645,8 @@ class LSTMPPOPolicy(nn.Module):
             gates=gates,
             ar_loss=policy_output.ar_loss,
             tar_loss=policy_output.tar_loss,
+            pred_obs=pred_obs,
+            pred_raw=pred_raw,
         )
 
     def evaluate_actions(self, out, actions):
@@ -472,6 +657,8 @@ class LSTMPPOPolicy(nn.Module):
             - logits: (B, A)
             - values: (B,)
         actions: (B,) or (B,1)
+
+        evaluate_actions() → rollout‑time, single‑step, no auxiliary predictions
         """
 
         # Ensure shape (B,)

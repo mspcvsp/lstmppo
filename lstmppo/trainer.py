@@ -33,6 +33,7 @@ PPO loss
 """
 
 import random
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -43,8 +44,11 @@ from rich.live import Live
 from torch import nn
 from torch.distributions.categorical import Categorical
 
+import wandb
+
 from .buffer import RecurrentRolloutBuffer, RolloutStep
 from .env import RecurrentVecEnvWrapper
+from .logging.jsonl_logger import JSONLLogger
 from .logging.tensorboard_logger import TensorboardLogger
 from .policy import LSTMPPOPolicy
 from .runtime_env_info import RuntimeEnvInfo
@@ -99,6 +103,9 @@ class LSTMPPOTrainer:
             run_name=self.state.cfg.log.run_name,
         )
 
+        jsonl_path = Path(cfg.log.jsonl_path) / f"{cfg.log.run_name}.jsonl"
+        self.jsonl_logger = JSONLLogger(str(jsonl_path))
+
         if self.state.validation_mode:
             self.policy.eval()
 
@@ -150,6 +157,11 @@ class LSTMPPOTrainer:
             cfg.ppo.target_kl = 0.005
             cfg.sched.start_entropy_coef = 0.1
             cfg.sched.end_entropy_coef = 0.0
+        elif preset_name == "repeat_previous_easy":
+            cfg.env.env_id = "popgym-RepeatPreviousEasy-v0"
+            cfg.ppo.target_kl = 0.005
+            cfg.sched.start_entropy_coef = 0.1
+            cfg.sched.end_entropy_coef = 0.0
 
         cfg = initialize_config(cfg, **kwargs)
 
@@ -174,15 +186,25 @@ class LSTMPPOTrainer:
             Live(console=console, refresh_per_second=4) as live,
         ):
             for self.state.update_idx in range(total_updates):
+                update_start = time.time()
+
                 self.state.init_stats()
 
                 self.state.apply_schedules(self.optimizer)
 
+                # ---- Rollout timing ----
+                t0 = time.time()
                 last_value = self.collect_rollout()
+                self.state.rollout_time = time.time() - t0
 
+                # ---- Optimization timing ----
+                t0 = time.time()
                 self.buffer.compute_returns_and_advantages(last_value)
-
                 self.optimize_policy()
+                self.state.optimize_time = time.time() - t0
+
+                # Total walltime for THIS update
+                self.state.update_walltime = time.time() - update_start
 
                 self.log_scalars()
 
@@ -205,6 +227,8 @@ class LSTMPPOTrainer:
 
                 if self.state.should_save_checkpoint():
                     self.save_checkpoint()
+
+        self.jsonl_logger.close()
 
     # ---------------------------------------------------------
     # Rollout Phase (unchanged except act() signature)
@@ -397,6 +421,9 @@ class LSTMPPOTrainer:
             )
         )
 
+        assert eval_output.pred_obs is not None, "evaluate_actions_sequence() must return pred_obs for auxiliary losses"
+        assert eval_output.pred_raw is not None, "evaluate_actions_sequence() must return pred_raw for auxiliary losses"
+
         # ------- Flatten -------
         # eval_output.values: [K, B] or [K, B, 1]
         values = eval_output.values
@@ -447,6 +474,24 @@ class LSTMPPOTrainer:
 
         if self.state.cfg.trainer.debug_mode is False:
             loss = loss + eval_output.ar_loss + eval_output.tar_loss
+
+        pred_next_obs = eval_output.pred_obs  # (K, B, obs_dim)
+        target_next_obs = mb.next_obs  # (K, B, obs_dim)
+
+        pred_next_rew = eval_output.pred_raw.squeeze(-1)  # (K, B)
+        target_next_rew = mb.next_rewards  # (K, B)
+
+        m = mb.mask.unsqueeze(-1)  # (K, B, 1)
+
+        obs_err = ((pred_next_obs - target_next_obs) ** 2) * m
+        aux_obs_loss = obs_err.sum() / (m.sum() * obs_err.size(-1)).clamp(min=1)
+
+        rew_err = ((pred_next_rew - target_next_rew) ** 2) * mb.mask
+        aux_rew_loss = rew_err.sum() / mb.mask.sum().clamp(min=1)
+
+        aux_loss = self.state.cfg.lstm.aux_obs_coef * aux_obs_loss + self.state.cfg.lstm.aux_rew_coef * aux_rew_loss
+
+        loss = loss + aux_loss
 
         grad_norm = self.backward_and_clip(loss)
 
@@ -506,13 +551,37 @@ class LSTMPPOTrainer:
                 diag=self.state.current_lstm_unit_diag,
             )
 
+        if hasattr(self, "jsonl_logger"):
+            self.jsonl_logger.log(
+                {
+                    "global_step": self.state.global_step,
+                    "update_idx": self.state.update_idx,
+                    "rollout_time": self.state.rollout_time,
+                    "optimize_time": self.state.optimize_time,
+                    "update_walltime": self.state.update_walltime,
+                    **self.state.metrics.to_dict(),
+                }
+            )
+
+        self.tb_logger.writer.add_scalar("runtime/rollout_time", self.state.rollout_time, self.state.global_step)
+        self.tb_logger.writer.add_scalar("runtime/optimize_time", self.state.optimize_time, self.state.global_step)
+        self.tb_logger.writer.add_scalar("runtime/update_walltime", self.state.update_walltime, self.state.global_step)
+
+        wandb.log(
+            {
+                "runtime/rollout_time": self.state.rollout_time,
+                "runtime/optimize_time": self.state.optimize_time,
+                "runtime/update_walltime": self.state.update_walltime,
+            },
+            step=self.state.global_step,
+        )
+
     def compute_lstm_unit_diagnostics(
         self, eval_output: PolicyEvalOutput, mask: Optional[torch.Tensor]
     ) -> LSTMUnitDiagnostics:
         """
         Computes per-unit LSTM diagnostics (shape [H]) instead of scalars.
         """
-
         # (T, B, H)
         i_g = eval_output.gates.i_gates
         f_g = eval_output.gates.f_gates

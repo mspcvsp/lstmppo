@@ -26,6 +26,10 @@ def get_flat_obs_dim(space: gym.Space) -> int:
     elif isinstance(space, gym.spaces.Tuple):
         return sum(get_flat_obs_dim(sub) for sub in space.spaces)
 
+    elif isinstance(space, gym.spaces.Discrete):
+        # Represent discrete observation as a single integer input
+        return 1
+
     else:
         raise NotImplementedError(f"Unsupported observation space: {space}")
 
@@ -61,6 +65,10 @@ def flatten_obs(obs, space: gym.Space) -> np.ndarray:
             sub = flatten_obs(obs[i], subspace)
             parts.append(sub)
         return np.concatenate(parts, axis=-1)
+
+    elif isinstance(space, gym.spaces.Discrete):
+        # obs: (N,) integers
+        return np.asarray(obs, dtype=np.float32).reshape(-1, 1)
 
     else:
         raise NotImplementedError(f"Unsupported observation type: {type(obs)}")

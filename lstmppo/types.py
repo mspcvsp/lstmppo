@@ -45,6 +45,10 @@ class LSTMConfig:
     """LSTM activation regularization (AR)"""
     lstm_tar_coef: float = 0.5
     """LSTM temporal activation regularization (TAR)"""
+    aux_obs_coef: float = 0.5
+    """ Coefficient for auxiliary next-observation prediction loss """
+    aux_rew_coef: float = 0.5
+    """ Coefficient for auxiliary next-reward prediction loss """
 
 
 @dataclass
@@ -110,7 +114,7 @@ class LoggingConfig:
 
 @dataclass
 class EnvironmentConfig:
-    env_id: str = "popgym-PositionOnlyCartPoleEasy-v0"
+    env_id: str = "popgym-RepeatPreviousEasy-v0"
     """Environment identifier"""
     num_envs: int = 64
     """ Number of environments """
@@ -224,6 +228,8 @@ class RolloutStep:
 @dataclass
 class RecurrentMiniBatch:
     obs: torch.Tensor
+    next_obs: torch.Tensor
+    next_rewards: torch.Tensor
     actions: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
@@ -238,7 +244,30 @@ class RecurrentMiniBatch:
 
 @dataclass
 class RecurrentBatch:
+    """
+    Even though each timestep has only one reward per environment, the `next_rewards`tensor is shaped (T, B) because it
+    represents the entire sequence of rewards aligned with the (T, B, ...) rollout format.
+
+    In PPO rollouts, reward[t] is already the reward for the transition t → t+1, so `next_rewards[t] = rewards[t]` is
+    the correct temporal alignment. Keeping`next_rewards` plural matches the naming of other sequence tensors (obs,
+    values, returns, advantages) and avoids special‑case handling in TBPTT or auxiliary prediction code.
+
+    -------------------------------------------------------------------------------------------------------------
+    `next_obs` is aligned such that next_obs[t] = obs[t+1]. This matches the environment’s transition semantics:
+        obs[t] --(action[t], reward[t])--> obs[t+1]
+
+    Because the rollout buffer stores observations in time‑major format (T, B, ...), we can obtain the entire
+    next‑observation sequence simply by shifting obs by one timestep. The final timestep is padded (and masked out)
+    because there is no obs[T+1] within the rollout.
+
+    Keeping `next_obs` shaped (T, B, obs_dim) ensures that auxiliary prediction (next‑state modeling) uses the same
+    temporal alignment as PPO’s values, advantages, logprobs, and masks. This avoids any special‑case handling at
+    chunk boundaries and preserves TBPTT correctness.
+    """
+
     obs: torch.Tensor
+    next_obs: torch.Tensor
+    next_rewards: torch.Tensor
     actions: torch.Tensor
     values: torch.Tensor
     logprobs: torch.Tensor
@@ -251,32 +280,80 @@ class RecurrentBatch:
 
     def iter_chunks(self, K: int):
         """
-        Yield TBPTT chunks of length K.
-        Each chunk yields:
-            obs_chunk:      (K, B, obs_dim)
-            actions_chunk:  (K, B, 1)
-            returns_chunk:  (K, B)
-            adv_chunk:      (K, B)
-            old_logp_chunk: (K, B)
-            old_values:     (K, B)
-            hxs0:           (B, H) -- initial hidden state for this chunk
-            cxs0:           (B, H)
+        TBPTT chunking over a full (T, B, ...) sequence.
+
+        iter_chunks Invariants:
+        -----------------------
+        This method defines how PPO performs truncated backpropagation through time (TBPTT). Each chunk must preserve
+        the temporal structure of the rollout and maintain correct LSTM state‑flow.
+
+        Critical invariants:
+
+        1. Chunk boundaries never break time order
+        ------------------------------------------
+        Chunks are contiguous slices [t0:t1] of the time dimension. We never shuffle or reorder timesteps. Only the
+        environment (B) dimension is shuffled upstream.
+
+        2. PRE‑STEP hidden state initialization
+        ---------------------------------------
+        Each chunk must begin with the PRE‑STEP LSTM state stored at t0 (hxs[t0], cxs[t0]). This ensures:
+
+            • TBPTT unrolls from the correct state
+            • evaluate_actions_sequence() matches rollout behavior
+            • state‑flow validation remains correct
+
+        3. Mask alignment
+        -----------------
+        The mask for each chunk must be sliced as (K, B) from the original terminated/truncated flags so that PPO
+        correctly ignores invalid timesteps inside the chunk.
+
+        4. next_obs / next_rewards alignment
+        ------------------------------------
+        These tensors must be sliced with the same (t0:t1) window so that auxiliary prediction targets remain aligned
+        with obs, actions, returns, and advantages.
+
+        5. No gradient detachment inside the chunk
+        ------------------------------------------
+        All tensors returned here must retain gradients through the policy evaluation path. Only the initial hidden
+        states (hxs0, cxs0) are detached later by the trainer.
+
+        If any of these invariants are violated, TBPTT breaks, PPO gradients become misaligned, auxiliary losses drift,
+        and LSTM state‑flow validation fails.
+
+        => Never modify this logic without re‑running all recurrent PPO tests.
         """
         T = self.obs.size(0)
 
         for t0 in range(0, T, K):
             t1 = min(t0 + K, T)
 
-            # Hidden state at the *start* of the chunk
+            """
+            TBPTT Invariant:
+            ---------------
+            Each chunk must begin with the LSTM hidden state at the *start* of the chunk (hxs[t0], cxs[t0]). This
+            ensures that:
+
+            • State‑flow remains deterministic across rollouts
+            • PPO’s recurrent evaluation matches rollout-time behavior
+            • Gradients do not leak across chunk boundaries
+            • TBPTT unrolls are independent and correctly truncated
+            • LSTM diagnostics (drift, saturation, entropy) remain aligned
+
+            If hxs0/cxs0 were taken from the *end* of the previous chunk instead of the start of the current one, the
+            model would silently violate the temporal structure of the rollout, break TBPTT, and invalidate all
+            state‑flow validation tests.
+            """
             hxs0 = self.hxs[t0]  # (B, H)
             cxs0 = self.cxs[t0]  # (B, H)
 
             mb_terminated = self.terminated[t0:t1]
             mb_truncated = self.truncated[t0:t1]
-            mb_mask = 1.0 - (mb_terminated | mb_truncated).float()  # (T, B)
+            mb_mask = 1.0 - (mb_terminated | mb_truncated).float()  # (K, B)
 
             yield RecurrentMiniBatch(
                 obs=self.obs[t0:t1],
+                next_obs=self.next_obs[t0:t1],
+                next_rewards=self.next_rewards[t0:t1],
                 actions=self.actions[t0:t1],
                 returns=self.returns[t0:t1],
                 advantages=self.advantages[t0:t1],
@@ -322,6 +399,8 @@ class VecEnvState:
 class PolicyOutput:
     logits: torch.Tensor  # (B,A) or (B,T,A)
     values: torch.Tensor  # (B,) or (B,T)
+    pred_obs: torch.Tensor
+    pred_raw: torch.Tensor
     new_hxs: torch.Tensor  # (B,H)
     new_cxs: torch.Tensor  # (B,H)
     ar_loss: torch.Tensor  # scalar
@@ -333,6 +412,8 @@ class PolicyOutput:
         return PolicyOutput(
             logits=self.logits.detach(),
             values=self.values.detach(),
+            pred_obs=self.pred_obs.detach(),
+            pred_raw=self.pred_raw.detach(),
             new_hxs=self.new_hxs.detach(),
             new_cxs=self.new_cxs.detach(),
             ar_loss=self.ar_loss.detach(),
@@ -360,6 +441,8 @@ class LSTMUnitPrev:
 @dataclass
 class LSTMCoreOutput:
     out: torch.Tensor
+    pred_obs: torch.Tensor
+    pred_raw: torch.Tensor
     h: torch.Tensor
     c: torch.Tensor
     ar_loss: torch.Tensor
@@ -394,6 +477,9 @@ class PolicyEvalOutput:
     ar_loss: Optional[torch.Tensor] = None
     tar_loss: Optional[torch.Tensor] = None
 
+    pred_obs: Optional[torch.Tensor] = None  # (T, B, obs_dim)
+    pred_raw: Optional[torch.Tensor] = None  # (T, B, 1)
+
     def to(self, device):
         return PolicyEvalOutput(
             values=self.values.to(device),
@@ -404,6 +490,8 @@ class PolicyEvalOutput:
             gates=self.gates.to(device),
             ar_loss=(None if self.ar_loss is None else self.ar_loss.to(device)),
             tar_loss=(None if self.tar_loss is None else self.tar_loss.to(device)),
+            pred_obs=(None if self.pred_obs is None else self.pred_obs.to(device)),
+            pred_raw=(None if self.pred_raw is None else self.pred_raw.to(device)),
         )
 
     @property
@@ -814,6 +902,17 @@ class MetricsHistory:
     c_entropy: list = field(default_factory=list)
     h_entropy: list = field(default_factory=list)
 
+    i_sat_low: list = field(default_factory=list)
+    i_sat_high: list = field(default_factory=list)
+    f_sat_low: list = field(default_factory=list)
+    f_sat_high: list = field(default_factory=list)
+    o_sat_low: list = field(default_factory=list)
+    o_sat_high: list = field(default_factory=list)
+
+    g_sat: list = field(default_factory=list)
+    c_sat: list = field(default_factory=list)
+    h_sat: list = field(default_factory=list)
+
     def update(self, upd: PolicyUpdateInfo, stats: Metrics):
         self.push("kl", upd.approx_kl.item())
 
@@ -861,8 +960,12 @@ class MetricsHistory:
         mapping["ep_return"] = stats.avg_ep_returns
         mapping["ep_len"] = stats.avg_ep_len
 
-        for name, tensor in mapping.items():
-            self.push(name, tensor.item())
+        for name, value in mapping.items():
+            if isinstance(value, torch.Tensor):
+                self.push(name, value.item())
+            else:
+                # Already a float
+                self.push(name, float(value))
 
     def push(self, name: str, value: float):
         hist = getattr(self, name)
