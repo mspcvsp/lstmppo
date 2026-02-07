@@ -10,10 +10,12 @@ class RecurrentRolloutBuffer:
         self.cfg = state.cfg.buffer_config
 
         # --- Storage ---
+        # - obs[t] — observation at time t
         self.obs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, state.flat_obs_dim, device=self.device)
 
         self.actions = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, 1, device=self.device)
 
+        # - rewards[t] — reward for transition t → t+1
         self.rewards = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
         self.values = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
@@ -25,12 +27,14 @@ class RecurrentRolloutBuffer:
         self.truncated = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, dtype=torch.bool, device=self.device)
 
         # Hidden states at *start* of each timestep
+        # - hxs[t], cxs[t] — LSTM state at start of timestep t
         self.hxs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, self.cfg.lstm_hidden_size, device=self.device)
-
         self.cxs = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, self.cfg.lstm_hidden_size, device=self.device)
 
+        # - returns[t] — GAE‑computed value target
         self.returns = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
+        # - advantages[t] — GAE advantage
         self.advantages = torch.zeros(self.cfg.rollout_steps, self.cfg.num_envs, device=self.device)
 
         self.masks: torch.Tensor | None = None
@@ -79,7 +83,26 @@ class RecurrentRolloutBuffer:
         self.terminated[t].copy_(step.terminated)
         self.truncated[t].copy_(step.truncated)
 
-        # Hidden state at *start* of timestep t
+        """
+        Hidden state at *start* of timestep t
+        ------------------------------------------------------------
+        LSTM State‑Flow Invariant: The buffer must store the PRE‑STEP LSTM state (h_t, c_t) that was used to produce
+        action[t]. This state is the anchor for:
+
+        • Deterministic state‑flow validation
+        • Correct PPO recurrent evaluation (evaluate_actions_sequence)
+        • TBPTT chunking (each chunk begins at the true h_t, c_t)
+        • Accurate LSTM diagnostics (drift, saturation, entropy)
+
+        Storing the POST‑STEP state (h_{t+1}, c_{t+1}) would silently break the entire recurrent pipeline:
+
+        • validate_lstm_state_flow() fails
+        • TBPTT unrolls from the wrong state
+        • PPO logprobs/values become misaligned
+        • Diagnostics become meaningless
+
+        => Never modify this without re‑running all LSTM validation tests.
+        """
         self.hxs[t].copy_(step.hxs)
         self.cxs[t].copy_(step.cxs)
 
@@ -236,8 +259,27 @@ class RecurrentRolloutBuffer:
         for start in range(0, self.cfg.num_envs, self.cfg.mini_batch_envs):
             idx = env_indices[start : start + self.cfg.mini_batch_envs]
 
+            # Slice rollout data
+            obs = self.obs[:, idx]  # (T, B, obs_dim)
+            rewards = self.rewards[:, idx]  # (T, B)
+
+            # ----------------------------------------------------
+            # Compute next_obs and next_rewards
+            # ----------------------------------------------------
+            # next_obs[t] = obs[t+1]
+            next_obs = obs[1:]  # (T-1, B, obs_dim)
+
+            # Pad final timestep (masked out anyway)
+            pad = torch.zeros_like(next_obs[0:1])
+            next_obs = torch.cat([next_obs, pad], dim=0)
+
+            # the reward at time t is already the reward for the transition t → t+1.
+            next_rewards = rewards  # already aligned
+
             yield RecurrentBatch(
-                obs=self.obs[:, idx],
+                obs=obs,
+                next_obs=next_obs,
+                next_rewards=next_rewards,
                 actions=self.actions[:, idx],
                 values=self.values[:, idx],
                 logprobs=self.logprobs[:, idx],

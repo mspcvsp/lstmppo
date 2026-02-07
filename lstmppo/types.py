@@ -231,6 +231,8 @@ class RolloutStep:
 @dataclass
 class RecurrentMiniBatch:
     obs: torch.Tensor
+    next_obs: torch.Tensor
+    next_rewards: torch.Tensor
     actions: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
@@ -245,7 +247,30 @@ class RecurrentMiniBatch:
 
 @dataclass
 class RecurrentBatch:
+    """
+    Even though each timestep has only one reward per environment, the `next_rewards`tensor is shaped (T, B) because it
+    represents the entire sequence of rewards aligned with the (T, B, ...) rollout format.
+
+    In PPO rollouts, reward[t] is already the reward for the transition t → t+1, so `next_rewards[t] = rewards[t]` is
+    the correct temporal alignment. Keeping`next_rewards` plural matches the naming of other sequence tensors (obs,
+    values, returns, advantages) and avoids special‑case handling in TBPTT or auxiliary prediction code.
+
+    -------------------------------------------------------------------------------------------------------------
+    `next_obs` is aligned such that next_obs[t] = obs[t+1]. This matches the environment’s transition semantics:
+        obs[t] --(action[t], reward[t])--> obs[t+1]
+
+    Because the rollout buffer stores observations in time‑major format (T, B, ...), we can obtain the entire
+    next‑observation sequence simply by shifting obs by one timestep. The final timestep is padded (and masked out)
+    because there is no obs[T+1] within the rollout.
+
+    Keeping `next_obs` shaped (T, B, obs_dim) ensures that auxiliary prediction (next‑state modeling) uses the same
+    temporal alignment as PPO’s values, advantages, logprobs, and masks. This avoids any special‑case handling at
+    chunk boundaries and preserves TBPTT correctness.
+    """
+
     obs: torch.Tensor
+    next_obs: torch.Tensor
+    next_rewards: torch.Tensor
     actions: torch.Tensor
     values: torch.Tensor
     logprobs: torch.Tensor
@@ -260,30 +285,50 @@ class RecurrentBatch:
         """
         Yield TBPTT chunks of length K.
         Each chunk yields:
-            obs_chunk:      (K, B, obs_dim)
-            actions_chunk:  (K, B, 1)
-            returns_chunk:  (K, B)
-            adv_chunk:      (K, B)
-            old_logp_chunk: (K, B)
-            old_values:     (K, B)
-            hxs0:           (B, H) -- initial hidden state for this chunk
-            cxs0:           (B, H)
+            obs_chunk:        (K, B, obs_dim)
+            next_obs_chunk:   (K, B, obs_dim)
+            next_rewards:     (K, B)
+            actions_chunk:    (K, B, 1)
+            returns_chunk:    (K, B)
+            adv_chunk:        (K, B)
+            old_logp_chunk:   (K, B)
+            old_values:       (K, B)
+            hxs0:             (B, H)
+            cxs0:             (B, H)
+            mask:             (K, B)
         """
         T = self.obs.size(0)
 
         for t0 in range(0, T, K):
             t1 = min(t0 + K, T)
 
-            # Hidden state at the *start* of the chunk
+            """
+            TBPTT Invariant:
+            ---------------
+            Each chunk must begin with the LSTM hidden state at the *start* of the chunk (hxs[t0], cxs[t0]). This
+            ensures that:
+
+            • State‑flow remains deterministic across rollouts
+            • PPO’s recurrent evaluation matches rollout-time behavior
+            • Gradients do not leak across chunk boundaries
+            • TBPTT unrolls are independent and correctly truncated
+            • LSTM diagnostics (drift, saturation, entropy) remain aligned
+
+            If hxs0/cxs0 were taken from the *end* of the previous chunk instead of the start of the current one, the
+            model would silently violate the temporal structure of the rollout, break TBPTT, and invalidate all
+            state‑flow validation tests.
+            """
             hxs0 = self.hxs[t0]  # (B, H)
             cxs0 = self.cxs[t0]  # (B, H)
 
             mb_terminated = self.terminated[t0:t1]
             mb_truncated = self.truncated[t0:t1]
-            mb_mask = 1.0 - (mb_terminated | mb_truncated).float()  # (T, B)
+            mb_mask = 1.0 - (mb_terminated | mb_truncated).float()  # (K, B)
 
             yield RecurrentMiniBatch(
                 obs=self.obs[t0:t1],
+                next_obs=self.next_obs[t0:t1],
+                next_rewards=self.next_rewards[t0:t1],
                 actions=self.actions[t0:t1],
                 returns=self.returns[t0:t1],
                 advantages=self.advantages[t0:t1],
