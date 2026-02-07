@@ -508,6 +508,28 @@ class LSTMPPOPolicy(nn.Module):
         # policy_output.logits: (B, T, A)
         # policy_output.values: (B, T)
 
+        """
+        Why pred_obs and pred_rew are returned here:
+        -------------------------------------------
+        Auxiliary prediction (next‑observation and next‑reward prediction) is a training‑time feature. PPO computes
+        these auxiliary losses over full (T, B, ...) sequences, so evaluate_actions_sequence() must expose the
+        model’s predicted next‑state and next‑reward tensors in time‑major format.
+
+        During rollout, evaluate_actions() is single‑step and does not use auxiliary predictions, so pred_obs and
+        pred_rew are omitted there to avoid unnecessary computation and keep the rollout path lightweight.
+
+        In short:
+
+        - evaluate_actions() → rollout‑time, single‑step, no auxiliary predictions
+        - evaluate_actions_sequence() → training‑time, full‑sequence, returns
+
+        => pred_obs and pred_rew for auxiliary losses
+
+        This separation keeps the rollout path fast and the training path fully supervised without mixing concerns.
+        """
+        pred_obs = policy_output.pred_obs.transpose(0, 1)  # (T, B, obs_dim)
+        pred_raw = policy_output.pred_raw.transpose(0, 1)  # (T, B, 1)
+
         # Back to (T, B, ...)
         logits = policy_output.logits.transpose(0, 1)  # (T, B, A)
         values = policy_output.values.transpose(0, 1)  # (T, B)
@@ -588,6 +610,8 @@ class LSTMPPOPolicy(nn.Module):
             gates=gates,
             ar_loss=policy_output.ar_loss,
             tar_loss=policy_output.tar_loss,
+            pred_obs=pred_obs,
+            pred_raw=pred_raw,
         )
 
     def evaluate_actions(self, out, actions):

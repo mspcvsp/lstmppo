@@ -480,6 +480,9 @@ class PolicyEvalOutput:
     ar_loss: Optional[torch.Tensor] = None
     tar_loss: Optional[torch.Tensor] = None
 
+    pred_obs: Optional[torch.Tensor] = None  # (T, B, obs_dim)
+    pred_raw: Optional[torch.Tensor] = None  # (T, B, 1)
+
     def to(self, device):
         return PolicyEvalOutput(
             values=self.values.to(device),
@@ -490,6 +493,8 @@ class PolicyEvalOutput:
             gates=self.gates.to(device),
             ar_loss=(None if self.ar_loss is None else self.ar_loss.to(device)),
             tar_loss=(None if self.tar_loss is None else self.tar_loss.to(device)),
+            pred_obs=(None if self.pred_obs is None else self.pred_obs.to(device)),
+            pred_raw=(None if self.pred_raw is None else self.pred_raw.to(device)),
         )
 
     @property
