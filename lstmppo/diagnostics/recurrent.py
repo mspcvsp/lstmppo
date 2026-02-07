@@ -20,7 +20,9 @@ def compute_drift_sequence(policy, T: int = 64):
     device = next(policy.parameters()).device
 
     # Create a dummy observation sequence
-    obs_dim = policy.obs_dim
+    # The encoder is the source of truth for obs_dim
+    obs_dim = policy.encoder[0].in_features
+
     obs = torch.zeros(T, 1, obs_dim, device=device)  # (T, B=1, obs_dim)
 
     # Reset hidden state: (B, H)
