@@ -18,12 +18,13 @@ def test_aux_targets_tbptt_chunks(fake_state: FakeState):
     batch = next(buf.get_recurrent_minibatches())
     chunks = list(batch.iter_chunks(K))
 
-    for mb in chunks:
+    for idx, mb in enumerate(chunks):
         # next_obs alignment inside chunk
         assert torch.allclose(mb.next_obs[:-1], mb.obs[1:])
 
-        # final timestep of chunk padded
-        assert torch.all(mb.next_obs[-1] == 0)
-
         # next_rewards alignment
         assert torch.allclose(mb.next_rewards, buf.rewards[mb.t0 : mb.t1])
+
+        # only the final global timestep is padded
+        if idx == len(chunks) - 1:
+            assert torch.all(mb.next_obs[-1] == 0)

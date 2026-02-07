@@ -6,7 +6,8 @@ from tests.cpu.aux_pred.conftest import FakeState
 
 def test_aux_targets_alignment(fake_state: FakeState):
     # Create fake rollout
-    T, B, obs_dim = 5, 2, 3
+    T, B, obs_dim = 5, 2, fake_state.flat_obs_dim
+
     buf = RecurrentRolloutBuffer(fake_state, device="cpu")
 
     # Fill obs with increasing integers so alignment is obvious
