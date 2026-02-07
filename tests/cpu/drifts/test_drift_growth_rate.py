@@ -1,6 +1,22 @@
 """
-Ensures drift grows roughly linearly with sequence length (not exploding,
-not collapsing).
+This test MUST use the real TrainerState and real LSTMPPOPolicy.
+
+Why:
+-----
+Drift growth rate is a *model‑level* invariant of the GateLSTMCell.
+It validates the true long‑horizon behavior of the LSTM:
+    • gate wiring correctness
+    • encoder → LSTM integration
+    • hidden‑state update equations
+    • detach logic
+    • variance accumulation over time
+
+Any fake state, fake policy, or synthetic rollout would bypass the
+actual LSTM math and completely invalidate the signal this test is
+designed to catch.
+
+This test is a sentinel for long‑sequence LSTM stability. Do not
+replace the real model here.
 """
 
 import torch
@@ -16,6 +32,7 @@ def test_drift_growth_rate():
 
     state = TrainerState(cfg)
 
+    # Explicitly set env info for deterministic dimensions
     assert state.env_info is not None
     state.env_info.flat_obs_dim = 4
     state.env_info.action_dim = 3
@@ -25,6 +42,7 @@ def test_drift_growth_rate():
 
     B = 3
     H = cfg.lstm.lstm_hidden_size
+    D = state.env_info.flat_obs_dim
 
     lengths = [20, 40, 80]
     num_samples = 20  # more samples = smoother averages
@@ -35,9 +53,10 @@ def test_drift_growth_rate():
         drifts = []
 
         for _ in range(num_samples):
-            obs = torch.randn(B, L, state.env_info.flat_obs_dim)
+            obs = torch.randn(B, L, D)
             h0 = torch.zeros(B, H)
             c0 = torch.zeros(B, H)
+
             out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
             drifts.append(out.gates.h_gates.pow(2).mean())
 

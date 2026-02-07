@@ -1,9 +1,31 @@
+"""
+This test MUST use the real TrainerState and real LSTMPPOPolicy.
+
+Why:
+-----
+LSTM drift is a *model‑level* invariant, not a rollout/buffer invariant. It validates the true behavior of the
+GateLSTMCell, encoder → LSTM wiring, gate computations, and detach logic over long unrolls.
+
+FakeState, FakePolicy, or any synthetic rollout helpers would mask or distort the actual LSTM dynamics. Only the real
+policy forward pass exposes the true c_t evolution, which is what this test is protecting.
+
+If this test ever stops using the real model, it will no longer detect:
+
+    • gate wiring regressions
+    • incorrect detach behavior
+    • encoder → LSTM misalignment
+    • broken long‑horizon unrolls
+    • drift/variance collapse in c_t
+
+This test is the sentinel for long‑term LSTM memory correctness. Do not replace the real model with fakes here.
+"""
+
 import pytest
 import torch
 
+from lstmppo.types import PolicyInput
 from tests.helpers.fake_policy import make_fake_policy
 from tests.helpers.fake_state import TrainerStateProtocol
-from lstmppo.types import PolicyInput
 
 pytestmark = pytest.mark.drift
 
