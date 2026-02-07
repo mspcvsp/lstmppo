@@ -1,7 +1,7 @@
 import torch
 
 from lstmppo.buffer import RecurrentRolloutBuffer
-from tests.cpu.aux_pred.conftest import FakeState
+from tests.helpers.fake_state import FakeState
 
 
 def test_aux_targets_tbptt_chunks(fake_state: FakeState):

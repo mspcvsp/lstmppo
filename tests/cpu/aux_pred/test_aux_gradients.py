@@ -2,7 +2,7 @@ import torch
 
 from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import PolicyEvalInput
-from tests.cpu.aux_pred.conftest import FakeState
+from tests.helpers.fake_state import FakeState
 
 
 def test_aux_gradients(fake_state: FakeState):
