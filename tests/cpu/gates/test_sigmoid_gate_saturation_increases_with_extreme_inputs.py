@@ -1,24 +1,29 @@
 """
-Instead of checking abs(gate) > 0.95, measure distance to the
-saturation boundaries:
+This test MUST use the real LSTMPPOPolicy and real TrainerState.
 
-For sigmoid gates (i, f, o):
----------------------------
-- saturation happens when values approach 0 or 1
+Why:
+-----
+Gate saturation is a *mathematical interpretability invariant* of the
+GateLSTMCell. Extreme inputs should push:
 
-For tanh gates (g):
----------------------------
-- saturation happens when values approach -1 or 1
+    • sigmoid gates (i, f, o) toward {0, 1}
+    • tanh gates (g) toward {−1, +1}
 
-So the correct saturation metric is:
+Correct saturation metrics:
+    • Sigmoid:  min(g, 1 - g)      (lower = more saturated)
+    • Tanh:     1 - |g|            (lower = more saturated)
 
-Sigmoid saturation:
-------------------
-sat = min(gate, 1-gate) (Lower = more saturated)
+This behavior emerges only from the true LSTM dynamics:
+    • correct gate wiring
+    • encoder → LSTM integration
+    • stable activation functions
+    • meaningful gate responses to input scaling
 
-Tanh saturation:
-------------------
-sat = 1 - |gate| (Lower = more saturated)
+Any fake policy or synthetic gate object would bypass the real LSTM math
+and invalidate this interpretability signal.
+
+This is a sentinel test for gate‑saturation correctness. Do not replace
+the real model here.
 """
 
 import pytest
@@ -40,21 +45,24 @@ def test_gate_saturation_increases_with_extreme_inputs(trainer_state: TrainerSta
     policy.eval()
 
     B, T = 3, 5
-    obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-    h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
+    H = trainer_state.cfg.lstm.lstm_hidden_size
+    D = trainer_state.env_info.flat_obs_dim
+
+    obs = torch.randn(B, T, D)
+    h0 = torch.zeros(B, H)
+    c0 = torch.zeros(B, H)
 
     # Baseline
     out1 = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
-    i1 = out1.gates.i_gates  # (B,T,H)
+    i1 = out1.gates.i_gates  # (B, T, H)
 
     # Extreme inputs
     out2 = policy.forward(PolicyInput(obs=obs * 5.0, hxs=h0, cxs=c0))
     i2 = out2.gates.i_gates
 
-    # Sigmoid saturation metric: closer to 0 or 1 = more saturated
+    # Sigmoid saturation metric (lower = more saturated)
     sat1 = torch.minimum(i1, 1 - i1).mean()
     sat2 = torch.minimum(i2, 1 - i2).mean()
 
-    # More extreme inputs → more saturation → LOWER sat metric
+    # Extreme inputs → more saturation → LOWER sat metric
     assert sat2 < sat1
