@@ -1,22 +1,20 @@
 import torch
 
-from lstmppo.buffer import RecurrentRolloutBuffer
-from tests.helpers.fake_state import FakeState
+from tests.helpers.fake_batch import make_fake_batch
+from tests.helpers.fake_rollout import FakeRolloutBuilder
+from tests.helpers.fake_state import TrainerStateProtocol
 
 
-def test_aux_targets_alignment(fake_state: FakeState):
-    # Create fake rollout
-    T, B, obs_dim = 5, 2, fake_state.flat_obs_dim
+def test_aux_targets_alignment(fake_state: TrainerStateProtocol):
+    cfg = fake_state.cfg.buffer_config
+    T = cfg.rollout_steps
+    B = cfg.num_envs
+    D = fake_state.flat_obs_dim
 
-    buf = RecurrentRolloutBuffer(fake_state, device="cpu")
+    # Build deterministic rollout
+    rollout = FakeRolloutBuilder(T=T, B=B, obs_dim=D).with_pattern("range").build()
 
-    # Fill obs with increasing integers so alignment is obvious
-    for t in range(T):
-        buf.obs[t] = torch.full((B, obs_dim), float(t))
-        buf.rewards[t] = t * 10.0
-
-    batches = list(buf.get_recurrent_minibatches())
-    batch = batches[0]
+    batch = make_fake_batch(fake_state, rollout)
 
     # next_obs[t] = obs[t+1]
     assert torch.allclose(batch.next_obs[:-1], batch.obs[1:])
@@ -25,4 +23,4 @@ def test_aux_targets_alignment(fake_state: FakeState):
     assert torch.all(batch.next_obs[-1] == 0)
 
     # next_rewards[t] = rewards[t]
-    assert torch.allclose(batch.next_rewards, buf.rewards)
+    assert torch.allclose(batch.next_rewards, rollout.rewards)

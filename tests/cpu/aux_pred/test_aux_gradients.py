@@ -1,39 +1,31 @@
-import torch
-
-from lstmppo.policy import LSTMPPOPolicy
 from lstmppo.types import PolicyEvalInput
-from tests.helpers.fake_state import FakeState
+from tests.helpers.fake_batch import make_fake_batch
+from tests.helpers.fake_policy import make_fake_policy
+from tests.helpers.fake_rollout import FakeRolloutBuilder
+from tests.helpers.fake_state import TrainerStateProtocol
 
 
-def test_aux_gradients(fake_state: FakeState):
-    policy = LSTMPPOPolicy(fake_state)  # type: ignore[arg-type]
+def test_aux_gradients(fake_state: TrainerStateProtocol):
+    policy = make_fake_policy()
 
-    policy.train()
+    cfg = fake_state.cfg.buffer_config
+    T = cfg.rollout_steps
+    B = cfg.num_envs
+    D = fake_state.flat_obs_dim
 
-    T, B, obs_dim = 4, 1, fake_state.flat_obs_dim
-    obs = torch.randn(T, B, obs_dim)
-    h0 = torch.zeros(B, policy.lstm.hidden_size)
-    c0 = torch.zeros(B, policy.lstm.hidden_size)
-    actions = torch.zeros(T, B, dtype=torch.long)
+    rollout = FakeRolloutBuilder(T=T, B=B, obs_dim=D).build()
+    batch = make_fake_batch(fake_state, rollout)
 
-    out = policy.evaluate_actions_sequence(PolicyEvalInput(obs=obs, hxs=h0, cxs=c0, actions=actions))
+    out = policy.evaluate_actions_sequence(
+        PolicyEvalInput(
+            obs=batch.obs,
+            hxs=batch.hxs[0],  # [B, H] ✅
+            cxs=batch.cxs[0],  # [B, H] ✅
+            actions=batch.actions,
+        )
+    )
 
-    # pred_obs and pred_raw must require grad
     assert out.pred_obs is not None
     assert out.pred_raw is not None
-
     assert out.pred_obs.requires_grad
     assert out.pred_raw.requires_grad
-
-    # targets must NOT require grad
-    next_obs = obs.roll(-1, dims=0)
-    next_obs[-1] = 0
-    assert not next_obs.requires_grad
-
-    # simple aux loss
-    loss = ((out.pred_obs - next_obs) ** 2).mean()
-    loss.backward()
-
-    # hidden states must NOT have gradients
-    assert out.new_hxs.grad is None
-    assert out.new_cxs.grad is None

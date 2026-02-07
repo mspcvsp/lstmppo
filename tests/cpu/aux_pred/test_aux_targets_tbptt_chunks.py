@@ -1,20 +1,19 @@
 import torch
 
-from lstmppo.buffer import RecurrentRolloutBuffer
-from tests.helpers.fake_state import FakeState
+from tests.helpers.fake_buffer_loader import load_rollout_into_buffer
+from tests.helpers.fake_rollout import FakeRolloutBuilder
+from tests.helpers.fake_state import TrainerStateProtocol
 
 
-def test_aux_targets_tbptt_chunks(fake_state: FakeState):
+def test_aux_targets_tbptt_chunks(fake_state: TrainerStateProtocol):
     T = 8
-    K = 3  # chunk length
+    K = 3
+    D = fake_state.flat_obs_dim
+    B = fake_state.cfg.buffer_config.num_envs
 
-    buf = RecurrentRolloutBuffer(fake_state, device="cpu")
+    rollout = FakeRolloutBuilder(T=T, B=B, obs_dim=D).with_pattern("range").build()
 
-    # Fill obs with t for easy checking
-    for t in range(T):
-        buf.obs[t] = t
-        buf.rewards[t] = t
-
+    buf = load_rollout_into_buffer(fake_state, rollout)
     batch = next(buf.get_recurrent_minibatches())
     chunks = list(batch.iter_chunks(K))
 
@@ -23,7 +22,7 @@ def test_aux_targets_tbptt_chunks(fake_state: FakeState):
         assert torch.allclose(mb.next_obs[:-1], mb.obs[1:])
 
         # next_rewards alignment
-        assert torch.allclose(mb.next_rewards, buf.rewards[mb.t0 : mb.t1])
+        assert torch.allclose(mb.next_rewards, rollout.rewards[mb.t0 : mb.t1])
 
         # only the final global timestep is padded
         if idx == len(chunks) - 1:
