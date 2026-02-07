@@ -27,17 +27,38 @@ def fake_state() -> FakeState:
         lstm_hidden_size=hidden_size,
     )
 
-    cfg = SimpleNamespace(buffer_config=buffer_config)
+    lstm_cfg = SimpleNamespace(
+        enc_hidden_size=128,
+        lstm_hidden_size=128,
+        lstm_ar_coef=1.0,
+        lstm_tar_coef=0.5,
+        dropconnect_p=0.0,
+        lstm_layer_norm=False,
+    )
+
+    dummy_obs_space = SimpleNamespace(shape=(obs_dim,))
 
     env_info = SimpleNamespace(
         action_dim=1,
         obs_dim=obs_dim,
+        obs_space=dummy_obs_space,
+        flat_obs_dim=obs_dim,
     )
 
     lstm = nn.LSTM(
         input_size=obs_dim,
         hidden_size=hidden_size,
         batch_first=True,
+    )
+
+    trainer_cfg = SimpleNamespace(
+        debug_mode=False,
+    )
+
+    cfg = SimpleNamespace(
+        buffer_config=buffer_config,
+        lstm=lstm_cfg,
+        trainer=trainer_cfg,
     )
 
     return FakeState(
