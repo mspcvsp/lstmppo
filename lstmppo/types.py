@@ -45,6 +45,10 @@ class LSTMConfig:
     """LSTM activation regularization (AR)"""
     lstm_tar_coef: float = 0.5
     """LSTM temporal activation regularization (TAR)"""
+    aux_obs_coef: float = 0.5
+    """ Coefficient for auxiliary next-observation prediction loss """
+    aux_rew_coef: float = 0.5
+    """ Coefficient for auxiliary next-reward prediction loss """
 
 
 @dataclass
@@ -123,12 +127,6 @@ class EnvironmentConfig:
 
 
 @dataclass
-class AuxConfig:
-    obs_coef: float = 1.0
-    rew_coef: float = 0.1
-
-
-@dataclass
 class BufferConfig:
     rollout_steps: int
     num_envs: int
@@ -147,7 +145,6 @@ class Config:
     ppo: PPOHyperparams = field(default_factory=PPOHyperparams)
     lstm: LSTMConfig = field(default_factory=LSTMConfig)
     sched: ScheduleConfig = field(default_factory=ScheduleConfig)
-    aux: AuxConfig = AuxConfig()
     log: LoggingConfig = field(default_factory=LoggingConfig)
 
     @property

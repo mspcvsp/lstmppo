@@ -421,6 +421,9 @@ class LSTMPPOTrainer:
             )
         )
 
+        assert eval_output.pred_obs is not None, "evaluate_actions_sequence() must return pred_obs for auxiliary losses"
+        assert eval_output.pred_raw is not None, "evaluate_actions_sequence() must return pred_raw for auxiliary losses"
+
         # ------- Flatten -------
         # eval_output.values: [K, B] or [K, B, 1]
         values = eval_output.values
@@ -471,6 +474,24 @@ class LSTMPPOTrainer:
 
         if self.state.cfg.trainer.debug_mode is False:
             loss = loss + eval_output.ar_loss + eval_output.tar_loss
+
+        pred_next_obs = eval_output.pred_obs  # (K, B, obs_dim)
+        target_next_obs = mb.next_obs  # (K, B, obs_dim)
+
+        pred_next_rew = eval_output.pred_raw.squeeze(-1)  # (K, B)
+        target_next_rew = mb.next_rewards  # (K, B)
+
+        m = mb.mask.unsqueeze(-1)  # (K, B, 1)
+
+        obs_err = ((pred_next_obs - target_next_obs) ** 2) * m
+        aux_obs_loss = obs_err.sum() / (m.sum() * obs_err.size(-1)).clamp(min=1)
+
+        rew_err = ((pred_next_rew - target_next_rew) ** 2) * mb.mask
+        aux_rew_loss = rew_err.sum() / mb.mask.sum().clamp(min=1)
+
+        aux_loss = self.state.cfg.lstm.aux_obs_coef * aux_obs_loss + self.state.cfg.lstm.aux_rew_coef * aux_rew_loss
+
+        loss = loss + aux_loss
 
         grad_norm = self.backward_and_clip(loss)
 

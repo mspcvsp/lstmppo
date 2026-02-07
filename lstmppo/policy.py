@@ -292,6 +292,41 @@ class LSTMPPOPolicy(nn.Module):
             c_list.append(c)
 
         out = torch.cat(outputs, dim=1)  # (B, T, H)
+
+        """
+        Auxiliary Prediction Intent
+        ---------------------------
+        Auxiliary tasks (next‑observation and next‑reward prediction) provide additional supervised learning signals
+        that help the LSTM learn a richer, more stable internal representation of the environment’s dynamics.
+
+        Why this matters:
+        -----------------
+        • PPO’s policy gradient signal is sparse, noisy, and delayed.
+        • LSTMs benefit from dense, timestep‑level supervision.
+        • Predicting next_obs and next_rewards forces the recurrent state to
+        encode information that is actually predictive of the future.
+        • This improves memory, stabilizes hidden‑state dynamics, and reduces
+        drift across updates.
+
+        Effect on learning:
+        -------------------
+        Auxiliary prediction acts as a self‑supervised regularizer:
+            - strengthens temporal representations
+            - improves credit assignment in POMDPs
+            - reduces overfitting to short‑term correlations
+            - encourages the LSTM to model latent dynamics, not just react
+
+        Training‑time only:
+        -------------------
+        These predictions are used *only* during PPO training to compute auxiliary losses. They are not used during
+        rollout or action selection, which keeps the inference path lightweight and deterministic.
+
+        In short:
+        ---------
+        Auxiliary prediction teaches the LSTM to understand the world it is acting in, not just to optimize the policy
+        loss. It provides dense, future‑predictive supervision that dramatically improves stability and memory in
+        recurrent PPO.
+        """
         pred_obs = self.obs_pred_head(out)  # (B, T, obs_dim)
         pred_rew = self.rew_pred_head(out)  # (B, T, 1)
 
