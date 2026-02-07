@@ -123,6 +123,12 @@ class EnvironmentConfig:
 
 
 @dataclass
+class AuxConfig:
+    obs_coef: float = 1.0
+    rew_coef: float = 0.1
+
+
+@dataclass
 class BufferConfig:
     rollout_steps: int
     num_envs: int
@@ -141,6 +147,7 @@ class Config:
     ppo: PPOHyperparams = field(default_factory=PPOHyperparams)
     lstm: LSTMConfig = field(default_factory=LSTMConfig)
     sched: ScheduleConfig = field(default_factory=ScheduleConfig)
+    aux: AuxConfig = AuxConfig()
     log: LoggingConfig = field(default_factory=LoggingConfig)
 
     @property
@@ -322,6 +329,8 @@ class VecEnvState:
 class PolicyOutput:
     logits: torch.Tensor  # (B,A) or (B,T,A)
     values: torch.Tensor  # (B,) or (B,T)
+    pred_obs: torch.Tensor
+    pred_raw: torch.Tensor
     new_hxs: torch.Tensor  # (B,H)
     new_cxs: torch.Tensor  # (B,H)
     ar_loss: torch.Tensor  # scalar
@@ -333,6 +342,8 @@ class PolicyOutput:
         return PolicyOutput(
             logits=self.logits.detach(),
             values=self.values.detach(),
+            pred_obs=self.pred_obs.detach(),
+            pred_raw=self.pred_raw.detach(),
             new_hxs=self.new_hxs.detach(),
             new_cxs=self.new_cxs.detach(),
             ar_loss=self.ar_loss.detach(),
@@ -360,6 +371,8 @@ class LSTMUnitPrev:
 @dataclass
 class LSTMCoreOutput:
     out: torch.Tensor
+    pred_obs: torch.Tensor
+    pred_raw: torch.Tensor
     h: torch.Tensor
     c: torch.Tensor
     ar_loss: torch.Tensor

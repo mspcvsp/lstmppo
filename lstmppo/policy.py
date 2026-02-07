@@ -177,6 +177,9 @@ class LSTMPPOPolicy(nn.Module):
 
         self.critic = nn.Linear(state.cfg.lstm.lstm_hidden_size, 1)
 
+        self.obs_pred_head = nn.Linear(state.cfg.lstm.lstm_hidden_size, self.obs_dim)
+        self.rew_pred_head = nn.Linear(state.cfg.lstm.lstm_hidden_size, 1)
+
         if isinstance(self.actor, nn.Linear):
             if self.actor.weight.numel() > 0:
                 nn.init.xavier_uniform_(self.actor.weight)
@@ -189,6 +192,18 @@ class LSTMPPOPolicy(nn.Module):
 
         if self.critic.bias.numel() > 0:
             nn.init.zeros_(self.critic.bias)
+
+        if self.obs_pred_head.weight.numel() > 0:
+            nn.init.xavier_uniform_(self.obs_pred_head.weight)
+
+        if self.obs_pred_head.bias.numel() > 0:
+            nn.init.zeros_(self.obs_pred_head.bias)
+
+        if self.rew_pred_head.weight.numel() > 0:
+            nn.init.xavier_uniform_(self.rew_pred_head.weight)
+
+        if self.rew_pred_head.bias.numel() > 0:
+            nn.init.zeros_(self.rew_pred_head.bias)
 
     def initial_state(self, batch_size: int, device):
         return self.lstm.initial_state(batch_size, device)
@@ -256,6 +271,9 @@ class LSTMPPOPolicy(nn.Module):
             c_list.append(c)
 
         out = torch.cat(outputs, dim=1)  # (B, T, H)
+        pred_obs = self.obs_pred_head(out)  # (B, T, obs_dim)
+        pred_rew = self.rew_pred_head(out)  # (B, T, 1)
+
         i_gates, f_gates, g_gates, o_gates = zip(*gate_list)
 
         # Stack into (B, T, H)
@@ -278,6 +296,8 @@ class LSTMPPOPolicy(nn.Module):
 
         return LSTMCoreOutput(
             out=out,
+            pred_obs=pred_obs,
+            pred_raw=pred_rew,
             h=h,
             c=c,
             ar_loss=ar_loss,
@@ -323,6 +343,8 @@ class LSTMPPOPolicy(nn.Module):
         return PolicyOutput(
             logits=logits,
             values=values,
+            pred_obs=core_out.pred_obs,
+            pred_raw=core_out.pred_raw,
             new_hxs=core_out.h,
             new_cxs=core_out.c,
             ar_loss=core_out.ar_loss,
