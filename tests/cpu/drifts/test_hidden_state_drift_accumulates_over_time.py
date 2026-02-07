@@ -1,12 +1,24 @@
 """
-This test checks that hidden‑state drift grows over long horizons, which is
-a key LSTM interpretability invariant.
+This test MUST use the real LSTMPPOPolicy and real TrainerState.
 
-This test ensures:
+Why:
+-----
+Hidden‑state drift accumulation is a *core interpretability invariant* of
+the GateLSTMCell. Over longer horizons, the LSTM hidden state should
+accumulate more variance and exhibit larger drift magnitudes. This
+emerges only from the true LSTM dynamics:
 
-- LSTM hidden states accumulate variance over time
-- Drift metrics behave meaningfully
-- Diagnostics remain interpretable for long rollouts
+    • correct gate wiring (i, f, g, o)
+    • encoder → LSTM integration
+    • stable long‑horizon unrolls
+    • meaningful hidden‑state updates
+    • correct detach and state‑flow logic
+
+Any fake state, fake policy, or synthetic rollout would bypass the real
+LSTM math and invalidate the signal this test is designed to catch.
+
+This is a sentinel test for long‑sequence LSTM interpretability and
+stability. Do not replace the real model here.
 """
 
 import pytest
@@ -29,10 +41,11 @@ def test_hidden_state_drift_accumulates_over_time(trainer_state: TrainerState):
 
     B = 3
     H = trainer_state.cfg.lstm.lstm_hidden_size
+    D = trainer_state.env_info.flat_obs_dim
 
-    # Short vs long sequence
-    obs_short = torch.randn(B, 5, trainer_state.env_info.flat_obs_dim)
-    obs_long = torch.randn(B, 50, trainer_state.env_info.flat_obs_dim)
+    # Short vs long sequences
+    obs_short = torch.randn(B, 5, D)
+    obs_long = torch.randn(B, 50, D)
 
     h0 = torch.zeros(B, H)
     c0 = torch.zeros(B, H)
@@ -43,17 +56,12 @@ def test_hidden_state_drift_accumulates_over_time(trainer_state: TrainerState):
     drift_short = out_short.gates.h_gates.pow(2).mean()
     drift_long = out_long.gates.h_gates.pow(2).mean()
 
-    """
-    Hidden‑state drift should be non‑decreasing on average, not strictly increasing.
-    Individual samples may show tiny decreases due to:
-
-    - encoder noise
-    - float32 rounding
-    - LayerNorm stabilizing hidden activations
-    - small batch size (B=3)
-    - small drift magnitude (~1e‑4)
-
-    So tests must use averaging and tolerances, not strict comparisons.
-    """
+    # Hidden‑state drift should be non‑decreasing on average.
+    # Tiny decreases are allowed due to:
+    #   • encoder noise
+    #   • float32 rounding
+    #   • LayerNorm stabilization
+    #   • small batch size (B=3)
+    #   • small drift magnitude (~1e‑4)
     eps = 1e-6
     assert drift_long + eps >= drift_short
