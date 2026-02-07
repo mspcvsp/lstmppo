@@ -113,15 +113,37 @@ class RecurrentRolloutBuffer:
     # ---------------------------------------------------------
     def store_last_lstm_states(self, last_policy_output):
         """
-        Stores the PRE-STEP LSTM state used to produce the next action.
+        Stores the PRE‑STEP LSTM state used to produce the *next* action.
 
-        Shape invariant:
-            new_hxs, new_cxs: (T, B, H)
-            last_hxs, last_cxs: (B, H)
+        LSTM Rollout Boundary Invariant:
+        --------------------------------
+        At the end of a rollout, PPO must carry forward the LSTM state (h_T, c_T) that existed *before* the final
+        env.step(). This state becomes the initial hidden state for the next rollout.
 
-        Tests rely on:
-            • last_hxs/cxs always being 2-D
-            • representing the state at time t BEFORE env.step()
+        Critical requirements:
+        ---------------------
+        • new_hxs/new_cxs from the policy are shaped (T, B, H) or (B, H) depending on sequence length; we must extract
+          the final timestep.
+        • The stored state must be 2‑D (B, H) to match rollout initialization.
+        • The state must be detached to prevent gradients from spanning across rollout boundaries.
+
+        Why this invariant matters:
+        ---------------------------
+        • Ensures deterministic state‑flow across rollouts
+        • Ensures evaluate_actions_sequence() reproduces rollout‑time behavior
+        • Ensures TBPTT chunking begins from the correct h_0, c_0
+        • Ensures LSTM diagnostics (drift, saturation, entropy) remain aligned
+        • Prevents accidental backprop through multiple rollouts
+
+        If this invariant is violated:
+        ------------------------------
+        • validate_lstm_state_flow() will fail
+        • PPO will compute logprobs/values from misaligned states
+        • TBPTT will unroll from the wrong initial state
+        • Diagnostics become meaningless
+        • Training becomes nondeterministic
+
+        => Never modify this logic without re‑running all LSTM validation tests.
         """
         # Typically new_hxs/new_cxs are (T, B, H) or (T, H) when B=1
         hxs = last_policy_output.new_hxs[-1]
@@ -254,6 +276,51 @@ class RecurrentRolloutBuffer:
     # Yield minibatches of full sequences (T, B, ...)
     # ---------------------------------------------------------
     def get_recurrent_minibatches(self):
+        """
+        Yield full‑sequence recurrent minibatches in time‑major format.
+
+        get_recurrent_minibatches Invariants:
+        -------------------------------------
+        This function defines how PPO samples (T, B, ...) sequences from the rollout buffer. It must preserve the
+        temporal structure of the rollout and maintain alignment across all tensors used by the recurrent policy.
+
+        Critical invariants:
+
+        1. Time‑major slicing
+        ---------------------
+        All tensors must be sliced as (T, B, ...) so that PPO, TBPTT, and evaluate_actions_sequence() operate on
+        identically aligned data.
+
+        2. Environment‑major shuffling only
+        -----------------------------------
+        We shuffle environments (the B dimension) but never shuffle or break the temporal dimension T. Each minibatch
+        contains full sequences for a subset of environments.
+
+        3. PRE‑STEP hidden state alignment
+        ----------------------------------
+        The hxs/cxs tensors sliced here must correspond to the PRE‑STEP states stored during rollout. This ensures that
+        TBPTT chunks begin from the correct initial hidden state.
+
+        4. next_obs / next_rewards alignment
+        ------------------------------------
+        next_obs[t] = obs[t+1] and next_rewards[t] = rewards[t] must be constructed here so that auxiliary prediction
+        targets remain aligned with PPO’s time‑major rollout structure.
+
+        5. Mask correctness
+        -------------------
+        terminated/truncated flags must be sliced in (T, B) format so that TBPTT and PPO losses correctly ignore
+        invalid timesteps.
+
+        6. No gradient detachment
+        -------------------------
+        All tensors returned here must retain gradients through the policy evaluation path. Only hidden states are
+        detached later, never here.
+
+        If any of these invariants are violated, PPO training becomes nondeterministic, TBPTT breaks, auxiliary losses
+        misalign, and LSTM state‑flow validation fails.
+
+        => Never modify this function without re‑running all recurrent PPO tests.
+        """
         env_indices = torch.randperm(self.cfg.num_envs, device=self.device)
 
         for start in range(0, self.cfg.num_envs, self.cfg.mini_batch_envs):
@@ -263,10 +330,47 @@ class RecurrentRolloutBuffer:
             obs = self.obs[:, idx]  # (T, B, obs_dim)
             rewards = self.rewards[:, idx]  # (T, B)
 
-            # ----------------------------------------------------
-            # Compute next_obs and next_rewards
-            # ----------------------------------------------------
-            # next_obs[t] = obs[t+1]
+            """
+            Auxiliary Prediction Invariants (next_obs / next_rewards)
+            ---------------------------------------------------------
+            Auxiliary tasks predict the next observation and next reward for each timestep. These targets must be
+            constructed in a way that preserves the temporal structure of the rollout and aligns with PPO’s time‑major
+            format.
+
+            Critical invariants:
+
+            1. next_obs[t] = obs[t+1]
+            -------------------------
+            The next observation is the environment state *after* taking action[t]. Because the rollout buffer stores
+            observations in time‑major format (T, B, ...), next_obs is obtained by shifting obs by one timestep. The
+            final timestep is padded (and masked out) because obs[T+1] does not exist within the rollout.
+
+            2. next_rewards[t] = rewards[t]
+            -------------------------------
+            In Gym/PopGym environments, reward[t] is already the reward for the transition t → t+1. There is no
+            separate “next reward” field. Using rewards[t] preserves PPO’s GAE semantics and ensures that auxiliary
+            reward prediction aligns with the true transition function.
+
+            3. Sequence‑level alignment
+            ---------------------------
+            next_obs and next_rewards must have shape (T, B, ...) so they remain aligned with obs, actions, values,
+            returns, advantages, and masks. This avoids any special‑case handling in TBPTT or the trainer.
+
+            4. Mask correctness
+            -------------------
+            The final timestep’s next_obs is padded but always masked out by the (terminated | truncated) mask.
+            Auxiliary losses must never propagate gradients through invalid timesteps.
+
+            5. No gradient detachment
+            -------------------------
+            next_obs and next_rewards are treated as supervised targets; the predictions retain gradients, but the
+            targets do not. Detaching targets here ensures PPO and auxiliary losses remain independent.
+
+            If any of these invariants are violated, auxiliary losses become misaligned, TBPTT breaks, and PPO’s
+            recurrent evaluation no longer matches rollout‑time behavior.
+
+            => Never modify this logic without re‑running all recurrent PPO tests.
+            """
             next_obs = obs[1:]  # (T-1, B, obs_dim)
 
             # Pad final timestep (masked out anyway)

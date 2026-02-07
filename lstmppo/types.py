@@ -283,19 +283,47 @@ class RecurrentBatch:
 
     def iter_chunks(self, K: int):
         """
-        Yield TBPTT chunks of length K.
-        Each chunk yields:
-            obs_chunk:        (K, B, obs_dim)
-            next_obs_chunk:   (K, B, obs_dim)
-            next_rewards:     (K, B)
-            actions_chunk:    (K, B, 1)
-            returns_chunk:    (K, B)
-            adv_chunk:        (K, B)
-            old_logp_chunk:   (K, B)
-            old_values:       (K, B)
-            hxs0:             (B, H)
-            cxs0:             (B, H)
-            mask:             (K, B)
+        TBPTT chunking over a full (T, B, ...) sequence.
+
+        iter_chunks Invariants:
+        -----------------------
+        This method defines how PPO performs truncated backpropagation through time (TBPTT). Each chunk must preserve
+        the temporal structure of the rollout and maintain correct LSTM state‑flow.
+
+        Critical invariants:
+
+        1. Chunk boundaries never break time order
+        ------------------------------------------
+        Chunks are contiguous slices [t0:t1] of the time dimension. We never shuffle or reorder timesteps. Only the
+        environment (B) dimension is shuffled upstream.
+
+        2. PRE‑STEP hidden state initialization
+        ---------------------------------------
+        Each chunk must begin with the PRE‑STEP LSTM state stored at t0 (hxs[t0], cxs[t0]). This ensures:
+
+            • TBPTT unrolls from the correct state
+            • evaluate_actions_sequence() matches rollout behavior
+            • state‑flow validation remains correct
+
+        3. Mask alignment
+        -----------------
+        The mask for each chunk must be sliced as (K, B) from the original terminated/truncated flags so that PPO
+        correctly ignores invalid timesteps inside the chunk.
+
+        4. next_obs / next_rewards alignment
+        ------------------------------------
+        These tensors must be sliced with the same (t0:t1) window so that auxiliary prediction targets remain aligned
+        with obs, actions, returns, and advantages.
+
+        5. No gradient detachment inside the chunk
+        ------------------------------------------
+        All tensors returned here must retain gradients through the policy evaluation path. Only the initial hidden
+        states (hxs0, cxs0) are detached later by the trainer.
+
+        If any of these invariants are violated, TBPTT breaks, PPO gradients become misaligned, auxiliary losses drift,
+        and LSTM state‑flow validation fails.
+
+        => Never modify this logic without re‑running all recurrent PPO tests.
         """
         T = self.obs.size(0)
 
