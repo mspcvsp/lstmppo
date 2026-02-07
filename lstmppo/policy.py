@@ -622,6 +622,8 @@ class LSTMPPOPolicy(nn.Module):
             - logits: (B, A)
             - values: (B,)
         actions: (B,) or (B,1)
+
+        evaluate_actions() → rollout‑time, single‑step, no auxiliary predictions
         """
 
         # Ensure shape (B,)
