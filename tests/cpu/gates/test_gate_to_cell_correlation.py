@@ -1,6 +1,27 @@
 """
-Ensures forget gate correlates with cell‑state magnitude
-(core LSTM behavior).
+This test MUST use the real LSTMPPOPolicy and real TrainerState.
+
+Why:
+-----
+The forget gate (f_t) and the cell state magnitude (|c_t|) should not
+exhibit a strong linear correlation. This is a *non‑relationship
+invariant* of LSTM dynamics.
+
+Reasons:
+    • f_t is initialized near 0.73 (bias = +1.0), independent of c_t
+    • c_t is an accumulator and grows with drift, noise, and gating
+    • LayerNorm stabilizes h_t but not c_t
+    • The LSTM equations do not impose a monotonic or sign‑stable
+      relationship between f_t and |c_t|
+    • Small batch sizes and short sequences introduce noise
+
+Therefore:
+    • The sign of the correlation is unstable
+    • The magnitude should remain small
+    • A strong positive or negative correlation indicates broken gating
+
+This is a sentinel test for LSTM gate correctness. Do not replace the
+real model here.
 """
 
 import pytest
@@ -22,34 +43,20 @@ def test_gate_to_cell_correlation(trainer_state: TrainerState):
     policy.eval()
 
     B, T = 3, 30
-    obs = torch.randn(B, T, trainer_state.env_info.flat_obs_dim)
-    h0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
-    c0 = torch.zeros(B, trainer_state.cfg.lstm.lstm_hidden_size)
+    H = trainer_state.cfg.lstm.lstm_hidden_size
+    D = trainer_state.env_info.flat_obs_dim
+
+    obs = torch.randn(B, T, D)
+    h0 = torch.zeros(B, H)
+    c0 = torch.zeros(B, H)
 
     out = policy.forward(PolicyInput(obs=obs, hxs=h0, cxs=c0))
 
+    # Flatten across (B, T)
     f = out.gates.f_gates.reshape(-1)
     c = out.gates.c_gates.abs().reshape(-1)
 
     corr = torch.corrcoef(torch.stack([f, c]))[0, 1]
 
-    """
-    The correlation between forget gate and cell magnitude should be small
-    near zero).
-
-    Why?
-    - The forget gate is initialized near 0.73 (bias=1.0)
-    - The cell state is unnormalized and accumulates drift
-    - The hidden state is normalized (LayerNorm)
-    - The recurrent dynamics do not enforce a monotonic relationship
-    - The LSTM equations do not imply a sign constraint
-    - The sample size is tiny, so correlation estimates are noisy
-
-    Therefore:
-    - The sign is not stable
-    - The magnitude should be small
-    - The correlation should not be strongly positive or strongly negative
-
-    This is the real invariant.
-    """
+    # The correlation should be small in magnitude
     assert corr.abs() < 0.2
