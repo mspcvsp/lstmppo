@@ -68,6 +68,7 @@ def train_popgym_seed(trainer, steps=5000):
     critic_losses = []
     action_logits = []
     returns = []
+    recent_returns = []
 
     for step in range(steps):
         trainer.collect_env_steps()
@@ -80,7 +81,14 @@ def train_popgym_seed(trainer, steps=5000):
 
         # Track episodic returns
         if trainer.env_state["is_last"].any():
-            returns.append(trainer.env_state["reward"].sum().item())
+            ep_return = trainer.env_state["reward"].sum().item()
+            trainer.tb.add_scalar("env/ep_return", ep_return, step)
+
+            recent_returns.append(ep_return)
+            recent_returns = recent_returns[-50:]
+            trainer.tb.add_scalar("env/avg_return_50", np.mean(recent_returns), step)
+
+            returns.append(ep_return)
 
         # Track logits for KL (last 50 steps)
         if step >= steps - 50:

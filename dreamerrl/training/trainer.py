@@ -5,11 +5,11 @@ import os
 import time
 from typing import Any, Dict
 
-from matplotlib.pyplot import step
 import numpy as np
 import torch
 import torch.nn.functional as F
 from gymnasium.spaces import Discrete
+from matplotlib.pyplot import step
 from rich.live import Live
 from rich.table import Table
 from torch.utils.tensorboard import SummaryWriter
