@@ -10,8 +10,6 @@ import torch
 import torch.nn.functional as F
 from gymnasium.spaces import Discrete
 from matplotlib.pyplot import step
-from rich.live import Live
-from rich.table import Table
 from torch.utils.tensorboard import SummaryWriter
 
 import wandb
@@ -168,25 +166,6 @@ class DreamerTrainer:
     def global_step(self) -> int:
         return self.total_env_steps
 
-    def _make_rich_table(self, step, wm, actor_loss, critic_loss, ep_return):
-        t = Table(title="DreamerV3 Convergence Monitor")
-
-        t.add_column("Metric")
-        t.add_column("Value")
-
-        t.add_row("Step", str(step))
-        t.add_row("WM Loss", f"{wm.total_loss.item():.4f}")
-        t.add_row("KL_dyn", f"{wm.kl_dyn.item():.4f}")
-        t.add_row("KL_rep", f"{wm.kl_rep.item():.4f}")
-        t.add_row("Actor Loss", f"{actor_loss:.4f}")
-        t.add_row("Critic Loss", f"{critic_loss:.4f}")
-        t.add_row("Episodic Return", f"{ep_return:.3f}")
-        t.add_row(
-            "Avg Return (50)", f"{np.mean(self.recent_returns):.3f}" if hasattr(self, "recent_returns") else "N/A"
-        )
-
-        return t
-
     # -------------------------------------------------------------
     # Training Loop
     # -------------------------------------------------------------
@@ -198,11 +177,6 @@ class DreamerTrainer:
             lr_floor=0.1,
         )
         lr_schedule = CosineWarmupScheduler(lr_cfg)
-
-        live = None
-        if self.cfg.debug.rich_dashboard:
-            live = Live(refresh_per_second=4)
-            live.start()
 
         self.recent_returns = []
 
@@ -237,17 +211,6 @@ class DreamerTrainer:
                 self.recent_returns = self.recent_returns[-50:]
                 self.tb.add_scalar("env/avg_return_50", np.mean(self.recent_returns), step)
 
-            if live and update_idx % self.cfg.debug.rich_update_interval == 0:
-                live.update(
-                    self._make_rich_table(
-                        update_idx,
-                        wm_metrics,
-                        actor_loss,
-                        critic_loss,
-                        ep_return,
-                    )
-                )
-
             if self.cfg.log.enable_wandb:
                 wandb.log(
                     {
@@ -258,9 +221,6 @@ class DreamerTrainer:
                     },
                     step=update_idx,
                 )
-
-        if live:
-            live.stop()
 
     # -------------------------------------------------------------
     # Collect steps from environment
