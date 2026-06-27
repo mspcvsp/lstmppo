@@ -114,6 +114,9 @@ class TrainingConfig:
     # Whether to use deterministic imagination (argmax) or sample from the prior.
     deterministic_imagination: bool = False
 
+    # Enable / disable Weights & Biases logging.
+    enable_wandb: bool = False
+
     # Deterministic env stepping (for reproducibility tests only).
     #
     # If True:
