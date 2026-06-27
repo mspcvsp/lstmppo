@@ -71,8 +71,7 @@ def train_popgym_seed(trainer, steps=5000):
     recent_returns = []
 
     for step in range(steps):
-        if step % 100 == 0:
-            print(f"[popgym] seed={trainer.cfg.env.seed} step={step}", flush=True)
+        print(f"[popgym] seed={trainer.cfg.env.seed} step={step}", flush=True)
 
         trainer.collect_env_steps()
         batch = trainer.replay.sample(trainer.cfg.train.batch_size)

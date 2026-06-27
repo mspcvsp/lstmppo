@@ -15,7 +15,7 @@ def test_popgym(request):
         pytest.skip("Manual test skipped. Use --run-manual to enable.")
 
     env_id = request.config.getoption("--env")
-    steps = request.config.getoption("--steps")
+    steps = int(request.config.getoption("--steps"))
 
     seeds = [0, 1, 2]
     results = []
