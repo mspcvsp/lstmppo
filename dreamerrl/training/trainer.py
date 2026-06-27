@@ -13,6 +13,7 @@ from matplotlib.pyplot import step
 from torch.utils.tensorboard import SummaryWriter
 
 import wandb
+from dreamerrl.env.popgym.popgym_parallel_env import PopGymParallelEnv
 from dreamerrl.env.popgym.popgym_wrappers import PopGymVecEnv
 from dreamerrl.models.actor import Actor
 from dreamerrl.models.value_head import ValueHead
@@ -82,7 +83,11 @@ class DreamerTrainer:
         # -----------------------------------------------------
         # Environment
         # -----------------------------------------------------
-        self.env = PopGymVecEnv(cfg.env, device=self.device)
+        if cfg.env.parallel:
+            self.env = PopGymParallelEnv(cfg.env, device=self.device)
+        else:
+            self.env = PopGymVecEnv(cfg.env, device=self.device)
+
         obs_space = self.env.venv.single_observation_space
 
         action_space = self.env.venv.single_action_space

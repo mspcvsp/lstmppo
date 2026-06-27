@@ -151,6 +151,7 @@ class EnvironmentConfig:
     num_envs: int = 4
     max_episode_steps: int = 50
     deterministic: bool = False
+    parallel: bool = False  # reproducibility mode
     seed: int = 0
 
 
