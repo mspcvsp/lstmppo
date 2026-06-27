@@ -9,6 +9,7 @@ from dreamerrl.utils.types import make_default_config
 
 
 @pytest.mark.manual
+@pytest.mark.popgym
 def test_popgym(request):
     if not request.config.getoption("--run-manual"):
         pytest.skip("Manual test skipped. Use --run-manual to enable.")

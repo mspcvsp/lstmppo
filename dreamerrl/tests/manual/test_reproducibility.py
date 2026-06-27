@@ -185,6 +185,7 @@ def summarize(metric_list):
 
 
 @pytest.mark.manual
+@pytest.mark.reproducibility
 def test_reproducibility():
     seeds = [0, 1, 2]
     results = run_all_seeds(seeds, steps=300)
