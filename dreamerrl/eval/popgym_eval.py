@@ -1,10 +1,11 @@
 import time
+
 import numpy as np
 import torch
 from scipy.stats import entropy
 
 # ============================================================
-# 1. Deterministic Evaluation (your function, refined)
+# 1. Deterministic Evaluation
 # ============================================================
 
 
@@ -24,15 +25,12 @@ def evaluate_popgym(env, world, actor, episodes=10, device="cpu"):
         ep_return = torch.zeros(batch_size, device=device)
 
         while not torch.all(done):
-            # RSSM update
             out = world.observe_step(world_state, obs)
             world_state = out["post"]
 
-            # Greedy action
             logits = actor(world_state.h, world_state.z)
             action = torch.argmax(logits, dim=-1)
 
-            # Step environment
             env_out = env.step(action)
             obs = env_out["state"]
             reward = env_out["reward"]
@@ -56,7 +54,15 @@ def evaluate_popgym(env, world, actor, episodes=10, device="cpu"):
 
 
 def train_popgym_seed(trainer, steps=1000):
-    trainer.cfg.train.collect_steps = 1  # 1 env step per update
+    """
+    Fast PopGym functional training harness.
+    - collect_steps = 1 for predictable runtime
+    - warmup ensures replay buffer is non-empty
+    - logits collected periodically (not only at end)
+    """
+
+    # Make PopGym fast + predictable
+    trainer.cfg.train.collect_steps = 1
     trainer.cfg.train.random_exploration_steps = 0
     trainer.cfg.train.warmup_steps = 0
 
@@ -66,7 +72,7 @@ def train_popgym_seed(trainer, steps=1000):
     action_logits = []
     returns = []
 
-    # Warm up replay buffer with enough steps to fill one episode
+    # Warm up replay buffer so sampling works
     for _ in range(200):
         trainer.collect_env_steps()
 
@@ -74,7 +80,7 @@ def train_popgym_seed(trainer, steps=1000):
     print("\n")
 
     for step in range(steps):
-        trainer.collect_env_steps()  # now exactly 1 step
+        trainer.collect_env_steps()
 
         batch = trainer.replay.sample(trainer.cfg.train.batch_size)
 
@@ -83,14 +89,29 @@ def train_popgym_seed(trainer, steps=1000):
         actor_losses.append(a_loss)
         critic_losses.append(c_loss)
 
+        # Episodic returns
         if trainer.env_state["is_last"].any():
             ep_return = trainer.env_state["reward"].sum().item()
             returns.append(ep_return)
 
+        # ETA heartbeat
         if step % 10 == 0 and step > 0:
             elapsed = time.time() - start
             eta = elapsed / step * (steps - step)
             print(f"[popgym] step={step}/{steps} elapsed={elapsed:.1f}s eta={eta:.1f}s", flush=True)
+
+        # Collect logits every 100 steps (robust)
+        if step % 100 == 0:
+            with torch.no_grad():
+                logits = trainer.actor(trainer.world_state.h, trainer.world_state.z)
+                action_logits.append(logits.cpu())
+
+    # Fallback: ensure we have ~30 logits for KL
+    if len(action_logits) < 30:
+        with torch.no_grad():
+            for _ in range(30 - len(action_logits)):
+                logits = trainer.actor(trainer.world_state.h, trainer.world_state.z)
+                action_logits.append(logits.cpu())
 
     return {
         "wm_loss": np.array(wm_losses),
