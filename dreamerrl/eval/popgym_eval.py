@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import torch
 from scipy.stats import entropy
@@ -54,26 +55,27 @@ def evaluate_popgym(env, world, actor, episodes=10, device="cpu"):
 # ============================================================
 
 
-def train_popgym_seed(trainer, steps=5000):
-    """
-    Runs Dreamer-V3 training for a single seed and collects:
-      - world model loss curve
-      - actor loss curve
-      - critic loss curve
-      - action logits (for KL)
-      - episodic returns
-    """
+def train_popgym_seed(trainer, steps=1000):
+    trainer.cfg.train.collect_steps = 1  # 1 env step per update
+    trainer.cfg.train.random_exploration_steps = 0
+    trainer.cfg.train.warmup_steps = 0
+
     wm_losses = []
     actor_losses = []
     critic_losses = []
     action_logits = []
     returns = []
-    recent_returns = []
+
+    # Warm up replay buffer with enough steps to fill one episode
+    for _ in range(200):
+        trainer.collect_env_steps()
+
+    start = time.time()
+    print("\n")
 
     for step in range(steps):
-        print(f"[popgym] seed={trainer.cfg.env.seed} step={step}", flush=True)
+        trainer.collect_env_steps()  # now exactly 1 step
 
-        trainer.collect_env_steps()
         batch = trainer.replay.sample(trainer.cfg.train.batch_size)
 
         wm_losses.append(trainer.update_world_model(batch, step))
@@ -81,22 +83,14 @@ def train_popgym_seed(trainer, steps=5000):
         actor_losses.append(a_loss)
         critic_losses.append(c_loss)
 
-        # Track episodic returns
         if trainer.env_state["is_last"].any():
             ep_return = trainer.env_state["reward"].sum().item()
-            trainer.tb.add_scalar("env/ep_return", ep_return, step)
-
-            recent_returns.append(ep_return)
-            recent_returns = recent_returns[-50:]
-            trainer.tb.add_scalar("env/avg_return_50", np.mean(recent_returns), step)
-
             returns.append(ep_return)
 
-        # Track logits for KL (last 50 steps)
-        if step >= steps - 50:
-            with torch.no_grad():
-                logits = trainer.actor(trainer.world_state.h, trainer.world_state.z)
-                action_logits.append(logits.cpu())
+        if step % 10 == 0 and step > 0:
+            elapsed = time.time() - start
+            eta = elapsed / step * (steps - step)
+            print(f"[popgym] step={step}/{steps} elapsed={elapsed:.1f}s eta={eta:.1f}s", flush=True)
 
     return {
         "wm_loss": np.array(wm_losses),
