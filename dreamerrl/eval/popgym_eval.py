@@ -62,9 +62,9 @@ def train_popgym_seed(trainer, steps=1000):
     """
 
     # Make PopGym fast + predictable
-    trainer.cfg.train.collect_steps = 1
-    trainer.cfg.train.random_exploration_steps = 0
-    trainer.cfg.train.warmup_steps = 0
+    trainer.cfg.train.collect_steps = 10
+    trainer.cfg.train.random_exploration_steps = 100
+    trainer.cfg.train.warmup_steps = 50
 
     wm_losses = []
     actor_losses = []
@@ -77,7 +77,6 @@ def train_popgym_seed(trainer, steps=1000):
         trainer.collect_env_steps()
 
     start = time.time()
-    print("\n")
 
     for step in range(steps):
         trainer.collect_env_steps()
@@ -90,7 +89,7 @@ def train_popgym_seed(trainer, steps=1000):
         critic_losses.append(c_loss)
 
         # Episodic returns
-        if trainer.env_state["is_last"].any():
+        if trainer.env_state["is_last"].any() or trainer.env_state["is_terminal"].any():
             ep_return = trainer.env_state["reward"].sum().item()
             returns.append(ep_return)
 
@@ -112,6 +111,10 @@ def train_popgym_seed(trainer, steps=1000):
             for _ in range(30 - len(action_logits)):
                 logits = trainer.actor(trainer.world_state.h, trainer.world_state.z)
                 action_logits.append(logits.cpu())
+
+    # Prevent nan returns if no episodes finished (e.g. PopGym's "hard" envs)
+    if len(returns) == 0:
+        returns.append(0.0)
 
     return {
         "wm_loss": np.array(wm_losses),
@@ -143,8 +146,35 @@ def summarize(arr_list):
     return mean, std, cv
 
 
+def summarize_metrics(metrics_list):
+    """
+    metrics_list: list of lists of WorldModelMetrics
+    Returns mean/std/cv for each metric curve.
+    """
+    # Convert list-of-dataclasses → dict of numpy arrays
+    curves = {
+        "total_loss": np.stack([m.total_loss.item() for m in metrics_list]),
+        "recon_loss": np.stack([m.recon_loss.item() for m in metrics_list]),
+        "reward_loss": np.stack([m.reward_loss.item() for m in metrics_list]),
+        "cont_loss": np.stack([m.cont_loss.item() for m in metrics_list]),
+        "kl_dyn": np.stack([m.kl_dyn.item() for m in metrics_list]),
+        "kl_rep": np.stack([m.kl_rep.item() for m in metrics_list]),
+    }
+
+    # Compute summary stats for each curve
+    summary = {}
+    for key, arr in curves.items():
+        mean = arr.mean()
+        std = arr.std()
+        cv = std / abs(mean) if mean != 0 else 0.0
+        summary[key] = (mean, std, cv)
+
+    return summary
+
+
 def aggregate_popgym_results(results):
-    wm_mean, wm_std, wm_cv = summarize([r["wm_loss"] for r in results])
+    wm_mean, wm_std, wm_cv = summarize([[m.total_loss.item() for m in r["wm_loss"]] for r in results])
+
     actor_mean, actor_std, actor_cv = summarize([r["actor_loss"] for r in results])
     critic_mean, critic_std, critic_cv = summarize([r["critic_loss"] for r in results])
 
