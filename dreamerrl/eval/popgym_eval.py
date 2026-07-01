@@ -19,7 +19,7 @@ def evaluate_popgym(env, world, actor, episodes=10, device="cpu"):
     batch_size = env.batch_size
 
     for _ in range(episodes):
-        obs = env.reset()["state"]
+        obs = env.reset()
         world_state = world.init_state(batch_size).to(device)
         done = torch.zeros(batch_size, dtype=torch.bool, device=device)
         ep_return = torch.zeros(batch_size, device=device)
@@ -31,10 +31,9 @@ def evaluate_popgym(env, world, actor, episodes=10, device="cpu"):
             logits = actor(world_state.h, world_state.z)
             action = torch.argmax(logits, dim=-1)
 
-            env_out = env.step(action)
-            obs = env_out["state"]
-            reward = env_out["reward"]
-            done = env_out["is_terminal"]
+            obs = env.step(action)
+            reward = obs["reward"]
+            done = obs["is_terminal"]
 
             ep_return += reward * (~done)
 
