@@ -1,3 +1,36 @@
+"""
+PopGym → Dreamer Observation Contract
+
+PopGym environments return dict observations that include:
+    - obs["state"]:       the actual environment state (Box space)
+    - obs["action"]:      the *previous* action taken (Discrete → scalar)
+
+Dreamer expects a single flat observation vector, so this wrapper:
+    1. Flattens only obs["state"] into [s0, s1, ..., sn]
+    2. Converts obs["action"] into a 1-D tensor [prev_action]
+    3. Returns both fields separately ("state", "prev_action")
+
+The Dreamer encoder then concatenates these internally, producing:
+
+        [s0, s1, s2, s3, prev_action]
+
+This is REQUIRED for PopGym's RepeatPrevious* tasks, whose reward depends on whether the agent repeats the previous
+action:
+
+        reward = +1 if action_t == action_{t-1}
+
+Without exposing prev_action, Dreamer cannot learn the rule.
+
+Additionally, Dreamer trains on a continuous stream of transitions. When an environment finishes an episode
+(is_last=True), we immediately reset *only* that environment and stitch the reset observation (state + prev_action)
+into the batch. This produces seamless transitions across episode boundaries:
+
+        ... → (terminal) → (reset obs) → ...
+
+allowing Dreamer to sample fixed-length sequences without encountering dead environments. This is the standard
+DreamerV3 vector-environment pattern.
+"""
+
 from typing import Any, Callable, Dict, Optional
 
 import gymnasium as gym

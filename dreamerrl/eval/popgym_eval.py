@@ -1,3 +1,34 @@
+"""
+PopGym → Dreamer Evaluation Contract
+
+This file implements deterministic evaluation of Dreamer-V3 agents on PopGym environments. Evaluation uses:
+
+    - Dreamer's latent state (h, z)
+    - Greedy actor policy (argmax over logits)
+   - No exploration, no replay, no randomness
+
+PopGym environments return dict observations containing:
+    - "state":       flattened environment state
+    - "prev_action": previous action taken (added by our wrapper)
+
+The evaluation loop passes the *full* observation dict directly into world.observe_step(), allowing Dreamer to encode
+both the current state and the previous action. This is REQUIRED for PopGym's RepeatPrevious* tasks, whose reward
+depends on:
+
+    reward = +1 if action_t == action_{t-1}
+
+The evaluation loop runs until all vectorized environments report is_terminal=True, accumulating per-env episodic
+returns. Because the wrapper auto-resets environments internally, evaluation always receives valid transitions and
+never encounters dead envs.
+
+The result dictionary includes:
+    - mean return across episodes
+    - std return
+    - per-env return vector
+
+This file provides a stable, deterministic benchmark for Dreamer functional correctness on PopGym tasks.
+"""
+
 import time
 
 import numpy as np
