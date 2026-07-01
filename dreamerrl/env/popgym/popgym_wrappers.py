@@ -1,34 +1,46 @@
 """
-PopGym → Dreamer Observation Contract
+PopGym → Dreamer Observation Contract (SyncVectorEnv-compatible)
 
-PopGym environments return dict observations that include:
-    - obs["state"]:       the actual environment state (Box space)
-    - obs["action"]:      the *previous* action taken (Discrete → scalar)
+PopGym environments normally return dict observations:
+    - obs["state"]:       environment state
+    - obs["action"]:      previous action taken
 
-Dreamer expects a single flat observation vector, so this wrapper:
-    1. Flattens only obs["state"] into [s0, s1, ..., sn]
-    2. Converts obs["action"] into a 1-D tensor [prev_action]
-    3. Returns both fields separately ("state", "prev_action")
+BUT Gymnasium's SyncVectorEnv *collapses dict observations into arrays*.
+This means obs["action"] and obs["state"] are NOT available in vectorized
+mode — only a single numpy array containing the state is returned.
 
-The Dreamer encoder then concatenates these internally, producing:
+To support PopGym's RepeatPrevious* tasks (reward = +1 if action_t == action_{t-1}),
+this wrapper tracks the previous action INTERNALLY:
 
-        [s0, s1, s2, s3, prev_action]
+    self._prev_action[i] = action taken by env i on the previous step
 
-This is REQUIRED for PopGym's RepeatPrevious* tasks, whose reward depends on whether the agent repeats the previous
-action:
+Dreamer receives:
+    - "state":       flattened state array
+    - "prev_action": previous action (tracked internally)
 
-        reward = +1 if action_t == action_{t-1}
+Dreamer’s encoder concatenates these internally, producing:
+    [s0, s1, s2, s3, prev_action]
 
-Without exposing prev_action, Dreamer cannot learn the rule.
+This is REQUIRED for RepeatPrevious* tasks because the reward depends on
+whether the agent repeats the previous action.
 
-Additionally, Dreamer trains on a continuous stream of transitions. When an environment finishes an episode
-(is_last=True), we immediately reset *only* that environment and stitch the reset observation (state + prev_action)
-into the batch. This produces seamless transitions across episode boundaries:
+AUTO‑RESET LOGIC (Dreamer-style streaming):
 
-        ... → (terminal) → (reset obs) → ...
+Dreamer trains on a continuous stream of fixed-length sequences. When an
+environment finishes an episode (is_last=True):
 
-allowing Dreamer to sample fixed-length sequences without encountering dead environments. This is the standard
-DreamerV3 vector-environment pattern.
+    1. We immediately reset *only* that environment.
+    2. We flatten the new initial state.
+    3. We reset prev_action for that environment to 0.
+    4. We stitch the reset state + prev_action into the batch output.
+    5. We mark that environment as is_first=True on the NEXT step.
+
+This produces seamless transitions across episode boundaries:
+
+    ... → (terminal) → (reset obs) → ...
+
+allowing Dreamer to sample fixed-length sequences without encountering
+dead environments. This is the standard DreamerV3 vector-environment pattern.
 """
 
 from typing import Any, Callable, Dict, Optional
@@ -59,7 +71,6 @@ def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
             rng = getattr(env.unwrapped, "rng", None)
             if rng is not None:
                 setattr(env.unwrapped, "rng", np.random.default_rng(env_cfg.seed + idx))
-
             env.reset(seed=env_cfg.seed + idx)
 
         return env
@@ -70,11 +81,7 @@ def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
 class PopGymVecEnv(EnvInterface):
     """
     Dreamer-native vector env wrapper for PopGym.
-    Now correctly exposes:
-      - state (flattened)
-      - prev_action (required for RepeatPreviousEasy)
-      - reward
-      - is_first / is_last / is_terminal
+    Tracks prev_action internally (SyncVectorEnv does not expose it).
     """
 
     def __init__(self, env_cfg: EnvironmentConfig, device: torch.device):
@@ -85,12 +92,20 @@ class PopGymVecEnv(EnvInterface):
 
         self.venv = SyncVectorEnv([make_env(env_cfg, idx) for idx in range(self._batch_size)])
 
-        # Observation dimension (flattened state only)
-        self._obs_dim = int(torch.tensor(self.venv.single_observation_space.shape).prod())
+        # Flattened state dimension
+        shape = self.venv.single_observation_space.shape
+        if shape is None:
+            raise RuntimeError("PopGymVecEnv: single_observation_space.shape is None")
+
+        self._obs_dim = int(np.prod(shape))
 
         assert isinstance(self.venv.single_action_space, Discrete)
         self._action_dim = int(self.venv.single_action_space.n)
 
+        # Track previous actions internally
+        self._prev_action = torch.zeros(self._batch_size, dtype=torch.float32, device=self.device)
+
+        # Track Dreamer-style "first step" markers
         self._needs_first = torch.ones(self._batch_size, dtype=torch.bool, device=self.device)
 
     @property
@@ -108,18 +123,18 @@ class PopGymVecEnv(EnvInterface):
     def reset(self, seed: Optional[int] = None) -> Dict[str, Any]:
         obs, info = self.venv.reset(seed=seed)
 
-        # Extract previous action
-        prev_action = torch.as_tensor(obs["action"], dtype=torch.float32, device=self.device)
-
-        # Flatten only the state part
-        flat_state = flatten_obs(obs["state"], self.venv.single_observation_space)
+        # Flatten state
+        flat_state = flatten_obs(obs, self.venv.single_observation_space)
         state = torch.as_tensor(flat_state, dtype=torch.float32, device=self.device)
+
+        # Reset prev_action to 0
+        self._prev_action.zero_()
 
         self._needs_first[:] = True
 
         return {
             "state": state,
-            "prev_action": prev_action,
+            "prev_action": self._prev_action.clone(),
             "reward": torch.zeros(self._batch_size, dtype=torch.float32, device=self.device),
             "is_first": torch.ones(self._batch_size, dtype=torch.bool, device=self.device),
             "is_last": torch.zeros(self._batch_size, dtype=torch.bool, device=self.device),
@@ -128,6 +143,7 @@ class PopGymVecEnv(EnvInterface):
         }
 
     def step(self, actions: torch.Tensor) -> Dict[str, Any]:
+        # Normalize actions to shape (B,)
         if actions.dim() == 2 and actions.size(-1) == 1:
             actions_np = actions.squeeze(-1).detach().cpu().numpy()
         else:
@@ -135,11 +151,8 @@ class PopGymVecEnv(EnvInterface):
 
         obs, reward, terminated, truncated, info = self.venv.step(actions_np)
 
-        # Extract previous action
-        prev_action = torch.as_tensor(obs["action"], dtype=torch.float32, device=self.device)
-
-        # Flatten only the state part
-        flat_state = flatten_obs(obs["state"], self.venv.single_observation_space)
+        # Flatten state
+        flat_state = flatten_obs(obs, self.venv.single_observation_space)
         state = torch.as_tensor(flat_state, dtype=torch.float32, device=self.device)
 
         reward_t = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
@@ -150,35 +163,11 @@ class PopGymVecEnv(EnvInterface):
         is_last = terminated_t | truncated_t
         is_first = self._needs_first.clone()
 
+        # Update prev_action BEFORE auto-reset
+        self._prev_action = actions.detach().float().to(self.device)
+
         # ------------------------------------------------------------------
-        # Auto‑reset logic (Dreamer-style streaming)
-        #
-        # Dreamer trains on a continuous stream of fixed-length sequences.
-        # To support this, environments must NEVER stop producing transitions.
-        #
-        # When an env finishes an episode (is_last=True):
-        #   1. We immediately call env.reset() *only for those envs*.
-        #   2. We extract the new initial observation (state + prev_action).
-        #   3. We stitch the reset observation into the batch output:
-        #        - state[i]      ← reset_state[i]
-        #        - prev_action[i]← reset_prev_action[i]
-        #   4. We mark that env as `is_first=True` on the NEXT step.
-        #
-        # This produces a seamless transition:
-        #
-        #     ... → (terminal) → (reset obs) → ...
-        #
-        # allowing Dreamer to sample fixed-horizon sequences without ever
-        # encountering a "dead" environment. All envs remain active, and
-        # Dreamer sees a continuous stream of transitions across episode
-        # boundaries.
-        #
-        # IMPORTANT:
-        #   - We must replace BOTH `state` and `prev_action` for reset envs.
-        #   - `is_last` marks the boundary where the reset occurs.
-        #   - `is_first` marks the first transition *after* the reset.
-        #
-        # This is the standard DreamerV3 vector-environment pattern.
+        # Auto-reset logic (Dreamer-style streaming)
         # ------------------------------------------------------------------
         if bool(is_last.any()):
             if self.deterministic:
@@ -187,16 +176,18 @@ class PopGymVecEnv(EnvInterface):
             else:
                 reset_obs, _ = self.venv.reset()
 
-            # Extract previous action on reset
-            reset_prev_action = torch.as_tensor(reset_obs["action"], dtype=torch.float32, device=self.device)
-
-            # Flatten only the state part
-            reset_flat_state = flatten_obs(reset_obs["state"], self.venv.single_observation_space)
+            reset_flat_state = flatten_obs(reset_obs, self.venv.single_observation_space)
             reset_state = torch.as_tensor(reset_flat_state, dtype=torch.float32, device=self.device)
 
             # Replace finished envs
             state = torch.where(is_last[:, None], reset_state, state)
-            prev_action = torch.where(is_last[:, None], reset_prev_action, prev_action)
+
+            # Reset prev_action for finished envs
+            self._prev_action = torch.where(
+                is_last,
+                torch.zeros_like(self._prev_action),
+                self._prev_action,
+            )
 
             self._needs_first = is_last.clone()
         else:
@@ -204,7 +195,7 @@ class PopGymVecEnv(EnvInterface):
 
         return {
             "state": state,
-            "prev_action": prev_action,
+            "prev_action": self._prev_action.clone(),
             "reward": reward_t,
             "is_first": is_first,
             "is_last": is_last,
