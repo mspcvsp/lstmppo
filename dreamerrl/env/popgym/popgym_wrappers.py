@@ -117,7 +117,36 @@ class PopGymVecEnv(EnvInterface):
         is_last = terminated_t | truncated_t
         is_first = self._needs_first.clone()
 
-        # Auto-reset ended envs
+        # ------------------------------------------------------------------
+        # Auto‑reset logic (Dreamer-style streaming)
+        #
+        # Dreamer trains on a continuous stream of fixed-length sequences.
+        # To support this, environments must NEVER stop producing transitions.
+        #
+        # When an env finishes an episode (is_last=True):
+        #   1. We immediately call env.reset() *only for those envs*.
+        #   2. We extract the new initial observation (state + prev_action).
+        #   3. We stitch the reset observation into the batch output:
+        #        - state[i]      ← reset_state[i]
+        #        - prev_action[i]← reset_prev_action[i]
+        #   4. We mark that env as `is_first=True` on the NEXT step.
+        #
+        # This produces a seamless transition:
+        #
+        #     ... → (terminal) → (reset obs) → ...
+        #
+        # allowing Dreamer to sample fixed-horizon sequences without ever
+        # encountering a "dead" environment. All envs remain active, and
+        # Dreamer sees a continuous stream of transitions across episode
+        # boundaries.
+        #
+        # IMPORTANT:
+        #   - We must replace BOTH `state` and `prev_action` for reset envs.
+        #   - `is_last` marks the boundary where the reset occurs.
+        #   - `is_first` marks the first transition *after* the reset.
+        #
+        # This is the standard DreamerV3 vector-environment pattern.
+        # ------------------------------------------------------------------
         if bool(is_last.any()):
             if self.deterministic:
                 seeds = [(self.base_seed + i) if is_last[i].item() else None for i in range(self._batch_size)]
