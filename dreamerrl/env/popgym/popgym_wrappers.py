@@ -99,7 +99,12 @@ class PopGymVecEnv(EnvInterface):
         assert isinstance(self.venv.single_action_space, Discrete)
         self._action_dim = int(self.venv.single_action_space.n)
 
-        self._prev_action = torch.zeros(self._batch_size, dtype=torch.float32, device=self.device)
+        self._prev_action = torch.zeros(
+            (self._batch_size, self._action_dim),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
         self._needs_first = torch.ones(self._batch_size, dtype=torch.bool, device=self.device)
 
     @property
@@ -204,11 +209,38 @@ class PopGymVecEnv(EnvInterface):
         terminated_t = torch.as_tensor(terminated, dtype=torch.bool, device=self.device)
         truncated_t = torch.as_tensor(truncated, dtype=torch.bool, device=self.device)
 
-        is_terminal = terminated_t
-        is_last = terminated_t | truncated_t
+        # ---------------------------------------------------------------------------------------------
+        # Dreamer requires fixed-length episodes -> Treat truncation as terminal
+        # ---------------------------------------------------------------------------------------------
+        # NOTE: Dreamer-V3 uses both `is_last` and `is_terminal` even when they appear equal.
+        #
+        # • `is_last`      → marks the *end of an episode* for replay slicing and RSSM state resets.
+        # • `is_terminal`  → marks a *true terminal condition* for discounting, bootstrapping,
+        #                    and value/return target computation.
+        #
+        # In fixed-length training (e.g., PopGym with max_episode_steps), both flags become True
+        # on the final step. However, in variable-length environments (Atari, DMControl, robotics):
+        #
+        #   - `is_last` may be True due to time limits or wrapper truncation,
+        #   - while `is_terminal` is only True when the environment reaches a true terminal state.
+        #
+        # Dreamer must keep these concepts separate to maintain correct KL dynamics, replay
+        # boundaries, and value targets. Even when equal, both flags are required.
+
+        is_terminal = terminated_t | truncated_t
+        is_last = is_terminal
         is_first = self._needs_first.clone()
 
-        self._prev_action = actions.detach().float().to(self.device)
+        actions_t = actions.detach().long().to(self.device)
+
+        prev = torch.zeros(
+            (self._batch_size, self._action_dim),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        prev[torch.arange(self._batch_size), actions_t] = 1.0
+
+        self._prev_action = prev
 
         # ------------------------------------------------------------------
         # Correct per-environment reset
@@ -221,7 +253,7 @@ class PopGymVecEnv(EnvInterface):
                     obs_i, _ = self.venv.envs[i].reset()
 
                 state[i] = self._one_hot(np.array([obs_i]))[0]
-                self._prev_action[i] = 0.0
+                self._prev_action[i] = torch.zeros(self._action_dim, device=self.device)
                 self._needs_first[i] = True
             else:
                 self._needs_first[i] = False
