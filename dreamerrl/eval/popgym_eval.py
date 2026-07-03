@@ -110,7 +110,6 @@ def train_popgym_seed(trainer, steps=1000):
 
     for step in range(steps):
         trainer.collect_env_steps()
-        print("OBS SHAPE:", trainer.env_state["state"].shape, "PREV:", trainer.env_state["prev_action"][:5])
 
         batch = trainer.replay.sample(trainer.cfg.train.batch_size)
 

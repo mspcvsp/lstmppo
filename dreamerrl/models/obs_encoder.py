@@ -21,7 +21,8 @@ def get_flat_obs_dim(space: gym.Space) -> int:
     elif isinstance(space, gym.spaces.Tuple):
         return sum(get_flat_obs_dim(sub) for sub in space.spaces)
     elif isinstance(space, gym.spaces.Discrete):
-        return 1
+        assert space.n is not None, "Discrete space must have a defined 'n'"
+        return int(space.n)
     else:
         raise NotImplementedError(f"Unsupported observation space: {space!r}")
 
