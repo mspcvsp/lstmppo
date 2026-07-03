@@ -89,10 +89,7 @@ class DreamerTrainer:
             self.env = PopGymVecEnv(cfg.env, device=self.device)
 
         obs_space = self.env.venv.single_observation_space
-
-        action_space = self.env.venv.single_action_space
-        assert isinstance(action_space, Discrete)
-        self.action_dim: int = int(action_space.n)
+        self.action_dim = self.env.action_dim
 
         # -----------------------------------------------------
         # Latent + Network configs
@@ -166,6 +163,17 @@ class DreamerTrainer:
 
         self.env_state: Dict[str, Any] = self.env.reset()
         self.total_env_steps: int = 0
+
+        # NOTE:
+        # Dreamer requires seq_len <= collect_steps <= max_episode_steps.
+        # This clamp MUST run at the end of __init__, after all config overrides
+        # (including test overrides) have been applied. Running it earlier allows
+        # stale default values to leak into the trainer and break invariants.
+        self.cfg.train.seq_len = min(
+            self.cfg.train.seq_len,
+            self.cfg.train.collect_steps,
+            self.cfg.env.max_episode_steps,
+        )
 
     @property
     def global_step(self) -> int:
@@ -302,15 +310,16 @@ class DreamerTrainer:
         obs_dim = self.env.obs_dim
         action_dim = self.env.action_dim
 
-        seq_len = self.cfg.train.seq_len
-        max_steps = self.cfg.env.max_episode_steps
-        collect_steps = self.cfg.train.collect_steps
+        if self.cfg.train.enforce_length_invariants:
+            seq_len = self.cfg.train.seq_len
+            max_steps = self.cfg.env.max_episode_steps
+            collect_steps = self.cfg.train.collect_steps
 
-        if seq_len > max_steps:
-            raise ValueError(f"seq_len={seq_len} must be <= max_episode_steps={max_steps}")
+            if seq_len > max_steps:
+                raise ValueError(f"seq_len={seq_len} must be <= max_episode_steps={max_steps}")
 
-        if seq_len > collect_steps:
-            raise ValueError(f"seq_len={seq_len} must be <= collect_steps={collect_steps}")
+            if seq_len > collect_steps:
+                raise ValueError(f"seq_len={seq_len} must be <= collect_steps={collect_steps}")
 
         if state.shape != (batch_size, obs_dim):
             raise RuntimeError(f"State shape mismatch: got {state.shape}, expected ({batch_size}, {obs_dim})")

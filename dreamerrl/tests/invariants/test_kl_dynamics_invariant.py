@@ -16,6 +16,7 @@ def test_kl_dynamics_invariant():
     cfg = make_default_config()
     cfg.train.seed = 0
     cfg.train.cuda = False
+    cfg.train.enforce_length_invariants = True
 
     cfg.env.num_envs = 1
     cfg.env.env_id = "popgym-RepeatFirstEasy-v0"

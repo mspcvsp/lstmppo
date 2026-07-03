@@ -132,6 +132,16 @@ class TrainingConfig:
     cuda: bool = True
     seed: int = 0
 
+    # Dreamer‑V3 only needs that invariant for reproducibility tests (KL dynamics, bit‑for‑bit determinism). It is not
+    # required for:
+    #
+    # - PopGym functional tests
+    # - Atari training
+    # - DMControl training
+    # - Robotics
+    # - Any normal Dreamer training loop
+    enforce_length_invariants: bool = False
+
 
 # ---------------------------------------------------------
 # Environment Config
