@@ -42,8 +42,15 @@ def run_training(seed, steps, progress, task_id):
     cfg.train.deterministic_env = True
     cfg.env.num_envs = 4
     cfg.env.env_id = "popgym-RepeatFirstEasy-v0"
+
+    # Dreamer-V3 requires fixed-length sequences in replay.
+    # RepeatFirstEasy produces short episodes (~10 steps), so default seq_len=50 is invalid.
+    # Setting seq_len = max_episode_steps = collect_steps ensures uniform slices and
+    # stable replay buffer behavior, which is required for reproducibility tests.
     cfg.train.collect_steps = 10
-    cfg.env.max_episode_steps = 10
+    cfg.env.max_episode_steps = cfg.train.collect_steps
+    cfg.train.seq_len = cfg.train.collect_steps
+
     cfg.env.deterministic = True
     cfg.env.seed = seed
     cfg.world.num_aux_reward_heads = 0

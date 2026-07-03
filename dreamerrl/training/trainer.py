@@ -255,6 +255,7 @@ class DreamerTrainer:
 
             # 2. Step environment
             env_out = self.env.step(actions_discrete)
+            self._check_consistency(env_out)
 
             # Move env outputs to CUDA
             for k, v in env_out.items():
@@ -288,6 +289,55 @@ class DreamerTrainer:
             # 6. Update counters
             self.env_state = env_out
             self.total_env_steps += self.env.batch_size
+
+    def _check_consistency(self, env_out: dict) -> None:
+        state = env_out["state"]
+        reward = env_out["reward"]
+        is_last = env_out["is_last"]
+        is_terminal = env_out["is_terminal"]
+        prev_action = env_out.get("prev_action", None)
+
+        # ✅ unified environment interface
+        batch_size = self.env.batch_size
+        obs_dim = self.env.obs_dim
+        action_dim = self.env.action_dim
+
+        seq_len = self.cfg.train.seq_len
+        max_steps = self.cfg.env.max_episode_steps
+        collect_steps = self.cfg.train.collect_steps
+
+        if seq_len > max_steps:
+            raise ValueError(f"seq_len={seq_len} must be <= max_episode_steps={max_steps}")
+
+        if seq_len > collect_steps:
+            raise ValueError(f"seq_len={seq_len} must be <= collect_steps={collect_steps}")
+
+        if state.shape != (batch_size, obs_dim):
+            raise RuntimeError(f"State shape mismatch: got {state.shape}, expected ({batch_size}, {obs_dim})")
+
+        if prev_action is not None and prev_action.shape != (batch_size, action_dim):
+            raise RuntimeError(
+                f"Prev_action shape mismatch: got {prev_action.shape}, expected ({batch_size}, {action_dim})"
+            )
+
+        if reward.shape != (batch_size,):
+            raise RuntimeError(f"Reward shape mismatch: got {reward.shape}, expected ({batch_size},)")
+
+        if not torch.isfinite(reward).all():
+            raise RuntimeError("Non-finite reward detected")
+
+        # ✅ use is_first so Ruff stops complaining
+        for key in ("is_first", "is_last", "is_terminal"):
+            flag = env_out[key]
+            if flag.shape != (batch_size,):
+                raise RuntimeError(f"{key} shape mismatch: got {flag.shape}, expected ({batch_size},)")
+            if flag.dtype != torch.bool:
+                raise RuntimeError(f"{key} must be boolean, got {flag.dtype}")
+
+        if is_last.any() and not is_terminal.any():
+            raise RuntimeError(
+                f"Environment produced early termination; Dreamer requires fixed-length episodes of {max_steps} steps"
+            )
 
     # -------------------------------------------------------------
     # World Model Update
