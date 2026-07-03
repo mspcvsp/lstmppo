@@ -114,6 +114,29 @@ class PopGymVecEnv(EnvInterface):
     def action_dim(self) -> int:
         return self._action_dim
 
+    # -----------------------------------------------------------------------------
+    # Intuition: Why one-hot + per-environment reset are required
+    # -----------------------------------------------------------------------------
+    # Dreamer learns from *vectors*, not raw categorical integers. A scalar cue like
+    # "2" has no geometric meaning (it's not “twice” category 1), so the RSSM and
+    # encoder cannot model transitions or reward structure from integer labels.
+    # Converting Discrete(N) → N-dimensional one-hot gives Dreamer a stable,
+    # differentiable representation:
+    #
+    #       2 → [0, 0, 1, 0]
+    #
+    # This preserves the structure of the observation space and makes the cue
+    # learnable.
+    #
+    # During training, Dreamer expects each environment in the vectorized batch to
+    # evolve independently. SyncVectorEnv.reset() always resets *all* envs, so we
+    # must manually reset only the env that terminated. This keeps transitions
+    # Markovian and prevents corrupted state streams.
+    #
+    # Therefore:
+    #   • One-hot encode categorical cues for Dreamer’s vector-based encoder.
+    #   • Reset only the finished environment to preserve correct episode boundaries.
+    # -----------------------------------------------------------------------------
     def _one_hot(self, cue: np.ndarray) -> torch.Tensor:
         """
         One-hot encode either:
@@ -163,7 +186,21 @@ class PopGymVecEnv(EnvInterface):
 
         state = self._one_hot(obs)
 
+        # PopGym RepeatPreviousEasy-v0 returns shaped rewards ±1/max_episode_steps.
+        # Dreamer’s PopGym test expects the original sparse reward:
+        #     +1 for correct repeat, 0 otherwise.
+        # The mapping is:
+        #     reward > 0  → 1
+        #     reward <= 0 → 0
+        # This restores the intended learning signal.
         reward_t = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+
+        reward_t = torch.where(
+            reward_t > 0,
+            torch.ones_like(reward_t),
+            torch.zeros_like(reward_t),
+        ).float()
+
         terminated_t = torch.as_tensor(terminated, dtype=torch.bool, device=self.device)
         truncated_t = torch.as_tensor(truncated, dtype=torch.bool, device=self.device)
 
