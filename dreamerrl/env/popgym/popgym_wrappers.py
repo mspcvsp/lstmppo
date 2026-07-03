@@ -115,10 +115,26 @@ class PopGymVecEnv(EnvInterface):
         return self._action_dim
 
     def _one_hot(self, cue: np.ndarray) -> torch.Tensor:
-        out = torch.zeros((self._batch_size, self._num_categories), dtype=torch.float32, device=self.device)
-        for i in range(self._batch_size):
-            out[i, int(cue[i])] = 1.0
-        return out
+        """
+        One-hot encode either:
+        • a full batch of cues (shape = [batch_size])
+        • a single cue (shape = [1])
+        """
+        if cue.shape[0] == self._batch_size:
+            # Full batch
+            out = torch.zeros((self._batch_size, self._num_categories), dtype=torch.float32, device=self.device)
+            for i in range(self._batch_size):
+                out[i, int(cue[i])] = 1.0
+            return out
+
+        elif cue.shape[0] == 1:
+            # Single env reset
+            out = torch.zeros((1, self._num_categories), dtype=torch.float32, device=self.device)
+            out[0, int(cue[0])] = 1.0
+            return out
+
+        else:
+            raise ValueError(f"Unexpected cue shape: {cue.shape}")
 
     def reset(self, seed: Optional[int] = None) -> Dict[str, Any]:
         obs, info = self.venv.reset(seed=seed)
