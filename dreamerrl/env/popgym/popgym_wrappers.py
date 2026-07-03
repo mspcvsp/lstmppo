@@ -1,47 +1,47 @@
 """
-PopGym → Dreamer Observation Contract (SyncVectorEnv-compatible)
+Design Rationale
+----------------
 
-PopGym environments normally return dict observations:
-    - obs["state"]:       environment cue (categorical)
-    - obs["action"]:      previous action taken
+1. Dreamer requires *vector* observations, not raw categorical integers.
 
-BUT Gymnasium's SyncVectorEnv *collapses dict observations into arrays*.
-This means obs["state"] and obs["action"] are NOT available in vectorized
-mode — only a single numpy array containing the cue is returned.
+   PopGym’s RepeatPrevious* environments emit a categorical cue (e.g., 0–3).
+   SyncVectorEnv collapses dict observations into a single integer, which has
+   no geometric meaning to Dreamer’s encoder or RSSM. Dreamer learns from
+   continuous vectors, not discrete labels, so the cue must be converted into
+   a one-hot vector:
 
-For RepeatPrevious* tasks, the cue is a categorical integer (0..N-1).
-To preserve the original semantics, this wrapper reconstructs the cue as
-a one-hot vector:
+       2 → [0, 0, 1, 0]
 
-    cue → one_hot(cue, num_categories)
+   This preserves the structure of the observation space and gives Dreamer a
+   stable, differentiable representation that the encoder and RSSM can model.
 
-Dreamer receives:
-    - "state":       one-hot cue vector
-    - "prev_action": previous action (tracked internally)
+   Therefore:
+       Discrete(N) → N-dimensional one-hot vector
+       obs_dim = space.n
 
-Dreamer’s encoder concatenates these internally, producing:
-    [one_hot_state..., prev_action]
+2. Dreamer requires *per-environment* resets, not batch resets.
 
-This is REQUIRED for RepeatPrevious* tasks because the reward depends on
-whether the agent repeats the previous action.
+   SyncVectorEnv.reset() always resets the entire batch, even if only one
+   environment terminated. Mixing full-batch reset observations with selective
+   replacement (e.g., torch.where) produces inconsistent transitions and
+   non-Markovian behavior. Dreamer’s sequence stitching assumes each
+   environment evolves independently, so only the environments that actually
+   terminated must be reset.
 
-AUTO‑RESET LOGIC (Dreamer-style streaming):
+   Therefore:
+       - Detect which envs finished (is_last[i] == True)
+       - Call envs[i].reset() directly
+       - Update only state[i] and prev_action[i]
+       - Leave all other envs untouched
 
-Dreamer trains on a continuous stream of fixed-length sequences. When an
-environment finishes an episode (is_last=True):
+   This preserves correct episode boundaries and produces stable transition
+   streams for Dreamer’s world model.
 
-    1. We immediately reset *only* that environment.
-    2. We reconstruct the one-hot cue from the reset observation.
-    3. We reset prev_action for that environment to 0.
-    4. We stitch the reset state + prev_action into the batch output.
-    5. We mark that environment as is_first=True on the NEXT step.
-
-This produces seamless transitions across episode boundaries:
-
-    ... → (terminal) → (reset obs) → ...
-
-allowing Dreamer to sample fixed-length sequences without encountering
-dead environments. This is the standard DreamerV3 vector-environment pattern.
+Together, these two design choices ensure:
+   • Dreamer receives meaningful, learnable observations
+   • Episode boundaries are handled correctly
+   • prev_action is aligned with the reward rule
+   • RepeatPrevious* tasks become solvable and stable
 """
 
 from typing import Any, Callable, Dict, Optional
@@ -91,20 +91,15 @@ class PopGymVecEnv(EnvInterface):
 
         self.venv = SyncVectorEnv([make_env(env_cfg, idx) for idx in range(self._batch_size)])
 
-        # PopGym RepeatPreviousEasy uses Discrete observation space
         assert isinstance(self.venv.single_observation_space, Discrete)
         self._num_categories = int(self.venv.single_observation_space.n)
 
-        # One-hot state dimension
         self._obs_dim = self._num_categories
 
         assert isinstance(self.venv.single_action_space, Discrete)
         self._action_dim = int(self.venv.single_action_space.n)
 
-        # Track previous actions internally
         self._prev_action = torch.zeros(self._batch_size, dtype=torch.float32, device=self.device)
-
-        # Track Dreamer-style "first step" markers
         self._needs_first = torch.ones(self._batch_size, dtype=torch.bool, device=self.device)
 
     @property
@@ -120,7 +115,6 @@ class PopGymVecEnv(EnvInterface):
         return self._action_dim
 
     def _one_hot(self, cue: np.ndarray) -> torch.Tensor:
-        """Convert categorical cue to one-hot."""
         out = torch.zeros((self._batch_size, self._num_categories), dtype=torch.float32, device=self.device)
         for i in range(self._batch_size):
             out[i, int(cue[i])] = 1.0
@@ -128,13 +122,9 @@ class PopGymVecEnv(EnvInterface):
 
     def reset(self, seed: Optional[int] = None) -> Dict[str, Any]:
         obs, info = self.venv.reset(seed=seed)
-
-        # Reconstruct one-hot cue
         state = self._one_hot(obs)
 
-        # Reset prev_action to 0
         self._prev_action.zero_()
-
         self._needs_first[:] = True
 
         return {
@@ -148,7 +138,6 @@ class PopGymVecEnv(EnvInterface):
         }
 
     def step(self, actions: torch.Tensor) -> Dict[str, Any]:
-        # Normalize actions to shape (B,)
         if actions.dim() == 2 and actions.size(-1) == 1:
             actions_np = actions.squeeze(-1).detach().cpu().numpy()
         else:
@@ -156,7 +145,6 @@ class PopGymVecEnv(EnvInterface):
 
         obs, reward, terminated, truncated, info = self.venv.step(actions_np)
 
-        # Reconstruct one-hot cue
         state = self._one_hot(obs)
 
         reward_t = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
@@ -167,34 +155,23 @@ class PopGymVecEnv(EnvInterface):
         is_last = terminated_t | truncated_t
         is_first = self._needs_first.clone()
 
-        # Update prev_action BEFORE auto-reset
         self._prev_action = actions.detach().float().to(self.device)
 
         # ------------------------------------------------------------------
-        # Auto-reset logic (Dreamer-style streaming)
+        # Correct per-environment reset
         # ------------------------------------------------------------------
-        if bool(is_last.any()):
-            if self.deterministic:
-                seeds = [(self.base_seed + i) if is_last[i].item() else None for i in range(self._batch_size)]
-                reset_obs, _ = self.venv.reset(seed=seeds)
+        for i in range(self._batch_size):
+            if is_last[i]:
+                if self.deterministic:
+                    obs_i, _ = self.venv.envs[i].reset(seed=self.base_seed + i)
+                else:
+                    obs_i, _ = self.venv.envs[i].reset()
+
+                state[i] = self._one_hot(np.array([obs_i]))[0]
+                self._prev_action[i] = 0.0
+                self._needs_first[i] = True
             else:
-                reset_obs, _ = self.venv.reset()
-
-            reset_state = self._one_hot(reset_obs)
-
-            # Replace finished envs
-            state = torch.where(is_last[:, None], reset_state, state)
-
-            # Reset prev_action for finished envs
-            self._prev_action = torch.where(
-                is_last,
-                torch.zeros_like(self._prev_action),
-                self._prev_action,
-            )
-
-            self._needs_first = is_last.clone()
-        else:
-            self._needs_first.zero_()
+                self._needs_first[i] = False
 
         return {
             "state": state,
