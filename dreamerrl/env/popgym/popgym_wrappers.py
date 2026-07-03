@@ -2,24 +2,25 @@
 PopGym → Dreamer Observation Contract (SyncVectorEnv-compatible)
 
 PopGym environments normally return dict observations:
-    - obs["state"]:       environment state
+    - obs["state"]:       environment cue (categorical)
     - obs["action"]:      previous action taken
 
 BUT Gymnasium's SyncVectorEnv *collapses dict observations into arrays*.
-This means obs["action"] and obs["state"] are NOT available in vectorized
-mode — only a single numpy array containing the state is returned.
+This means obs["state"] and obs["action"] are NOT available in vectorized
+mode — only a single numpy array containing the cue is returned.
 
-To support PopGym's RepeatPrevious* tasks (reward = +1 if action_t == action_{t-1}),
-this wrapper tracks the previous action INTERNALLY:
+For RepeatPrevious* tasks, the cue is a categorical integer (0..N-1).
+To preserve the original semantics, this wrapper reconstructs the cue as
+a one-hot vector:
 
-    self._prev_action[i] = action taken by env i on the previous step
+    cue → one_hot(cue, num_categories)
 
 Dreamer receives:
-    - "state":       flattened state array
+    - "state":       one-hot cue vector
     - "prev_action": previous action (tracked internally)
 
 Dreamer’s encoder concatenates these internally, producing:
-    [s0, s1, s2, s3, prev_action]
+    [one_hot_state..., prev_action]
 
 This is REQUIRED for RepeatPrevious* tasks because the reward depends on
 whether the agent repeats the previous action.
@@ -30,7 +31,7 @@ Dreamer trains on a continuous stream of fixed-length sequences. When an
 environment finishes an episode (is_last=True):
 
     1. We immediately reset *only* that environment.
-    2. We flatten the new initial state.
+    2. We reconstruct the one-hot cue from the reset observation.
     3. We reset prev_action for that environment to 0.
     4. We stitch the reset state + prev_action into the batch output.
     5. We mark that environment as is_first=True on the NEXT step.
@@ -56,8 +57,6 @@ import popgym  # noqa: F401
 from dreamerrl.env.env import EnvInterface
 from dreamerrl.utils.types import EnvironmentConfig
 
-from .popgym_preprocessing import flatten_obs
-
 
 def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
     def thunk():
@@ -81,7 +80,7 @@ def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
 class PopGymVecEnv(EnvInterface):
     """
     Dreamer-native vector env wrapper for PopGym.
-    Tracks prev_action internally (SyncVectorEnv does not expose it).
+    Tracks prev_action internally and reconstructs one-hot state cues.
     """
 
     def __init__(self, env_cfg: EnvironmentConfig, device: torch.device):
@@ -92,12 +91,12 @@ class PopGymVecEnv(EnvInterface):
 
         self.venv = SyncVectorEnv([make_env(env_cfg, idx) for idx in range(self._batch_size)])
 
-        # Flattened state dimension
-        shape = self.venv.single_observation_space.shape
-        if shape is None:
-            raise RuntimeError("PopGymVecEnv: single_observation_space.shape is None")
+        # PopGym RepeatPreviousEasy uses Discrete observation space
+        assert isinstance(self.venv.single_observation_space, Discrete)
+        self._num_categories = int(self.venv.single_observation_space.n)
 
-        self._obs_dim = int(np.prod(shape))
+        # One-hot state dimension
+        self._obs_dim = self._num_categories
 
         assert isinstance(self.venv.single_action_space, Discrete)
         self._action_dim = int(self.venv.single_action_space.n)
@@ -120,12 +119,18 @@ class PopGymVecEnv(EnvInterface):
     def action_dim(self) -> int:
         return self._action_dim
 
+    def _one_hot(self, cue: np.ndarray) -> torch.Tensor:
+        """Convert categorical cue to one-hot."""
+        out = torch.zeros((self._batch_size, self._num_categories), dtype=torch.float32, device=self.device)
+        for i in range(self._batch_size):
+            out[i, int(cue[i])] = 1.0
+        return out
+
     def reset(self, seed: Optional[int] = None) -> Dict[str, Any]:
         obs, info = self.venv.reset(seed=seed)
 
-        # Flatten state
-        flat_state = flatten_obs(obs, self.venv.single_observation_space)
-        state = torch.as_tensor(flat_state, dtype=torch.float32, device=self.device)
+        # Reconstruct one-hot cue
+        state = self._one_hot(obs)
 
         # Reset prev_action to 0
         self._prev_action.zero_()
@@ -151,9 +156,8 @@ class PopGymVecEnv(EnvInterface):
 
         obs, reward, terminated, truncated, info = self.venv.step(actions_np)
 
-        # Flatten state
-        flat_state = flatten_obs(obs, self.venv.single_observation_space)
-        state = torch.as_tensor(flat_state, dtype=torch.float32, device=self.device)
+        # Reconstruct one-hot cue
+        state = self._one_hot(obs)
 
         reward_t = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
         terminated_t = torch.as_tensor(terminated, dtype=torch.bool, device=self.device)
@@ -176,8 +180,7 @@ class PopGymVecEnv(EnvInterface):
             else:
                 reset_obs, _ = self.venv.reset()
 
-            reset_flat_state = flatten_obs(reset_obs, self.venv.single_observation_space)
-            reset_state = torch.as_tensor(reset_flat_state, dtype=torch.float32, device=self.device)
+            reset_state = self._one_hot(reset_obs)
 
             # Replace finished envs
             state = torch.where(is_last[:, None], reset_state, state)
