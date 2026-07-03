@@ -20,7 +20,8 @@ def test_kl_dynamics_invariant():
     cfg.env.num_envs = 1
     cfg.env.env_id = "popgym-RepeatFirstEasy-v0"
     cfg.env.max_episode_steps = 5
-    cfg.train.collect_steps = 5
+    cfg.train.collect_steps = cfg.env.max_episode_steps
+    cfg.train.seq_len = cfg.env.max_episode_steps
 
     cfg.train.batch_size = 4
     cfg.world.num_aux_reward_heads = 0
