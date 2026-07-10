@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from dreamerrl.replay_buffer.replay_buffer import ReplayBuffer
+from dreamerrl.utils.types import make_default_config
 
 
 def test_replay_buffer_determinism():
@@ -14,13 +15,11 @@ def test_replay_buffer_determinism():
     device = torch.device("cpu")
     seq_len = 5
 
-    rb = ReplayBuffer(
-        capacity=capacity,
-        obs_dim=obs_dim,
-        action_dim=action_dim,
-        device=device,
-        seq_len=seq_len,
-    )
+    cfg = make_default_config()
+    cfg.train.replay_capacity = capacity
+    cfg.train.seq_len = seq_len
+
+    rb = ReplayBuffer(cfg=cfg.train, obs_dim=obs_dim, action_dim=action_dim, device=device)
 
     # Seed BEFORE filling the buffer
     torch.manual_seed(0)

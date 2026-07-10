@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from loguru import Logger
 import torch
 
 from dreamerrl.utils.types import TrainingConfig
@@ -43,7 +42,7 @@ class ReplayBuffer:
         obs_dim: int,
         action_dim: int,
         device: torch.device,
-        log: Logger,
+        log=None,
         seed: int = 0,
     ):
         self.log = log
@@ -125,7 +124,7 @@ class ReplayBuffer:
 
             end = start + self.seq_len
 
-            if self.cfg.enable_repro_log:
+            if self.cfg.enable_repro_log and self.log is not None:
                 self.log.debug(f"SAMPLE_IDX: {idx}, START={start}, END={end}")
 
             obs_batch.append(ep["obs"][start:end])
