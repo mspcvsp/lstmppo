@@ -8,6 +8,7 @@ from typing import Any, Dict
 import numpy as np
 import torch
 import torch.nn.functional as F
+from loguru import logger
 from matplotlib.pyplot import step
 from torch.utils.tensorboard import SummaryWriter
 
@@ -21,6 +22,13 @@ from dreamerrl.replay_buffer.replay_buffer import ReplayBuffer
 from dreamerrl.training.core import actor_critic_update, world_model_training_step
 from dreamerrl.utils.seed import set_global_seeds
 from dreamerrl.utils.types import DreamerConfig, LatentConfig, LRScheduleConfig, NetworkConfig, WorldModelMetrics
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+LOG_DIR = os.path.join(ROOT, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Always-defined module-level logger alias
+log = logger
 
 
 class CosineWarmupScheduler:
@@ -55,6 +63,30 @@ class DreamerTrainer:
         self.cfg = cfg
         self.sample_step = 0
 
+        if self.cfg.train.enable_repro_log:
+            # Remove default stderr handler
+            log.remove()
+
+            # Bind seeds for reproducibility
+            bound = log.bind(
+                train_seed=self.cfg.train.seed,
+                env_seed=self.cfg.env.seed,
+            )
+
+            # Add deterministic file sink
+            bound.add(
+                os.path.join(LOG_DIR, f"repro_seed_{self.cfg.train.seed}.log"),
+                format="TRAIN={train_seed} ENV={env_seed} | {message}",
+                level="DEBUG",
+                mode="w",
+                enqueue=False,
+            )
+
+            # Save bound logger on trainer instance
+            self.log = bound
+        else:
+            self.log = log
+
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
 
@@ -85,7 +117,7 @@ class DreamerTrainer:
         if cfg.env.parallel:
             self.env = PopGymParallelEnv(cfg.env, device=self.device)
         else:
-            self.env = PopGymVecEnv(cfg.env, device=self.device)
+            self.env = PopGymVecEnv(cfg.env, cfg.train.enable_repro_log, device=self.device)
 
         obs_space = self.env.venv.single_observation_space
         self.action_dim = self.env.action_dim
@@ -140,11 +172,10 @@ class DreamerTrainer:
         # -----------------------------------------------------
         flat_obs_dim = self.world.flat_obs_dim
         self.replay = ReplayBuffer(
-            capacity=cfg.train.replay_capacity,
+            cfg=cfg.train,
             obs_dim=flat_obs_dim,
             action_dim=self.action_dim,
             device=self.device,
-            seq_len=cfg.train.seq_len,
         )
 
         # -----------------------------------------------------
@@ -260,8 +291,15 @@ class DreamerTrainer:
                 else:
                     actions_discrete, _ = self.actor.act(self.world_state)
 
+            if self.cfg.train.enable_repro_log:
+                self.log.debug(f"ACTION {self.global_step}: {actions_discrete.tolist()}")
+
             # 2. Step environment
             env_out = self.env.step(actions_discrete)
+
+            if self.cfg.train.enable_repro_log:
+                self.log.debug(f"REWARD {self.global_step}: {env_out['reward'].tolist()}")
+
             self._check_consistency(env_out)
 
             # Move env outputs to CUDA

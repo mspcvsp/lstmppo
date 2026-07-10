@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Dict, List
 
 import torch
+from loguru import logger
+from dreamerrl.utils.types import TrainingConfig
+
+log = logger
 
 
 class Episode:
@@ -36,16 +40,18 @@ class ReplayBuffer:
 
     def __init__(
         self,
-        capacity: int,
+        cfg: TrainingConfig,
         obs_dim: int,
         action_dim: int,
         device: torch.device,
-        seq_len: int = 50,
         seed: int = 0,
     ):
-        self.capacity = capacity
+        self.log = log
+        self.cfg = cfg
+
+        self.capacity = self.cfg.replay_capacity
         self.device = device
-        self.seq_len = seq_len
+        self.seq_len = self.cfg.seq_len
 
         self.episodes: List[Dict[str, torch.Tensor]] = []
         self.current_eps: List[Episode] = []
@@ -118,6 +124,9 @@ class ReplayBuffer:
                 start = int(torch.randint(0, length - self.seq_len, (1,), generator=self.rng, device=self.device))
 
             end = start + self.seq_len
+
+            if self.cfg.enable_repro_log:
+                self.log.debug(f"SAMPLE_IDX: {idx}, START={start}, END={end}")
 
             obs_batch.append(ep["obs"][start:end])
             act_batch.append(ep["action"][start:end])
