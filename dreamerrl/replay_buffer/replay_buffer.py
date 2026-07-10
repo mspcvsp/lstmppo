@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from loguru import Logger
 import torch
-from loguru import logger
-from dreamerrl.utils.types import TrainingConfig
 
-log = logger
+from dreamerrl.utils.types import TrainingConfig
 
 
 class Episode:
@@ -44,6 +43,7 @@ class ReplayBuffer:
         obs_dim: int,
         action_dim: int,
         device: torch.device,
+        log: Logger,
         seed: int = 0,
     ):
         self.log = log

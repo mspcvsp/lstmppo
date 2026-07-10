@@ -117,7 +117,7 @@ class DreamerTrainer:
         if cfg.env.parallel:
             self.env = PopGymParallelEnv(cfg.env, device=self.device)
         else:
-            self.env = PopGymVecEnv(cfg.env, cfg.train.enable_repro_log, device=self.device)
+            self.env = PopGymVecEnv(cfg.env, device=self.device)
 
         obs_space = self.env.venv.single_observation_space
         self.action_dim = self.env.action_dim
@@ -172,10 +172,7 @@ class DreamerTrainer:
         # -----------------------------------------------------
         flat_obs_dim = self.world.flat_obs_dim
         self.replay = ReplayBuffer(
-            cfg=cfg.train,
-            obs_dim=flat_obs_dim,
-            action_dim=self.action_dim,
-            device=self.device,
+            cfg=cfg.train, obs_dim=flat_obs_dim, action_dim=self.action_dim, device=self.device, log=self.log
         )
 
         # -----------------------------------------------------
