@@ -8,7 +8,6 @@ from typing import Any, Dict
 import numpy as np
 import torch
 import torch.nn.functional as F
-from gymnasium.spaces import Discrete
 from matplotlib.pyplot import step
 from torch.utils.tensorboard import SummaryWriter
 

@@ -35,13 +35,21 @@ def gpu_utilization():
 
 def run_training(seed, steps, progress, task_id):
     cfg = make_default_config()
+
     cfg.train.seed = seed
-    cfg.log.enable_wandb = False
-    cfg.train.cuda = True
     cfg.train.deterministic_imagination = True
+    cfg.train.enforce_length_invariants = True
     cfg.train.deterministic_env = True
+    cfg.train.cuda = True
+    cfg.train.enable_repro_log = True
+
+    cfg.log.enable_wandb = False
+
     cfg.env.num_envs = 4
     cfg.env.env_id = "popgym-RepeatFirstEasy-v0"
+    cfg.env.deterministic = True
+    cfg.env.seed = seed
+    cfg.env.parallel = False
 
     # Dreamer-V3 requires fixed-length sequences in replay.
     # RepeatFirstEasy produces short episodes (~10 steps), so default seq_len=50 is invalid.
@@ -51,8 +59,6 @@ def run_training(seed, steps, progress, task_id):
     cfg.env.max_episode_steps = cfg.train.collect_steps
     cfg.train.seq_len = cfg.train.collect_steps
 
-    cfg.env.deterministic = True
-    cfg.env.seed = seed
     cfg.world.num_aux_reward_heads = 0
 
     set_global_seeds(seed)

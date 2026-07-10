@@ -142,6 +142,8 @@ class TrainingConfig:
     # - Any normal Dreamer training loop
     enforce_length_invariants: bool = False
 
+    enable_repro_log: bool = False  # Set to true to enable reproducibility logging (repro.log)
+
 
 # ---------------------------------------------------------
 # Environment Config
