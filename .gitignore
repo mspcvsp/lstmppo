@@ -7,3 +7,4 @@ jsonl/
 checkpoints/
 *egg-info
 *.txt
+logs/

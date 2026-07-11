@@ -27,9 +27,6 @@ ROOT = os.path.dirname(os.path.dirname(__file__))
 LOG_DIR = os.path.join(ROOT, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# Always-defined module-level logger alias
-log = logger
-
 
 class CosineWarmupScheduler:
     """Single shared LR schedule for world, actor, critic (Dreamer‑V3 requirement)."""
@@ -63,29 +60,27 @@ class DreamerTrainer:
         self.cfg = cfg
         self.sample_step = 0
 
-        if self.cfg.train.enable_repro_log:
-            # Remove default stderr handler
-            log.remove()
+        # Always start with the global logger
+        logger.remove()  # remove default stderr handler
 
-            # Bind seeds for reproducibility
-            bound = log.bind(
+        if self.cfg.train.enable_repro_log:
+            # Bind reproducibility fields
+            self.log = logger.bind(
                 train_seed=self.cfg.train.seed,
                 env_seed=self.cfg.env.seed,
             )
 
-            # Add deterministic file sink
-            bound.add(
+            # Add deterministic sink
+            self.log.add(
                 os.path.join(LOG_DIR, f"repro_seed_{self.cfg.train.seed}.log"),
                 format="TRAIN={train_seed} ENV={env_seed} | {message}",
                 level="DEBUG",
                 mode="w",
                 enqueue=False,
             )
-
-            # Save bound logger on trainer instance
-            self.log = bound
         else:
-            self.log = log
+            # No repro logging → use global logger directly
+            self.log = logger
 
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
