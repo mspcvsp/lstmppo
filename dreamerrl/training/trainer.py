@@ -60,26 +60,32 @@ class DreamerTrainer:
         self.cfg = cfg
         self.sample_step = 0
 
-        # Always start with the global logger
-        logger.remove()  # remove default stderr handler
+        # Remove ALL sinks globally
+        logger.remove()
 
-        if self.cfg.train.enable_repro_log:
-            # Bind reproducibility fields
-            self.log = logger.bind(
-                train_seed=self.cfg.train.seed,
-                env_seed=self.cfg.env.seed,
+        if cfg.train.enable_repro_log:
+            # Patch logger so EVERY record has train_seed/env_seed in record["extra"]
+            patched = logger.patch(
+                lambda record: record["extra"].update(
+                    {
+                        "train_seed": cfg.train.seed,
+                        "env_seed": cfg.env.seed,
+                    }
+                )
             )
 
             # Add deterministic sink
-            self.log.add(
-                os.path.join(LOG_DIR, f"repro_seed_{self.cfg.train.seed}.log"),
-                format="TRAIN={train_seed} ENV={env_seed} | {message}",
+            patched.add(
+                os.path.join(LOG_DIR, f"repro_seed_{cfg.train.seed}.log"),
+                format="TRAIN={extra[train_seed]} ENV={extra[env_seed]} | {message}",
                 level="DEBUG",
                 mode="w",
                 enqueue=False,
             )
+
+            self.log = patched
         else:
-            # No repro logging → use global logger directly
+            # No reproducibility logging → use global logger
             self.log = logger
 
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
