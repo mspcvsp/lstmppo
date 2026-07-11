@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import math
 import os
-import time
 import sys
+import time
 from typing import Any, Dict
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from loguru import logger
+from loguru import Logger
 from matplotlib.pyplot import step
 from torch.utils.tensorboard import SummaryWriter
 
@@ -62,13 +62,16 @@ class DreamerTrainer:
         self.sample_step = 0
 
         if cfg.train.enable_repro_log:
-            # Dedicated reproducibility logger with per‑seed context
-            self.repro_log = logger.bind(
+            # Create a brand‑new isolated logger
+            self.repro_log = Logger()
+
+            # Add reproducibility context
+            self.repro_log = self.repro_log.bind(
                 train_seed=cfg.train.seed,
                 env_seed=cfg.env.seed,
             )
 
-            # File sink: full DEBUG detail
+            # File sink: DEBUG
             self.repro_log.add(
                 os.path.join(LOG_DIR, f"repro_seed_{cfg.train.seed}.log"),
                 format="TRAIN={extra[train_seed]} ENV={extra[env_seed]} | {message}",
@@ -77,13 +80,12 @@ class DreamerTrainer:
                 enqueue=False,
             )
 
-            # Stdout sink: INFO only (clean console output)
+            # Stdout sink: INFO only
             self.repro_log.add(
                 sys.stdout,
                 format="TRAIN={extra[train_seed]} ENV={extra[env_seed]} | {message}",
                 level="INFO",
             )
-
         else:
             self.repro_log = None
 
@@ -293,12 +295,14 @@ class DreamerTrainer:
                     actions_discrete, _ = self.actor.act(self.world_state)
 
             if self.cfg.train.enable_repro_log:
+                assert self.repro_log is not None
                 self.repro_log.debug(f"ACTION {self.global_step}: {actions_discrete.tolist()}")
 
             # 2. Step environment
             env_out = self.env.step(actions_discrete)
 
             if self.cfg.train.enable_repro_log:
+                assert self.repro_log is not None
                 self.repro_log.debug(f"REWARD {self.global_step}: {env_out['reward'].tolist()}")
 
             self._check_consistency(env_out)
