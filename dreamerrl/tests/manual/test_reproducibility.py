@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pytest
 import torch
@@ -8,7 +10,15 @@ from dreamerrl.training.trainer import DreamerTrainer
 from dreamerrl.utils.seed import set_global_seeds
 from dreamerrl.utils.types import make_default_config
 
-logger.remove()  # Remove ALL sinks globally before anything else
+
+def log_progress(seed, step, total_steps, timings):
+    pct = 100 * step / total_steps
+    logger.info(
+        f"[Seed {seed}] Step {step}/{total_steps} ({pct:5.1f}%) | "
+        f"env={timings['env']:.3f}s replay={timings['replay']:.3f}s "
+        f"world={timings['world']:.3f}s actor={timings['actor']:.3f}s "
+        f"critic={timings['critic']:.3f}s"
+    )
 
 
 def run_training(seed, steps):
@@ -46,18 +56,40 @@ def run_training(seed, steps):
     critic_losses = []
     action_logits = []
 
+    t_env = 0.0
+    t_replay = 0.0
+    t_world = 0.0
+    t_actor = 0.0
+    t_critic = 0.0
+
     for step in range(steps):
+        # ENV
+        t0 = time.time()
         trainer.collect_env_steps()
+        t_env += time.time() - t0
 
+        # REPLAY
+        t0 = time.time()
         batch = trainer.replay.sample(cfg.train.batch_size)
+        t_replay += time.time() - t0
 
+        # WORLD MODEL
+        t0 = time.time()
         wm_metrics = trainer.update_world_model(batch, step)
         wm_losses.append(wm_metrics.total_loss.item())
+        t_world += time.time() - t0
 
+        # ACTOR + CRITIC
+        t0 = time.time()
         a_loss, c_loss = trainer.update_actor_critic(batch, step)
         actor_losses.append(float(a_loss))
-        critic_losses.append(float(c_loss))
+        t_actor += time.time() - t0
 
+        t0 = time.time()
+        critic_losses.append(float(c_loss))
+        t_critic += time.time() - t0
+
+        # Logits (last 50 steps only)
         if step >= steps - 50:
             with torch.no_grad():
                 logits = trainer.actor(trainer.world_state.h, trainer.world_state.z)
@@ -65,6 +97,21 @@ def run_training(seed, steps):
 
         if trainer.env_state["is_last"].any():
             returns.append(trainer.env_state["reward"].sum().item())
+
+        # PROGRESS LOGGING (every 10 steps)
+        if step % 10 == 0:
+            log_progress(
+                seed,
+                step,
+                steps,
+                {
+                    "env": t_env,
+                    "replay": t_replay,
+                    "world": t_world,
+                    "actor": t_actor,
+                    "critic": t_critic,
+                },
+            )
 
     return {
         "returns": np.array(returns),
