@@ -42,10 +42,10 @@ class ReplayBuffer:
         obs_dim: int,
         action_dim: int,
         device: torch.device,
-        log=None,
+        repro_log=None,
         seed: int = 0,
     ):
-        self.log = log
+        self.repro_log = repro_log
         self.cfg = cfg
 
         self.capacity = self.cfg.replay_capacity
@@ -124,8 +124,8 @@ class ReplayBuffer:
 
             end = start + self.seq_len
 
-            if self.cfg.enable_repro_log and self.log is not None:
-                self.log.debug(f"SAMPLE_IDX: {idx}, START={start}, END={end}")
+            if self.cfg.enable_repro_log and self.repro_log is not None:
+                self.repro_log.debug(f"SAMPLE_IDX: {idx}, START={start}, END={end}")
 
             obs_batch.append(ep["obs"][start:end])
             act_batch.append(ep["action"][start:end])

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import time
+import sys
 from typing import Any, Dict
 
 import numpy as np
@@ -60,22 +61,15 @@ class DreamerTrainer:
         self.cfg = cfg
         self.sample_step = 0
 
-        # Remove ALL sinks globally
-        logger.remove()
-
         if cfg.train.enable_repro_log:
-            # Patch logger so EVERY record has train_seed/env_seed in record["extra"]
-            patched = logger.patch(
-                lambda record: record["extra"].update(
-                    {
-                        "train_seed": cfg.train.seed,
-                        "env_seed": cfg.env.seed,
-                    }
-                )
+            # Dedicated reproducibility logger with per‑seed context
+            self.repro_log = logger.bind(
+                train_seed=cfg.train.seed,
+                env_seed=cfg.env.seed,
             )
 
-            # Add deterministic sink
-            patched.add(
+            # File sink: full DEBUG detail
+            self.repro_log.add(
                 os.path.join(LOG_DIR, f"repro_seed_{cfg.train.seed}.log"),
                 format="TRAIN={extra[train_seed]} ENV={extra[env_seed]} | {message}",
                 level="DEBUG",
@@ -83,10 +77,15 @@ class DreamerTrainer:
                 enqueue=False,
             )
 
-            self.log = patched
+            # Stdout sink: INFO only (clean console output)
+            self.repro_log.add(
+                sys.stdout,
+                format="TRAIN={extra[train_seed]} ENV={extra[env_seed]} | {message}",
+                level="INFO",
+            )
+
         else:
-            # No reproducibility logging → use global logger
-            self.log = logger
+            self.repro_log = None
 
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
@@ -173,7 +172,11 @@ class DreamerTrainer:
         # -----------------------------------------------------
         flat_obs_dim = self.world.flat_obs_dim
         self.replay = ReplayBuffer(
-            cfg=cfg.train, obs_dim=flat_obs_dim, action_dim=self.action_dim, device=self.device, log=self.log
+            cfg=cfg.train,
+            obs_dim=flat_obs_dim,
+            action_dim=self.action_dim,
+            device=self.device,
+            repro_log=self.repro_log,
         )
 
         # -----------------------------------------------------
@@ -290,13 +293,13 @@ class DreamerTrainer:
                     actions_discrete, _ = self.actor.act(self.world_state)
 
             if self.cfg.train.enable_repro_log:
-                self.log.debug(f"ACTION {self.global_step}: {actions_discrete.tolist()}")
+                self.repro_log.debug(f"ACTION {self.global_step}: {actions_discrete.tolist()}")
 
             # 2. Step environment
             env_out = self.env.step(actions_discrete)
 
             if self.cfg.train.enable_repro_log:
-                self.log.debug(f"REWARD {self.global_step}: {env_out['reward'].tolist()}")
+                self.repro_log.debug(f"REWARD {self.global_step}: {env_out['reward'].tolist()}")
 
             self._check_consistency(env_out)
 

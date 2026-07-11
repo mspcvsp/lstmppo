@@ -31,7 +31,7 @@ def run_training(seed, steps):
     cfg.train.cuda = True
 
     # Disable reproducibility logging for this statistical test
-    cfg.train.enable_repro_log = False
+    cfg.train.enable_repro_log = True
 
     cfg.log.enable_wandb = False
 
