@@ -9,8 +9,7 @@ from typing import Any, Dict
 import numpy as np
 import torch
 import torch.nn.functional as F
-from loguru import Logger
-from matplotlib.pyplot import step
+from loguru import logger
 from torch.utils.tensorboard import SummaryWriter
 
 import wandb
@@ -62,8 +61,8 @@ class DreamerTrainer:
         self.sample_step = 0
 
         if cfg.train.enable_repro_log:
-            # Create a brand‑new isolated logger
-            self.repro_log = Logger()
+            # Create a brand-new isolated logger
+            self.repro_log = logger.opt(depth=0)
 
             # Add reproducibility context
             self.repro_log = self.repro_log.bind(
@@ -251,11 +250,11 @@ class DreamerTrainer:
             ep_return = 0.0
             if self.env_state["is_last"].any():
                 ep_return = self.env_state["reward"].sum().item()
-                self.tb.add_scalar("env/ep_return", ep_return, step)
+                self.tb.add_scalar("env/ep_return", ep_return, update_idx)
 
                 self.recent_returns.append(ep_return)
                 self.recent_returns = self.recent_returns[-50:]
-                self.tb.add_scalar("env/avg_return_50", np.mean(self.recent_returns), step)
+                self.tb.add_scalar("env/avg_return_50", np.mean(self.recent_returns), update_idx)
 
             if self.cfg.log.enable_wandb:
                 wandb.log(
