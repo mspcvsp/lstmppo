@@ -1,14 +1,22 @@
+import logging
 import time
 
 import numpy as np
 import pytest
 import torch
-from loguru import logger
 from scipy.stats import entropy
 
 from dreamerrl.training.trainer import DreamerTrainer
 from dreamerrl.utils.seed import set_global_seeds
 from dreamerrl.utils.types import make_default_config
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+logger.propagate = False
 
 
 def log_progress(seed, step, total_steps, timings):

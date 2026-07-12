@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import sys
@@ -9,7 +10,6 @@ from typing import Any, Dict
 import numpy as np
 import torch
 import torch.nn.functional as F
-from loguru import logger
 from torch.utils.tensorboard import SummaryWriter
 
 import wandb
@@ -61,29 +61,34 @@ class DreamerTrainer:
         self.sample_step = 0
 
         if cfg.train.enable_repro_log:
-            # Create a brand-new isolated logger
-            self.repro_log = logger.opt(depth=0)
+            logger_name = f"dreamerrl.repro.{cfg.train.seed}"
+            base_logger = logging.getLogger(logger_name)
+            base_logger.handlers.clear()
+            base_logger.setLevel(logging.DEBUG)
+            base_logger.propagate = False
 
-            # Add reproducibility context
-            self.repro_log = self.repro_log.bind(
-                train_seed=cfg.train.seed,
-                env_seed=cfg.env.seed,
-            )
+            formatter = logging.Formatter("TRAIN=%(train_seed)s ENV=%(env_seed)s | %(message)s")
 
-            # File sink: DEBUG
-            self.repro_log.add(
+            file_handler = logging.FileHandler(
                 os.path.join(LOG_DIR, f"repro_seed_{cfg.train.seed}.log"),
-                format="TRAIN={extra[train_seed]} ENV={extra[env_seed]} | {message}",
-                level="DEBUG",
                 mode="w",
-                enqueue=False,
             )
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(formatter)
 
-            # Stdout sink: INFO only
-            self.repro_log.add(
-                sys.stdout,
-                format="TRAIN={extra[train_seed]} ENV={extra[env_seed]} | {message}",
-                level="INFO",
+            stream_handler = logging.StreamHandler(sys.stdout)
+            stream_handler.setLevel(logging.INFO)
+            stream_handler.setFormatter(formatter)
+
+            base_logger.addHandler(file_handler)
+            base_logger.addHandler(stream_handler)
+
+            self.repro_log = logging.LoggerAdapter(
+                base_logger,
+                {
+                    "train_seed": cfg.train.seed,
+                    "env_seed": cfg.env.seed,
+                },
             )
         else:
             self.repro_log = None
