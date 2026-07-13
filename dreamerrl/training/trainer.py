@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import logging
 import math
 import os
-import sys
 import time
 from typing import Any, Dict
 
@@ -59,39 +57,6 @@ class DreamerTrainer:
     def __init__(self, cfg: DreamerConfig):
         self.cfg = cfg
         self.sample_step = 0
-
-        if cfg.train.enable_repro_log:
-            logger_name = f"dreamerrl.repro.{cfg.train.seed}"
-            base_logger = logging.getLogger(logger_name)
-            base_logger.handlers.clear()
-            base_logger.setLevel(logging.DEBUG)
-            base_logger.propagate = False
-
-            formatter = logging.Formatter("TRAIN=%(train_seed)s ENV=%(env_seed)s | %(message)s")
-
-            file_handler = logging.FileHandler(
-                os.path.join(LOG_DIR, f"repro_seed_{cfg.train.seed}.log"),
-                mode="w",
-            )
-            file_handler.setLevel(logging.DEBUG)
-            file_handler.setFormatter(formatter)
-
-            stream_handler = logging.StreamHandler(sys.stdout)
-            stream_handler.setLevel(logging.INFO)
-            stream_handler.setFormatter(formatter)
-
-            base_logger.addHandler(file_handler)
-            base_logger.addHandler(stream_handler)
-
-            self.repro_log = logging.LoggerAdapter(
-                base_logger,
-                {
-                    "train_seed": cfg.train.seed,
-                    "env_seed": cfg.env.seed,
-                },
-            )
-        else:
-            self.repro_log = None
 
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
@@ -177,13 +142,7 @@ class DreamerTrainer:
         # Replay Buffer
         # -----------------------------------------------------
         flat_obs_dim = self.world.flat_obs_dim
-        self.replay = ReplayBuffer(
-            cfg=cfg.train,
-            obs_dim=flat_obs_dim,
-            action_dim=self.action_dim,
-            device=self.device,
-            repro_log=self.repro_log,
-        )
+        self.replay = ReplayBuffer(cfg=cfg.train, obs_dim=flat_obs_dim, action_dim=self.action_dim, device=self.device)
 
         # -----------------------------------------------------
         # Optimizers
@@ -298,17 +257,8 @@ class DreamerTrainer:
                 else:
                     actions_discrete, _ = self.actor.act(self.world_state)
 
-            if self.cfg.train.enable_repro_log:
-                assert self.repro_log is not None
-                self.repro_log.debug(f"ACTION {self.global_step}: {actions_discrete.tolist()}")
-
             # 2. Step environment
             env_out = self.env.step(actions_discrete)
-
-            if self.cfg.train.enable_repro_log:
-                assert self.repro_log is not None
-                self.repro_log.debug(f"REWARD {self.global_step}: {env_out['reward'].tolist()}")
-
             self._check_consistency(env_out)
 
             # Move env outputs to CUDA
