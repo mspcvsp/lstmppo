@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+import numpy as np
 import torch
 
 from dreamerrl.utils.types import TrainingConfig
@@ -58,7 +59,7 @@ class ReplayBuffer:
         self.obs_dim = obs_dim
         self.action_dim = action_dim
 
-        self.rng = torch.Generator(device)
+        self.rng = torch.Generator("cpu")
         self.rng.manual_seed(seed)
 
     def _ensure_envs(self, num_envs: int):
@@ -84,7 +85,7 @@ class ReplayBuffer:
                 done[i].detach().to(self.device),
             )
 
-            if done[i].item() == 1.0:
+            if bool(done[i]):
                 self._finalize_episode(i)
 
     def _finalize_episode(self, idx: int):
@@ -103,6 +104,7 @@ class ReplayBuffer:
 
         if seed is not None:
             self.rng.manual_seed(seed)
+            np.random.seed(seed)
 
         obs_batch = []
         act_batch = []
@@ -110,7 +112,7 @@ class ReplayBuffer:
         done_batch = []
 
         for _ in range(batch_size):
-            idx = int(torch.randint(0, len(self.episodes), (1,), generator=self.rng, device=self.device))
+            idx = int(torch.randint(0, len(self.episodes), (1,), generator=self.rng))
             ep = self.episodes[idx]
 
             length = ep["obs"].shape[0]
@@ -118,7 +120,7 @@ class ReplayBuffer:
             if length <= self.seq_len:
                 start = 0
             else:
-                start = int(torch.randint(0, length - self.seq_len, (1,), generator=self.rng, device=self.device))
+                start = int(torch.randint(0, length - self.seq_len, (1,), generator=self.rng))
 
             end = start + self.seq_len
 

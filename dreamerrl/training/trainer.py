@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
@@ -13,6 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 import wandb
 from dreamerrl.env.popgym.popgym_parallel_env import PopGymParallelEnv
 from dreamerrl.env.popgym.popgym_wrappers import PopGymVecEnv
+from dreamerrl.logging.repo_logger import create_repro_logger
 from dreamerrl.models.actor import Actor
 from dreamerrl.models.value_head import ValueHead
 from dreamerrl.models.world_model import WorldModel
@@ -21,9 +23,18 @@ from dreamerrl.training.core import actor_critic_update, world_model_training_st
 from dreamerrl.utils.seed import set_global_seeds
 from dreamerrl.utils.types import DreamerConfig, LatentConfig, LRScheduleConfig, NetworkConfig, WorldModelMetrics
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-LOG_DIR = os.path.join(ROOT, "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
+# Define LOG_DIR at module load so the path is computed once, from the actual file location, not from the caller's
+# working directory. This guarantees a consistent top‑level logs/ directory under pytest, CLI runs, and
+# multiprocessing.
+
+# Path to trainer.py
+trainer_file = Path(__file__).resolve()
+
+# dreamerrl/training/trainer.py → dreamerrl/training → dreamerrl → project root
+PROJECT_ROOT = trainer_file.parents[2]
+
+LOG_DIR = PROJECT_ROOT / "logs"
+LOG_DIR.mkdir(exist_ok=True)
 
 
 class CosineWarmupScheduler:
@@ -57,6 +68,9 @@ class DreamerTrainer:
     def __init__(self, cfg: DreamerConfig):
         self.cfg = cfg
         self.sample_step = 0
+
+        if cfg.train.enable_repro_log:
+            self.repro_log = create_repro_logger(cfg.train.seed, cfg.env.seed, LOG_DIR)
 
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
