@@ -83,11 +83,12 @@ class PopGymVecEnv(EnvInterface):
     Tracks prev_action internally and reconstructs one-hot state cues.
     """
 
-    def __init__(self, env_cfg: EnvironmentConfig, device: torch.device):
+    def __init__(self, env_cfg: EnvironmentConfig, device: torch.device, repo_log=None):
         self._batch_size = env_cfg.num_envs
         self.device = device
         self.deterministic = env_cfg.deterministic
         self.base_seed = env_cfg.seed
+        self.repo_log = repo_log
 
         self.venv = SyncVectorEnv([make_env(env_cfg, idx) for idx in range(self._batch_size)])
 
@@ -257,6 +258,15 @@ class PopGymVecEnv(EnvInterface):
                 self._needs_first[i] = True
             else:
                 self._needs_first[i] = False
+
+        if self.repo_log:
+            self.repo_log.debug(
+                f"[ENV] obs={obs.tolist()} "
+                f"reward={reward_t.tolist()} "
+                f"terminated={terminated_t.tolist()} "
+                f"truncated={truncated_t.tolist()} "
+                f"is_last={is_last.tolist()}"
+            )
 
         return {
             "state": state,

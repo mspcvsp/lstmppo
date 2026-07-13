@@ -71,6 +71,8 @@ class DreamerTrainer:
 
         if cfg.train.enable_repro_log:
             self.repro_log = create_repro_logger(cfg.train.seed, cfg.env.seed, LOG_DIR)
+        else:
+            self.repro_log = None
 
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
@@ -102,7 +104,7 @@ class DreamerTrainer:
         if cfg.env.parallel:
             self.env = PopGymParallelEnv(cfg.env, device=self.device)
         else:
-            self.env = PopGymVecEnv(cfg.env, device=self.device)
+            self.env = PopGymVecEnv(cfg.env, device=self.device, repo_log=self.repro_log)
 
         obs_space = self.env.venv.single_observation_space
         self.action_dim = self.env.action_dim
@@ -371,6 +373,11 @@ class DreamerTrainer:
             batch=batch,
             kl_scale=self.cfg.world.kl_scale,
         )
+
+        if self.repro_log:
+            self.repro_log.debug(
+                f"[TRAIN] KL_DYN={metrics.kl_dyn.mean().item():.6f} KL_REP={metrics.kl_rep.mean().item():.6f}"
+            )
 
         loss = metrics.total_loss
 
