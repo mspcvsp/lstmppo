@@ -83,6 +83,7 @@ class WorldModel(nn.Module):
         kl_cfg: Optional[KLConfig] = None,
         num_aux_reward_heads: int = 0,
         device: Optional[torch.device] = None,
+        deterministic_latent_for_tests: bool = False,
         probe=None,
     ):
         super().__init__()
@@ -105,8 +106,15 @@ class WorldModel(nn.Module):
 
         self.encoder: ObsEncoder = build_obs_encoder(obs_space, embed_dim=self.embed_size).to(self.device)
         self.rssm: RSSMCore = RSSMCore(latent=latent, net=net).to(self.device)
-        self.prior: Prior = Prior(latent=latent, net=net).to(self.device)
-        self.posterior: Posterior = Posterior(latent=latent, net=net).to(self.device)
+
+        self.prior: Prior = Prior(
+            latent=latent, net=net, deterministic_latent_for_tests=deterministic_latent_for_tests
+        ).to(self.device)
+
+        self.posterior: Posterior = Posterior(
+            latent=latent, net=net, deterministic_latent_for_tests=deterministic_latent_for_tests
+        ).to(self.device)
+
         self.decoder: ObsDecoder = ObsDecoder(latent=latent, net=net, output_dim=self.flat_obs_dim).to(self.device)
 
         self.reward_heads = MultiRewardHead(

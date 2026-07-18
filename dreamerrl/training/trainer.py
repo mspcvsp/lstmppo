@@ -158,6 +158,8 @@ class DreamerTrainer:
             free_nats=cfg.world.free_nats,
             num_aux_reward_heads=cfg.world.num_aux_reward_heads,
             device=self.device,
+            probe=self.probe,
+            deterministic_latent_for_tests=cfg.train.deterministic_env,
         )
         self.world_state = self.world.init_state(self.env.batch_size)
         self.world_state = self.world_state.to(self.device)

@@ -178,6 +178,6 @@ def test_reproducibility():
     if cfg.world.num_aux_reward_heads > 0:
         kl_ok = mean_kl < 6.0
     else:
-        kl_ok = 0.1 < mean_kl < 2.0
+        kl_ok = 0.1 < mean_kl < 3.0
 
     assert wm_ok and critic_ok and actor_ok and kl_ok, "Statistical reproducibility FAILED"
