@@ -173,7 +173,7 @@ class PopGymVecEnv(EnvInterface):
         self._needs_first[:] = True
 
         if self.probe:
-            self.probe.reset(obs.tolist())
+            self.probe.env_reset(obs.tolist())
 
         return {
             "state": state,

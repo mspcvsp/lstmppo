@@ -32,18 +32,29 @@ class DeterminismProbe:
 
         assert self.log is not None
         log: logging.Logger = self.log  # type narrowing
+
+        # Normalize inputs to tensors
+        obs_t = torch.as_tensor(obs)
+        reward_t = torch.as_tensor(reward)
+        term_t = torch.as_tensor(terminated)
+        trunc_t = torch.as_tensor(truncated)
+        last_t = torch.as_tensor(is_last)
+
         log.debug(
-            f"[ENV] obs_mean={obs.mean().item():.6f} "
-            f"rew_mean={reward.mean().item():.6f} "
-            f"term={terminated.tolist()} trunc={truncated.tolist()} last={is_last.tolist()}"
+            f"[ENV] obs_mean={obs_t.float().mean().item():.6f} "
+            f"rew_mean={reward_t.float().mean().item():.6f} "
+            f"term={term_t.tolist()} trunc={trunc_t.tolist()} last={last_t.tolist()}"
         )
 
     def env_reset(self, obs):
         if not self._should_log():
             return
+
         assert self.log is not None
-        log: logging.Logger = self.log
-        log.debug(f"[ENV_RESET] obs_mean={obs.mean().item():.6f}")
+        log: logging.Logger = self.log  # type narrowing
+
+        obs_t = torch.as_tensor(obs)
+        log.debug(f"[ENV_RESET] obs_mean={obs_t.float().mean().item():.6f}")
 
     # ---------------------------------------------------------
     # Replay buffer probes
