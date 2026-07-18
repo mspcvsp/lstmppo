@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 import wandb
+from dreamerrl.debug.probe import DeterminismProbe
 from dreamerrl.env.popgym.popgym_parallel_env import PopGymParallelEnv
 from dreamerrl.env.popgym.popgym_wrappers import PopGymVecEnv
 from dreamerrl.logging.repo_logger import create_repro_logger
@@ -74,6 +75,12 @@ class DreamerTrainer:
         else:
             self.repro_log = None
 
+        # Unified determinism probe
+        self.probe = DeterminismProbe(
+            logger=self.repro_log,
+            every_n=self.cfg.train.repro_log_every_n,
+        )
+
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
 
@@ -104,7 +111,7 @@ class DreamerTrainer:
         if cfg.env.parallel:
             self.env = PopGymParallelEnv(cfg.env, device=self.device)
         else:
-            self.env = PopGymVecEnv(cfg.env, device=self.device, repo_log=self.repro_log)
+            self.env = PopGymVecEnv(cfg.env, device=self.device, probe=self.probe)
 
         obs_space = self.env.venv.single_observation_space
         self.action_dim = self.env.action_dim
@@ -151,8 +158,8 @@ class DreamerTrainer:
             value_bins=cfg.world.value_bins,
         )
 
-        self.actor = Actor(latent=latent, net=net_actor).to(self.device)
-        self.critic = ValueHead(latent=latent, net=net_critic).to(self.device)
+        self.actor = Actor(latent=latent, net=net_actor, probe=self.probe).to(self.device)
+        self.critic = ValueHead(latent=latent, net=net_critic, probe=self.probe).to(self.device)
 
         # -----------------------------------------------------
         # Replay Buffer

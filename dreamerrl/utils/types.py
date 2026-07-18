@@ -143,6 +143,7 @@ class TrainingConfig:
     enforce_length_invariants: bool = False
 
     enable_repro_log: bool = False  # Set to true to enable reproducibility logging (repro.log)
+    repro_log_every_n: int = 100
 
 
 # ---------------------------------------------------------

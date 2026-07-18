@@ -81,8 +81,9 @@ class WorldModel(nn.Module):
         net: NetworkConfig,
         free_nats: float = 3.0,
         kl_cfg: Optional[KLConfig] = None,
-        num_aux_reward_heads: int = 0,  # ← NEW
+        num_aux_reward_heads: int = 0,
         device: Optional[torch.device] = None,
+        probe=None,
     ):
         super().__init__()
 
@@ -90,6 +91,7 @@ class WorldModel(nn.Module):
         self.latent = latent
         self.net_cfg = net
         self.free_nats = free_nats
+        self.probe = probe
 
         self.kl_cfg = kl_cfg or KLConfig(
             max_kl=100.0,
@@ -171,6 +173,10 @@ class WorldModel(nn.Module):
             kl_cfg=self.kl_cfg,
         )
 
+        if self.probe:
+            self.probe.wm_observe(embed, post_stats, prior_stats)
+            self.probe.wm_kl(kl_dict)
+
         for key in ["kl_dyn", "kl_rep", "kl_total"]:
             if not torch.isfinite(kl_dict[key]).all():
                 raise ValueError(f"KL divergence {key} is not finite: {kl_dict[key]}")
@@ -223,6 +229,16 @@ class WorldModel(nn.Module):
 
         h = self.rssm(prev_state.h, action)
         prior = self.prior(h)
+
+        """
+        # Non-determinism in imagination shows up after the RSSM transition:
+        - actor logits may diverge
+        - sampled actions may diverge
+        - RSSM transition may diverge
+        - prior distribution may diverge
+        """
+        if self.probe:
+            self.probe.wm_imagine(logits, action, h)
 
         if deterministic_imagination:
             idx = prior["probs"].argmax(dim=-1)

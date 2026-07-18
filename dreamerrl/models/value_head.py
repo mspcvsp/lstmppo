@@ -10,11 +10,12 @@ class ValueHead(nn.Module):
     Outputs categorical logits over value bins.
     """
 
-    def __init__(self, *, latent, net):
+    def __init__(self, *, latent, net, probe=None):
         super().__init__()
 
         self.latent = latent
         self.net_cfg = net
+        self.probe = probe
 
         self.z_embed = nn.Linear(latent.stoch_size, net.hidden_size)
         self.h_embed = nn.Linear(latent.deter_size, net.hidden_size)
@@ -45,8 +46,14 @@ class ValueHead(nn.Module):
         z_e = self.z_embed(z)  # (B, K, H)
         z_sum = z_e.sum(dim=1)  # (B, H)
         h_e = self.h_embed(h)  # (B, H)
+
         features = h_e + z_sum
-        return self.net(features)  # (B, value_bins)
+        logits = self.net(features)
+
+        if self.probe:
+            self.probe.critic(logits)
+
+        return logits
 
     def readout(self, logits: torch.Tensor) -> torch.Tensor:
         """

@@ -43,11 +43,11 @@ class ReplayBuffer:
         obs_dim: int,
         action_dim: int,
         device: torch.device,
-        repo_log=None,
+        probe=None,
         seed: int = 0,
     ):
         self.cfg = cfg
-        self.repo_log = repo_log
+        self.probe = probe
 
         self.capacity = self.cfg.replay_capacity
         self.device = device
@@ -101,6 +101,13 @@ class ReplayBuffer:
             removed = self.episodes.pop(0)
             self.size -= removed["obs"].shape[0]
 
+        if self.probe:
+            self.probe.replay_finalize(
+                idx=idx,
+                length=ep["obs"].shape[0],
+                total_size=self.size,
+            )
+
     def sample(self, batch_size: int, seed: int | None = None) -> Dict[str, torch.Tensor]:
         assert len(self.episodes) > 0, "Replay buffer is empty"
 
@@ -124,8 +131,8 @@ class ReplayBuffer:
             else:
                 start = int(torch.randint(0, length - self.seq_len, (1,), generator=self.rng))
 
-            if self.repo_log:
-                self.repo_log.debug(f"[REPLAY] seed={seed} ep_idx={idx} ep_len={length} start={start}")
+            if self.probe:
+                self.probe.replay_sample(seed=seed, ep_idx=idx, ep_len=length, start=start)
 
             end = start + self.seq_len
 

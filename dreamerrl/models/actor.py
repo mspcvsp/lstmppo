@@ -11,11 +11,12 @@ class Actor(nn.Module):
     Outputs logits over discrete actions.
     """
 
-    def __init__(self, *, latent, net):
+    def __init__(self, *, latent, net, probe=None):
         super().__init__()
 
         self.latent = latent
         self.net_cfg = net
+        self.probe = probe
 
         self.z_embed = nn.Linear(latent.stoch_size, net.hidden_size)
         self.h_embed = nn.Linear(latent.deter_size, net.hidden_size)
@@ -36,7 +37,12 @@ class Actor(nn.Module):
         h_e = self.h_embed(h)  # (B, H)
 
         features = h_e + z_sum
-        return self.net(features)  # logits over actions
+        logits = self.net(features)
+
+        if self.probe:
+            self.probe.actor(logits)
+
+        return logits  # logits over actions
 
     @torch.no_grad()
     def act(self, state, deterministic: bool = False):
