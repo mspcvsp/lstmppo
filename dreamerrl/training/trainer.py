@@ -170,9 +170,15 @@ class DreamerTrainer:
         # -----------------------------------------------------
         # Optimizers
         # -----------------------------------------------------
-        self.model_opt = torch.optim.Adam(self.world.parameters(), lr=cfg.train.model_lr)
-        self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=cfg.train.actor_lr)
-        self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=cfg.train.critic_lr)
+        self.model_opt = torch.optim.Adam(
+            self.world.parameters(), lr=cfg.train.model_lr, fused=self.cfg.train.enable_fused_adamw_kernels
+        )
+        self.actor_opt = torch.optim.Adam(
+            self.actor.parameters(), lr=cfg.train.actor_lr, fused=self.cfg.train.enable_fused_adamw_kernels
+        )
+        self.critic_opt = torch.optim.Adam(
+            self.critic.parameters(), lr=cfg.train.critic_lr, fused=self.cfg.train.enable_fused_adamw_kernels
+        )
 
         # -----------------------------------------------------
         # Logging

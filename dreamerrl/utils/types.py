@@ -142,6 +142,9 @@ class TrainingConfig:
     # - Any normal Dreamer training loop
     enforce_length_invariants: bool = False
 
+    # Enable / disable  fused AdamW kernels
+    enable_fused_adamw_kernels: bool = True
+
     enable_repro_log: bool = False  # Set to true to enable reproducibility logging (repro.log)
     repro_log_every_n: int = 100
 
