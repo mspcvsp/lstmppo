@@ -9,6 +9,8 @@ from typing import Any, Dict
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch import autocast
+from torch.amp.grad_scaler import GradScaler
 from torch.utils.tensorboard import SummaryWriter
 
 import wandb
@@ -80,6 +82,21 @@ class DreamerTrainer:
             logger=self.repro_log,
             every_n=self.cfg.train.repro_log_every_n,
         )
+
+        if self.cfg.train.deterministic_env:
+            self.cfg.train.use_amp = False
+            self.cfg.train.enable_fused_adamw_kernels = False
+
+            torch.use_deterministic_algorithms(True)
+
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
+            os.environ["PYTORCH_DISABLE_FUSED_ADAMW"] = "1"
+            os.environ["PYTORCH_CUDA_FUSER_DISABLE"] = "1"
+
+        self.scaler = GradScaler() if cfg.train.use_amp else None
 
         logdir = os.path.join(cfg.log.tb_logdir, cfg.log.run_name)
         self.tb = SummaryWriter(log_dir=logdir)
@@ -380,12 +397,23 @@ class DreamerTrainer:
         # Zero optimizer gradients
         self.model_opt.zero_grad()
 
-        # Forward pass
-        metrics = world_model_training_step(
-            world_model=self.world,
-            batch=batch,
-            kl_scale=self.cfg.world.kl_scale,
-        )
+        # AMP (Automatic Mixed Precision):
+        #   Uses FP16 for most matrix multiplications and FP32 for numerically sensitive ops. This speeds up training
+        #   on modern GPUs and reduces memory use. AMP is nondeterministic because FP16 kernels vary across hardware
+        #   and drivers. Therefore AMP is disabled automatically when deterministic_env=True.
+        if self.cfg.train.use_amp:
+            with autocast(device_type="cuda", dtype=torch.float16, enabled=self.cfg.train.use_amp):
+                metrics = world_model_training_step(
+                    world_model=self.world,
+                    batch=batch,
+                    kl_scale=self.cfg.world.kl_scale,
+                )
+        else:
+            metrics = world_model_training_step(
+                world_model=self.world,
+                batch=batch,
+                kl_scale=self.cfg.world.kl_scale,
+            )
 
         if self.repro_log:
             self.repro_log.debug(
@@ -394,10 +422,17 @@ class DreamerTrainer:
 
         loss = metrics.total_loss
 
-        # Backprop
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.world.parameters(), self.cfg.train.grad_clip)
-        self.model_opt.step()
+        if self.cfg.train.use_amp:
+            assert self.scaler is not None, "GradScaler is None but use_amp is True"
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.model_opt)
+            torch.nn.utils.clip_grad_norm_(self.world.parameters(), self.cfg.train.grad_clip)
+            self.scaler.step(self.model_opt)
+            self.scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.world.parameters(), self.cfg.train.grad_clip)
+            self.model_opt.step()
 
         # TensorBoard logging
         step = update_idx
@@ -418,25 +453,59 @@ class DreamerTrainer:
     # Actor + Critic Update
     # -------------------------------------------------------------
     def update_actor_critic(self, batch: Dict[str, torch.Tensor], update_idx: int):
-        actor_loss, critic_loss = actor_critic_update(
-            world_model=self.world,
-            actor=self.actor,
-            critic=self.critic,
-            batch=batch,
-            imagination_horizon=self.cfg.world.imagination_horizon,
-            discount=self.cfg.ac.discount,
-            lam=self.cfg.ac.lambda_,
-            deterministic_imagination=self.cfg.train.deterministic_imagination,
-        )
+        if self.cfg.train.use_amp:
+            with autocast(device_type="cuda", dtype=torch.float16, enabled=self.cfg.train.use_amp):
+                actor_loss, critic_loss = actor_critic_update(
+                    world_model=self.world,
+                    actor=self.actor,
+                    critic=self.critic,
+                    batch=batch,
+                    imagination_horizon=self.cfg.world.imagination_horizon,
+                    discount=self.cfg.ac.discount,
+                    lam=self.cfg.ac.lambda_,
+                    deterministic_imagination=self.cfg.train.deterministic_imagination,
+                )
+        else:
+            actor_loss, critic_loss = actor_critic_update(
+                world_model=self.world,
+                actor=self.actor,
+                critic=self.critic,
+                batch=batch,
+                imagination_horizon=self.cfg.world.imagination_horizon,
+                discount=self.cfg.ac.discount,
+                lam=self.cfg.ac.lambda_,
+                deterministic_imagination=self.cfg.train.deterministic_imagination,
+            )
 
-        self.actor_opt.zero_grad()
-        actor_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.cfg.train.grad_clip)
-        self.actor_opt.step()
+        # AMP (Automatic Mixed Precision):
+        #   Uses FP16 for most matrix multiplications and FP32 for numerically sensitive ops. This speeds up training
+        #   on modern GPUs and reduces memory use. AMP is nondeterministic because FP16 kernels vary across hardware
+        #   and drivers. Therefore AMP is disabled automatically when deterministic_env=True.
+        if self.cfg.train.use_amp:
+            assert self.scaler is not None, "GradScaler is None but use_amp is True"
 
-        self.critic_opt.zero_grad()
-        critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.cfg.train.grad_clip)
-        self.critic_opt.step()
+            self.actor_opt.zero_grad()
+            self.scaler.scale(actor_loss).backward()
+            self.scaler.unscale_(self.actor_opt)
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.cfg.train.grad_clip)
+            self.scaler.step(self.actor_opt)
+            self.scaler.update()
+
+            self.critic_opt.zero_grad()
+            self.scaler.scale(critic_loss).backward()
+            self.scaler.unscale_(self.critic_opt)
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.cfg.train.grad_clip)
+            self.scaler.step(self.critic_opt)
+            self.scaler.update()
+        else:
+            self.actor_opt.zero_grad()
+            actor_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.cfg.train.grad_clip)
+            self.actor_opt.step()
+
+            self.critic_opt.zero_grad()
+            critic_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.cfg.train.grad_clip)
+            self.critic_opt.step()
 
         return float(actor_loss.item()), float(critic_loss.item())

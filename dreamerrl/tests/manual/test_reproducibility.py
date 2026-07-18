@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 
 import numpy as np
@@ -152,15 +151,6 @@ def summarize(metric_list):
 @pytest.mark.manual
 @pytest.mark.reproducibility
 def test_reproducibility():
-    # Force deterministic AdamW
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-    # CRITICAL: disable fused AdamW
-    os.environ["PYTORCH_DISABLE_FUSED_ADAMW"] = "1"
-    os.environ["PYTORCH_CUDA_FUSER_DISABLE"] = "1"
-
     seeds = [0, 1, 2]
     results = [run_training(seed, steps=300) for seed in seeds]
 

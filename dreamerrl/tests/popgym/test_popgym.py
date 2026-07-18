@@ -31,6 +31,7 @@ def test_popgym(request):
         cfg.env.env_id = env_id
         cfg.env.seed = seed
         cfg.train.seed = seed
+        cfg.train.use_amp = False  # Disable AMP for PopGym tests to avoid KL inflation
 
         # PopGym tests should be FAST, not deterministic
         cfg.env.parallel = False  # SyncVectorEnv for stability

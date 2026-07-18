@@ -128,6 +128,9 @@ class TrainingConfig:
     # Normal training behavior is unchanged.
     deterministic_env: bool = False
 
+    enable_fused_adamw_kernels: bool = True  # Use fused AdamW kernels if available (faster training on GPU)
+    use_amp: bool = True  # Use automatic mixed precision (AMP) for faster training on GPU
+
     # Device + seed.
     cuda: bool = True
     seed: int = 0
@@ -141,10 +144,6 @@ class TrainingConfig:
     # - Robotics
     # - Any normal Dreamer training loop
     enforce_length_invariants: bool = False
-
-    # Enable / disable  fused AdamW kernels
-    enable_fused_adamw_kernels: bool = True
-
     enable_repro_log: bool = False  # Set to true to enable reproducibility logging (repro.log)
     repro_log_every_n: int = 100
 
