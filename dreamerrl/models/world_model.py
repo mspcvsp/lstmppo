@@ -15,7 +15,7 @@ from .categorical_kl import structured_kl
 from .continue_head import ContinueHead
 from .decoder import ObsDecoder
 from .multi_reward_head import MultiRewardHead
-from .obs_encoder import ObsEncoder, build_obs_encoder, get_flat_obs_dim
+from .obs_encoder import build_obs_encoder, get_flat_obs_dim
 from .posterior import Posterior
 from .prior import Prior
 from .world_model_core import RSSMCore
@@ -104,7 +104,7 @@ class WorldModel(nn.Module):
         self.flat_obs_dim = get_flat_obs_dim(obs_space)
         self.embed_size = net.hidden_size
 
-        self.encoder: ObsEncoder = build_obs_encoder(obs_space, embed_dim=self.embed_size).to(self.device)
+        self.encoder = build_obs_encoder(obs_space, embed_dim=self.embed_size).to(self.device)
         self.rssm: RSSMCore = RSSMCore(latent=latent, net=net).to(self.device)
 
         self.prior: Prior = Prior(

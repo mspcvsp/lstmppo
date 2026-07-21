@@ -4,10 +4,10 @@ from typing import Any
 
 import gymnasium as gym
 import numpy as np
-import torch
-import torch.nn as nn
 
-from dreamerrl.utils.transforms import symlog
+from dreamerrl.models.base_obs_encoder import BaseEncoder
+from dreamerrl.models.cnn_obs_encoder import CNNObsEncoder
+from dreamerrl.models.mlp_obs_encoder import MLPObsEncoder
 
 
 # ============================================================
@@ -47,47 +47,30 @@ def flatten_obs(obs: Any, space: gym.Space) -> np.ndarray:
 
 
 # ============================================================
-# 3. Dreamer ObsEncoder (MLP with SiLU + Xavier)
-# ============================================================
-class ObsEncoder(nn.Module):
-    """
-    Dreamer-style observation encoder.
-
-    - Input:  (B, flat_dim) tensor
-    - Output: (B, embed_dim) tensor
-    - Uses SiLU activations and Xavier initialization.
-    """
-
-    def __init__(self, flat_dim: int, embed_dim: int = 256) -> None:
-        super().__init__()
-
-        self.net = nn.Sequential(
-            nn.Linear(flat_dim, embed_dim),
-            nn.SiLU(),
-            nn.Linear(embed_dim, embed_dim),
-            nn.SiLU(),
-        )
-
-        self.output_size: int = embed_dim
-        self.apply(self._init_weights)
-
-    @staticmethod
-    def _init_weights(m: nn.Module) -> None:
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        if obs.dim() != 2:
-            raise ValueError(...)
-        obs = symlog(obs)
-        return self.net(obs)
-
-
-# ============================================================
 # 4. Builder
 # ============================================================
-def build_obs_encoder(space: gym.Space, embed_dim: int = 256) -> ObsEncoder:
-    flat_dim = get_flat_obs_dim(space)
-    return ObsEncoder(flat_dim, embed_dim)
+def build_obs_encoder(space: gym.Space, embed_dim: int = 256) -> BaseEncoder:
+    # Crafter: Box(64,64,3)
+    if isinstance(space, gym.spaces.Box) and len(space.shape) == 3:
+        return CNNObsEncoder(space, embed_dim)
+
+    # PopGym: Discrete → one-hot → MLP
+    if isinstance(space, gym.spaces.Discrete):
+        flat_dim = int(space.n)
+        return MLPObsEncoder(flat_dim, embed_dim)
+
+    # CAGE2: Dict/Tuple → flatten → MLP
+    if isinstance(space, gym.spaces.Dict):
+        flat_dim = sum(get_flat_obs_dim(sub) for sub in space.spaces.values())
+        return MLPObsEncoder(flat_dim, embed_dim)
+
+    if isinstance(space, gym.spaces.Tuple):
+        flat_dim = sum(get_flat_obs_dim(sub) for sub in space.spaces)
+        return MLPObsEncoder(flat_dim, embed_dim)
+
+    # Generic Box (vector)
+    if isinstance(space, gym.spaces.Box) and len(space.shape) == 1:
+        flat_dim = int(np.prod(space.shape))
+        return MLPObsEncoder(flat_dim, embed_dim)
+
+    raise NotImplementedError(f"Unsupported observation space: {space}")
