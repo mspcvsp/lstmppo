@@ -27,8 +27,11 @@ class MLPObsEncoder(BaseEncoder):
             nn.SiLU(),
         )
 
-        self.output_size: int = embed_dim
-        self.apply(self._init_weights)
+        self._output_size: int = embed_dim
+
+    @property
+    def output_size(self) -> int:
+        return self._output_size
 
     @staticmethod
     def _init_weights(m: nn.Module) -> None:

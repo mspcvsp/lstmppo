@@ -29,6 +29,12 @@ class CNNObsEncoder(BaseEncoder):
 
         self.apply(self._init_weights)
 
+        self._output_size: int = embed_dim
+
+    @property
+    def output_size(self) -> int:
+        return self._output_size
+
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)
