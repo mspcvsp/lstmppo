@@ -19,6 +19,7 @@ from .obs_encoder import build_obs_encoder, get_flat_obs_dim
 from .posterior import Posterior
 from .prior import Prior
 from .world_model_core import RSSMCore
+from .aux_objectives import make_aux_heads
 
 
 @dataclass
@@ -81,7 +82,7 @@ class WorldModel(nn.Module):
         net: NetworkConfig,
         free_nats: float = 3.0,
         kl_cfg: Optional[KLConfig] = None,
-        num_aux_reward_heads: int = 0,
+        aux_objectives=None,
         device: Optional[torch.device] = None,
         deterministic_latent_for_tests: bool = False,
         probe=None,
@@ -120,10 +121,28 @@ class WorldModel(nn.Module):
         self.reward_heads = MultiRewardHead(
             latent=latent,
             net=net,
-            num_aux=num_aux_reward_heads,
+            num_aux=0,
         ).to(self.device)
 
         self.continue_head: ContinueHead = ContinueHead(latent=latent, net=net).to(self.device)
+
+        # -------------------------------------------------------------
+        # Auxiliary heads (novelty, reachability, affordance, skill, resource)
+        # -------------------------------------------------------------
+        all_aux_heads = make_aux_heads(
+            deter_size=latent.deter_size,
+            z_dim=latent.z_dim,
+            action_dim=net.action_dim or 0,
+            num_skills=net.action_dim or 0,
+            hidden=net.hidden_size,
+        )
+
+        # Filter by config
+        self.aux_heads = nn.ModuleDict({cfg.name: all_aux_heads[cfg.name] for cfg in (aux_objectives or [])}).to(
+            self.device
+        )
+
+        self.aux_objectives = aux_objectives or []
 
         # Backward‑compatibility alias for invariants + actor/critic tests
         self.reward_head = self.reward_heads.main
@@ -174,6 +193,8 @@ class WorldModel(nn.Module):
         reward_main_logits, reward_aux_logits = self.reward_heads(h, z)
         cont_logits = self.continue_head(h, z)
 
+        aux_logits = {name: head(h, z) for name, head in self.aux_heads.items()}
+
         kl_dict = structured_kl(
             q_probs=post_stats["probs"],
             p_probs=prior_stats["probs"],
@@ -209,6 +230,7 @@ class WorldModel(nn.Module):
             "reward_main_logits": reward_main_logits,
             "reward_aux_logits": reward_aux_logits,
             "cont_logits": cont_logits,
+            "aux_logits": aux_logits,
             "kl": post_stats["kl_total"],
         }
 

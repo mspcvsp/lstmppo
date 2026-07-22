@@ -25,7 +25,6 @@ def test_kl_dynamics_invariant():
     cfg.train.seq_len = cfg.env.max_episode_steps
 
     cfg.train.batch_size = 4
-    cfg.world.num_aux_reward_heads = 0
 
     trainer = DreamerTrainer(cfg)
 

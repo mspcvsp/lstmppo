@@ -156,7 +156,7 @@ class DreamerTrainer:
             latent=latent,
             net=net_world,
             free_nats=cfg.world.free_nats,
-            num_aux_reward_heads=cfg.world.num_aux_reward_heads,
+            aux_objectives=cfg.world.aux_objectives,
             device=self.device,
             probe=self.probe,
             deterministic_latent_for_tests=cfg.train.deterministic_env,

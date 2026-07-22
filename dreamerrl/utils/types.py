@@ -1,11 +1,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Callable, Dict, List
 
 import torch
 
 from .transforms import symexp
+
+
+# ---------------------------------------------------------
+# Auxiliary Objective Config
+# ---------------------------------------------------------
+@dataclass(frozen=True)
+class AuxObjectiveConfig:
+    """
+    Environment‑agnostic auxiliary objective.
+
+    Each objective provides a function:
+        fn(batch, gamma) -> target tensor of shape (B, L)
+
+    Examples:
+        • affordance prediction
+        • reachability prediction
+        • novelty / event prediction
+        • resource dynamics
+        • skill discovery / options
+    """
+
+    name: str
+    fn: Callable[[Dict[str, torch.Tensor], float], torch.Tensor]
 
 
 # ---------------------------------------------------------
@@ -47,7 +70,39 @@ class WorldModelConfig:
     # Distributional value/reward bins.
     value_bins: int = 41
 
-    num_aux_reward_heads: int = 1
+    # -----------------------------------------------------------------------------
+    # AuxObjectiveConfig design notes
+    # -----------------------------------------------------------------------------
+    # Auxiliary objectives in Dreamer‑V3 must be *environment‑agnostic* and computed
+    # dynamically from each training batch. They cannot be static tensors because:
+    #
+    #   • Targets depend on the current replay batch (B, L)
+    #   • Targets depend on sequence length L (Crafter vs CAGE2 vs PopGym)
+    #   • Targets depend on discount gamma
+    #   • Targets may require padding (novelty, short‑horizon return)
+    #   • Targets must run on the correct device (CPU/GPU)
+    #   • Targets may use differentiable PyTorch ops
+    #
+    # Examples:
+    #   - novelty[t]      = |obs[t+1] - obs[t]|
+    #   - reachability[t] = 1 - is_terminal[t]
+    #   - affordance[t]   = action_mask[t]
+    #   - resource[t]     = reward[t]
+    #   - skill[t]        = one-hot(action[t])
+    #
+    # Because each auxiliary objective must compute its own (B, L) target from the
+    # batch, the cleanest abstraction is a *callable*:
+    #
+    #       fn(batch: Dict[str, Tensor], gamma: float) -> Tensor(B, L)
+    #
+    # This makes auxiliary objectives:
+    #   • plug‑and‑play
+    #   • environment‑agnostic
+    #   • configurable per environment
+    #   • independent of observation structure (image, dict, discrete)
+    #   • compatible with AMP + determinism
+    # -----------------------------------------------------------------------------
+    aux_objectives: List[AuxObjectiveConfig] = field(default_factory=list)
 
 
 # ---------------------------------------------------------
