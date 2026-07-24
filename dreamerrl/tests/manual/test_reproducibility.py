@@ -29,7 +29,7 @@ def log_progress(seed, step, total_steps, timings):
     )
 
 
-def run_training(seed, steps):
+def run_training(seed, steps, freeze_actor_critic_steps):
     cfg = make_default_config()
 
     cfg.train.seed = seed
@@ -69,7 +69,7 @@ def run_training(seed, steps):
     #
     # This produces meaningful cross‑seed CV and KL metrics without requiring unrealistic bit‑level determinism.
     # ----------------------------------------------------------------------------------------------------------------
-    cfg.train.freeze_actor_critic_steps = steps
+    cfg.train.freeze_actor_critic_steps = freeze_actor_critic_steps
 
     # Disable reproducibility logging for this statistical test
     cfg.train.enable_repro_log = True
@@ -184,7 +184,7 @@ def summarize(metric_list):
 @pytest.mark.reproducibility
 def test_reproducibility():
     seeds = [0, 1, 2]
-    results = [run_training(seed, steps=300) for seed in seeds]
+    results = [run_training(seed, steps=300, freeze_actor_critic_steps=100) for seed in seeds]
 
     wm_mean, wm_std, wm_cv = summarize([r["wm_loss"] for r in results])
     actor_mean, actor_std, actor_cv = summarize([r["actor_loss"] for r in results])
@@ -219,22 +219,19 @@ def test_reproducibility():
     #
     # Therefore, thresholds are environment‑specific: they ensure the model is stable across seeds without requiring
     # unrealistic bit‑level determinism.
-    critic_ok = 0.05 < critic_cv < 1.0
-    actor_ok = 0.5 < actor_cv < 3.0
-
     cfg = results[0]["cfg"]
+
+    actor_ok = 0.5 < actor_cv < 3.0
+    critic_ok = 0.05 < critic_cv < 1.0
 
     if cfg.env.env_id == "popgym-RepeatFirstEasy-v0":
         wm_ok = wm_cv < 5e-2
     else:
         wm_ok = wm_cv < 5e-3
 
-    if cfg.world.num_aux_reward_heads > 0:
-        kl_ok = mean_kl < 6.0
+    if cfg.env.env_id == "popgym-RepeatFirstEasy-v0":
+        kl_ok = 0.1 < mean_kl < 3.0
     else:
-        if cfg.env.env_id == "popgym-RepeatFirstEasy-v0":
-            kl_ok = 0.1 < mean_kl < 3.0
-        else:
-            kl_ok = 0.1 < mean_kl < 2.0
+        kl_ok = 0.1 < mean_kl < 2.0
 
     assert wm_ok and critic_ok and actor_ok and kl_ok, "Statistical reproducibility FAILED"
