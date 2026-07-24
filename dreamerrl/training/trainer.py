@@ -146,6 +146,7 @@ class DreamerTrainer:
             hidden_size=cfg.world.hidden_size,
             action_dim=self.action_dim,
             value_bins=cfg.world.value_bins,
+            disable_aux_losses=self.cfg.train.disable_aux_losses,
         )
 
         # -----------------------------------------------------

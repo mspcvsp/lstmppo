@@ -203,6 +203,7 @@ class TrainingConfig:
     repro_log_every_n: int = 100
 
     freeze_actor_critic_steps: int = 2000
+    disable_aux_losses: bool = False
 
 
 # ---------------------------------------------------------
@@ -344,6 +345,7 @@ class NetworkConfig:
 
     discount: float = 0.99
     aux_reward_scale: float = 0.1
+    disable_aux_losses: bool = False  # Disable auxiliary losses for reproducibility tests
 
     # Action dimension is required for Actor, optional for Critic.
     action_dim: int | None = None

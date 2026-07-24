@@ -193,7 +193,11 @@ class WorldModel(nn.Module):
         reward_main_logits, reward_aux_logits = self.reward_heads(h, z)
         cont_logits = self.continue_head(h, z)
 
-        aux_logits = {name: head(h, z) for name, head in self.aux_heads.items()}
+        # Disable aux heads in reproducibility mode
+        if getattr(self.net_cfg, "disable_aux_losses", False):
+            aux_logits = {}
+        else:
+            aux_logits = {name: head(h, z) for name, head in self.aux_heads.items()}
 
         kl_dict = structured_kl(
             q_probs=post_stats["probs"],

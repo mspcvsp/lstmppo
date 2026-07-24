@@ -115,24 +115,27 @@ def world_model_training_step(
     L_pred = recon_loss + reward_loss + cont_loss
 
     aux_losses = []
-    for cfg in world_model.aux_objectives:
-        name = cfg.name
-        logits = aux_logits[name].reshape(B, L, -1)  # (B, L, dim)
-        target = cfg.fn(batch, gamma)  # (B, L, dim)
 
-        if target.dim() == 2:
-            target = target.unsqueeze(-1)  # ensures (B, L, 1)
+    # Skip aux losses in reproducibility mode
+    if not getattr(world_model.net_cfg, "disable_aux_losses", False):
+        for cfg in world_model.aux_objectives:
+            name = cfg.name
+            logits = aux_logits[name].reshape(B, L, -1)  # (B, L, dim)
+            target = cfg.fn(batch, gamma)  # (B, L, dim)
 
-        # normalize target
-        target = (target - target.mean()) / (target.std() + 1e-6)
+            if target.dim() == 2:
+                target = target.unsqueeze(-1)  # ensures (B, L, 1)
 
-        head = world_model.aux_heads[name]
-        loss = head.loss_from_logits(logits, target)
+            # normalize target
+            target = (target - target.mean()) / (target.std() + 1e-6)
 
-        # clamp loss to prevent latent drift
-        loss = torch.clamp(loss, -1.0, 1.0)  # >>> NEW
+            head = world_model.aux_heads[name]
+            loss = head.loss_from_logits(logits, target)
 
-        aux_losses.append(loss)
+            # clamp loss to prevent latent drift
+            loss = torch.clamp(loss, -1.0, 1.0)  # >>> NEW
+
+            aux_losses.append(loss)
 
     if aux_losses:
         aux_loss = sum(aux_losses) / len(aux_losses)
