@@ -202,6 +202,8 @@ class TrainingConfig:
     enable_repro_log: bool = False  # Set to true to enable reproducibility logging (repro.log)
     repro_log_every_n: int = 100
 
+    freeze_actor_critic_steps: int = 2000
+
 
 # ---------------------------------------------------------
 # Environment Config

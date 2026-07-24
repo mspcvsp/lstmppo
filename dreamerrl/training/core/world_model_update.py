@@ -98,10 +98,10 @@ def world_model_training_step(
     # -------------------------------------------------------------
     recon = world_model.decoder(h_flat, z_factored).reshape(B, L, -1)
 
-    reward_main_logits, reward_aux_logits_list = world_model.reward_heads(h_flat, z_factored)
+    reward_main_logits, _ = world_model.reward_heads(h_flat, z_factored)
     reward_main_logits = reward_main_logits.reshape(B, L, world_model.net_cfg.value_bins)
-    aux_logits_reshaped = [aux.reshape(B, L, world_model.net_cfg.value_bins) for aux in reward_aux_logits_list]
 
+    aux_logits = {name: head(h_flat, z_factored) for name, head in world_model.aux_heads.items()}
     cont_logits = world_model.continue_head(h_flat, z_factored).reshape(B, L, world_model.net_cfg.value_bins)
 
     # -------------------------------------------------------------
@@ -111,19 +111,32 @@ def world_model_training_step(
     recon_loss = F.mse_loss(recon, recon_target)
 
     reward_loss = world_model.reward_heads.main.loss_from_logits(reward_main_logits, reward)
+    cont_loss = world_model.continue_head.loss_from_logits(cont_logits, cont_target)
+    L_pred = recon_loss + reward_loss + cont_loss
 
     aux_losses = []
-    for i, aux_logits in enumerate(aux_logits_reshaped):
-        head = world_model.reward_heads.aux[i]
-        aux_losses.append(head.loss_from_logits(aux_logits, short_horizon))
+    for cfg in world_model.aux_objectives:
+        name = cfg.name
+        logits = aux_logits[name].reshape(B, L, -1)  # (B, L, dim)
+        target = cfg.fn(batch, gamma)  # (B, L, dim)
+
+        if target.dim() == 2:
+            target = target.unsqueeze(-1)  # ensures (B, L, 1)
+
+        # normalize target
+        target = (target - target.mean()) / (target.std() + 1e-6)
+
+        head = world_model.aux_heads[name]
+        loss = head.loss_from_logits(logits, target)
+
+        # clamp loss to prevent latent drift
+        loss = torch.clamp(loss, -1.0, 1.0)  # >>> NEW
+
+        aux_losses.append(loss)
 
     if aux_losses:
-        alpha = world_model.net_cfg.aux_reward_scale
-        reward_loss = reward_loss + alpha * sum(aux_losses) / len(aux_losses)
-
-    cont_loss = world_model.continue_head.loss_from_logits(cont_logits, cont_target)
-
-    L_pred = recon_loss + reward_loss + cont_loss
+        aux_loss = sum(aux_losses) / len(aux_losses)
+        L_pred = L_pred + world_model.net_cfg.aux_reward_scale * aux_loss
 
     # -------------------------------------------------------------
     # KL losses (already computed in observe_step)
