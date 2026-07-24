@@ -37,6 +37,7 @@ def run_training(seed, steps):
     cfg.train.enforce_length_invariants = True
     cfg.train.deterministic_env = True
     cfg.train.cuda = True
+    cfg.train.disable_aux_losses = True  # Disable auxiliary losses for PopGym tests to avoid KL inflation
 
     # Disable reproducibility logging for this statistical test
     cfg.train.enable_repro_log = True
@@ -52,8 +53,6 @@ def run_training(seed, steps):
     cfg.train.collect_steps = 10
     cfg.env.max_episode_steps = cfg.train.collect_steps
     cfg.train.seq_len = cfg.train.collect_steps
-
-    cfg.world.num_aux_reward_heads = 0
 
     set_global_seeds(seed)
     trainer = DreamerTrainer(cfg)
