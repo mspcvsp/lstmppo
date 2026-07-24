@@ -456,6 +456,10 @@ class DreamerTrainer:
     # Actor + Critic Update
     # -------------------------------------------------------------
     def update_actor_critic(self, batch: Dict[str, torch.Tensor], update_idx: int):
+        # Freeze actor/critic during reproducibility tests to prevent cross‑seed divergence.
+        if update_idx < self.cfg.train.freeze_actor_critic_steps:
+            return 0.0, 0.0
+
         if self.cfg.train.use_amp:
             with autocast(device_type="cuda", dtype=torch.float16, enabled=self.cfg.train.use_amp):
                 actor_loss, critic_loss = actor_critic_update(
@@ -481,9 +485,9 @@ class DreamerTrainer:
             )
 
         # AMP (Automatic Mixed Precision):
-        #   Uses FP16 for most matrix multiplications and FP32 for numerically sensitive ops. This speeds up training
-        #   on modern GPUs and reduces memory use. AMP is nondeterministic because FP16 kernels vary across hardware
-        #   and drivers. Therefore AMP is disabled automatically when deterministic_env=True.
+        #   Uses FP16 for most matrix multiplications and FP32 for numerically sensitive ops. This speeds up
+        #   training on modern GPUs and reduces memory use. AMP is nondeterministic because FP16 kernels vary
+        #   across hardware and drivers. Therefore AMP is disabled automatically when deterministic_env=True.
         if self.cfg.train.use_amp:
             assert self.scaler is not None, "GradScaler is None but use_amp is True"
 

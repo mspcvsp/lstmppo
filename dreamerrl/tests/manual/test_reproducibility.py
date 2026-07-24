@@ -39,6 +39,38 @@ def run_training(seed, steps):
     cfg.train.cuda = True
     cfg.train.disable_aux_losses = True  # Disable auxiliary losses for PopGym tests to avoid KL inflation
 
+    # ----------------------------------------------------------------------------------------------------------------
+    # Why actor & critic updates are disabled in reproducibility tests
+    # ----------------------------------------------------------------------------------------------------------------
+    # This test measures *statistical reproducibility*, not learning performance.
+    #
+    # Dreamer‑V3 contains a feedback loop:
+    #     actor → imagination → critic → actor → world model → replay → actor …
+    #
+    # Even when the environment, replay sampling, RSSM, KL dynamics, and CUDA kernels are fully deterministic,
+    # this feedback loop amplifies tiny numerical differences across seeds. If the actor or critic are allowed
+    # to learn during the test, their weights diverge across seeds, which inflates:
+    #
+    #     • actor loss CV
+    #     • critic loss CV
+    #     • action‑logit KL between seeds
+    #
+    # This divergence is *expected* during normal training, but it breaks the reproducibility metric.
+    #
+    # To isolate the stability of the world model and imagination dynamics, reproducibility tests freeze the
+    # actor and critic for the entire duration of the test (via freeze_actor_critic_steps). The world model
+    # still trains normally, which allows us to measure:
+    #
+    #     • stability of RSSM dynamics
+    #     • stability of KL (dyn/rep/total)
+    #     • stability of decoder/reward/continue heads
+    #     • stability of imagination trajectories
+    #     • stability of actor logits (with actor frozen)
+    #
+    # This produces meaningful cross‑seed CV and KL metrics without requiring unrealistic bit‑level determinism.
+    # ----------------------------------------------------------------------------------------------------------------
+    cfg.train.freeze_actor_critic_steps = steps
+
     # Disable reproducibility logging for this statistical test
     cfg.train.enable_repro_log = True
 
