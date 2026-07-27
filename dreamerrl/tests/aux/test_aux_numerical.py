@@ -7,6 +7,7 @@ import torch
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_novelty_loss_increases_on_repetition(aux_world_model, latent_cluster):
     wm = aux_world_model
     novelty_head = wm.aux_heads["novelty"]
@@ -22,6 +23,7 @@ def test_novelty_loss_increases_on_repetition(aux_world_model, latent_cluster):
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_skill_loss_matches_clusters(aux_world_model, latent_cluster):
     wm = aux_world_model
     skill_head = wm.aux_heads["skill"]

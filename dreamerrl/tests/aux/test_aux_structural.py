@@ -8,6 +8,7 @@ import torch
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_aux_heads_instantiation(aux_world_model):
     wm = aux_world_model
     assert "novelty" in wm.aux_heads
@@ -17,6 +18,7 @@ def test_aux_heads_instantiation(aux_world_model):
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_aux_logits_present(aux_world_model):
     wm = aux_world_model
 
@@ -32,6 +34,7 @@ def test_aux_logits_present(aux_world_model):
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_aux_logits_disabled(world_model_aux_losses_disabled):
     wm = world_model_aux_losses_disabled
 

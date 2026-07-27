@@ -12,6 +12,7 @@ import torch.nn.functional as F
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_skill_loss_decreases_with_correct_actor_choice(aux_world_model, latent_cluster):
     wm = aux_world_model
     skill_head = wm.aux_heads["skill"]
@@ -28,6 +29,7 @@ def test_skill_loss_decreases_with_correct_actor_choice(aux_world_model, latent_
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_skill_loss_increases_with_wrong_actor_choice(aux_world_model, latent_cluster):
     wm = aux_world_model
     skill_head = wm.aux_heads["skill"]
@@ -44,6 +46,7 @@ def test_skill_loss_increases_with_wrong_actor_choice(aux_world_model, latent_cl
 
 
 @pytest.mark.invariants
+@pytest.mark.aux_losses
 def test_aux_loss_propagates_gradients_into_rssm(aux_world_model, latent_cluster):
     wm = aux_world_model
     skill_head = wm.aux_heads["skill"]
