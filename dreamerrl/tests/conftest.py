@@ -277,3 +277,84 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "manual" in item.keywords:
             item.add_marker(skip_manual)
+
+
+# ---------------------------------------------------------------------------
+# Aux-loss fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def aux_world_model():
+    """
+    WorldModel with aux losses enabled for structural + numerical tests.
+    """
+    obs_space = DummyObsSpace(obs_dim=8)
+
+    latent = LatentConfig(
+        deter_size=200,
+        stoch_size=30,
+        num_classes=32,
+    )
+
+    net = NetworkConfig(
+        hidden_size=256,
+        action_dim=5,
+        value_bins=41,
+        disable_aux_losses=False,
+    )
+
+    wm = WorldModel(
+        obs_space=obs_space,
+        latent=latent,
+        net=net,
+        aux_objectives=["novelty", "skill"],
+        device=torch.device("cpu"),
+    )
+
+    return wm
+
+
+@pytest.fixture
+def world_model_aux_losses_disabled():
+    """
+    WorldModel with aux losses disabled for invariants tests.
+    """
+    obs_space = DummyObsSpace(obs_dim=8)
+
+    latent = LatentConfig(
+        deter_size=200,
+        stoch_size=30,
+        num_classes=32,
+    )
+
+    net = NetworkConfig(
+        hidden_size=256,
+        action_dim=5,
+        value_bins=41,
+        disable_aux_losses=True,
+    )
+
+    wm = WorldModel(
+        obs_space=obs_space,
+        latent=latent,
+        net=net,
+        aux_objectives=["novelty", "skill"],
+        device=torch.device("cpu"),
+    )
+
+    return wm
+
+
+@pytest.fixture
+def latent_cluster():
+    """
+    Synthetic latent cluster generator for skill-learning tests.
+    """
+
+    def _make(cluster_id, batch=8, num_classes=32):
+        z = torch.zeros(batch, num_classes)
+        z[:, cluster_id] = 1.0
+        return z
+
+    return _make
