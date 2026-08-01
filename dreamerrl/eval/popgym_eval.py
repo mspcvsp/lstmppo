@@ -123,6 +123,10 @@ def train_popgym_seed(trainer, steps=1000):
             ep_return = trainer.env_state["reward"].sum().item()
             returns.append(ep_return)
 
+        if step % 100 == 0:
+            avg_ret = np.mean(returns) if len(returns) > 0 else 0.0
+            print(f"[learning] step={step}/{steps} avg_return={avg_ret:.3f}", flush=True)
+
         # ETA heartbeat
         if step % 10 == 0 and step > 0:
             elapsed = time.time() - start
