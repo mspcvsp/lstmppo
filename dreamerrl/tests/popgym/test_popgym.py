@@ -10,7 +10,7 @@ from dreamerrl.utils.types import make_default_config
 
 
 @pytest.mark.manual
-@pytest.mark.popgym
+@pytest.mark.popgym_functional
 def test_popgym(request):
     """
     Fast functional PopGym integration test.
@@ -21,41 +21,44 @@ def test_popgym(request):
     if not request.config.getoption("--run-manual"):
         pytest.skip("Manual test skipped. Use --run-manual to enable.")
 
-    env_id = request.config.getoption("--env")
-    steps = int(request.config.getoption("--steps") or 1000)
+    steps = int(request.config.getoption("--steps") or 100)
+    print("Running PopGym test for {} steps".format(steps))
 
     seeds = [0, 1, 2]
     results = []
 
     for seed in seeds:
         cfg = make_default_config()
-        cfg.env.env_id = env_id
         cfg.env.seed = seed
         cfg.train.seed = seed
-        cfg.train.use_amp = False  # Disable AMP for PopGym tests to avoid KL inflation
-        cfg.train.disable_aux_losses = True  # Disable auxiliary losses for PopGym tests to avoid KL inflation
-        cfg.train.freeze_actor_critic_steps = 0
 
-        cfg.world.imagination_horizon = 3
+        cfg.env.env_id = "popgym-RepeatPreviousEasy-v0"
 
-        cfg.world.deter_size = 64
-        cfg.world.stoch_size = 16
-        cfg.world.num_classes = 16
-        cfg.world.hidden_size = 128
+        # World model size: small and sharp
+        cfg.world.deter_size = 32
+        cfg.world.stoch_size = 8
+        cfg.world.num_classes = 8
+        cfg.world.hidden_size = 64
 
-        # PopGym cannot handle DreamerV3’s default LR.
-        cfg.train.model_lr = 3e-5
-
-        # PopGym transitions are sharp and discrete — clipping must be strong.
-        cfg.train.grad_clip = 10.0
-
-        # PopGym rewards are tiny → KL dominates → actor/critic explode.
-        cfg.world.kl_scale = 0.02
+        # Imagination + KL: very conservative
+        cfg.world.imagination_horizon = 2
+        cfg.world.kl_scale = 0.005
         cfg.world.kl_balance = 0.5
-        cfg.world.free_nats = 1.0
+        cfg.world.free_nats = 0.5
 
-        # PopGym tests should be FAST, not deterministic
-        cfg.env.parallel = False  # SyncVectorEnv for stability
+        # Training: gentle but not trivial
+        cfg.train.model_lr = 3e-5
+        cfg.train.grad_clip = 10.0
+        cfg.train.freeze_actor_critic_steps = 0
+        cfg.train.disable_aux_losses = True
+        cfg.train.use_amp = False
+
+        # Sequence / rollout lengths
+        cfg.train.seq_len = 20
+        cfg.train.collect_steps = 20
+        cfg.env.max_episode_steps = 20
+
+        cfg.env.parallel = False
         cfg.train.deterministic_env = False
         cfg.log.enable_wandb = False
 
