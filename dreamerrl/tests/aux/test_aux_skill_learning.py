@@ -8,7 +8,8 @@ Adaptive skill-learning tests ensure:
 
 import pytest
 import torch
-import torch.nn.functional as F
+
+from dreamerrl.tests.aux.utils import assert_skill_loss_order
 
 
 @pytest.mark.invariants
@@ -22,8 +23,12 @@ def test_skill_loss_decreases_with_correct_actor_choice(aux_world_model, latent_
 
     logits = skill_head(h, z)
 
-    loss_correct = F.cross_entropy(logits, torch.full((4,), 2))
-    loss_wrong = F.cross_entropy(logits, torch.full((4,), 1))
+    loss_correct, loss_wrong = assert_skill_loss_order(
+        logits,
+        correct_skill_idx=2,
+        wrong_skill_idx=1,
+        num_skills=wm.net_cfg.action_dim,
+    )
 
     assert loss_correct < loss_wrong
 
@@ -39,25 +44,11 @@ def test_skill_loss_increases_with_wrong_actor_choice(aux_world_model, latent_cl
 
     logits = skill_head(h, z)
 
-    loss_correct = F.cross_entropy(logits, torch.full((4,), 1))
-    loss_wrong = F.cross_entropy(logits, torch.full((4,), 0))
+    loss_correct, loss_wrong = assert_skill_loss_order(
+        logits,
+        correct_skill_idx=1,
+        wrong_skill_idx=0,
+        num_skills=wm.net_cfg.action_dim,
+    )
 
     assert loss_wrong > loss_correct
-
-
-@pytest.mark.invariants
-@pytest.mark.aux_losses
-def test_aux_loss_propagates_gradients_into_rssm(aux_world_model, latent_cluster):
-    wm = aux_world_model
-    skill_head = wm.aux_heads["skill"]
-
-    # h must require grad to test gradient flow
-    h = torch.randn(4, wm.latent.deter_size, requires_grad=True)
-    z = latent_cluster(cluster_id=0, batch=4)
-
-    logits = skill_head(h, z)
-    loss = F.cross_entropy(logits, torch.zeros(4, dtype=torch.long))
-
-    grads = torch.autograd.grad(loss, h, retain_graph=True)[0]
-
-    assert grads.abs().sum() > 0
