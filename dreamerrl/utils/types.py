@@ -8,6 +8,21 @@ import torch
 from .transforms import symexp
 
 
+@dataclass(frozen=True)
+class AuxHeadConfig:
+    """
+    Shared config for auxiliary heads.
+
+    in_dim:  dimension of concatenated (h_t, z_t)
+    hidden:  hidden layer size
+    out_dim: output dimension (1 for scalar, N for vector)
+    """
+
+    in_dim: int
+    hidden: int
+    out_dim: int
+
+
 # ---------------------------------------------------------
 # Auxiliary Objective Config
 # ---------------------------------------------------------

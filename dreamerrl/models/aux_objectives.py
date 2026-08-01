@@ -1,165 +1,191 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+
+from dreamerrl.utils.types import AuxObjectiveConfig
 
 
-@dataclass(frozen=True)
-class AuxHeadConfig:
+# -------------------------------------------------------------------------
+# Novelty Target
+# -------------------------------------------------------------------------
+def novelty_target(batch, gamma):
     """
-    Shared config for auxiliary heads.
+    Intuition:
+        Novelty measures *how surprising the next observation is*.
+        A simple proxy is the absolute difference between consecutive frames:
+            novelty[t] = |obs[t+1] - obs[t]|
 
-    in_dim:  dimension of concatenated (h_t, z_t)
-    hidden:  hidden layer size
-    out_dim: output dimension (1 for scalar, N for vector)
-    """
+        Why this helps:
+        • Encourages the RSSM latent to encode changes in the environment.
+        • Helps the model detect events, transitions, and dynamics.
+        • Useful for exploration-heavy environments (PopGym, Crafter, CAGE2).
+        • Gives the world model a sense of “movement” or “state change”.
 
-    in_dim: int
-    hidden: int
-    out_dim: int
-
-
-class BaseAuxHead(nn.Module):
-    def __init__(self, cfg: AuxHeadConfig):
-        super().__init__()
-        self.cfg = cfg
-
-        self.fc1 = nn.Linear(cfg.in_dim, cfg.hidden)
-        self.fc2 = nn.Linear(cfg.hidden, cfg.out_dim)
-
-    def forward(self, h: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
-        """
-        h: (B * L, deter_size)
-        z: (B * L, z_dim) or (B * L, num_classes, stoch_size) flattened
-        """
-        if z.dim() > 2:
-            z = z.view(z.size(0), -1)
-
-        x = torch.cat([h, z], dim=-1)  # (B * L, in_dim)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
-
-    def loss_from_logits(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """
-        Default: scalar regression with MSE.
-        Override for classification / multi‑dim outputs.
-        """
-        # logits: (B * L, out_dim) or (B, L, out_dim)
-        if logits.dim() == 3:
-            B, L, D = logits.shape
-            logits = logits.view(B * L, D)
-            target = target.view(B * L, D)
-
-        return F.mse_loss(logits, target)
-
-
-# ---------------------------------------------------------------------
-# Novelty head: predicts scalar novelty per step
-# ---------------------------------------------------------------------
-class NoveltyHead(BaseAuxHead):
-    """
-    Predicts scalar novelty per time step:
-        novelty[t] ≈ |obs[t+1] - obs[t]| or similar proxy.
+        Implementation details:
+        • We compute novelty for t=0..L-2, then pad the last step.
+        • Output shape must be (B, L, 1) to match NoveltyHead.
     """
 
-    # Uses BaseAuxHead MSE loss (scalar regression).
+    obs = batch["obs"]  # (B, L, obs_dim)
+
+    # Compute novelty for each step except the last.
+    novelty = (obs[:, 1:] - obs[:, :-1]).abs().mean(dim=-1)  # (B, L-1)
+
+    # Pad last step so shape matches (B, L)
+    novelty = torch.cat([novelty, novelty[:, -1:].clone()], dim=1)
+
+    return novelty.unsqueeze(-1)  # (B, L, 1)
 
 
-# ---------------------------------------------------------------------
-# Reachability head: predicts scalar reachability (0/1)
-# ---------------------------------------------------------------------
-class ReachabilityHead(BaseAuxHead):
+# -------------------------------------------------------------------------
+# Skill Target
+# -------------------------------------------------------------------------
+def skill_target(batch, gamma):
     """
-    Predicts reachability / continuation:
-        reachability[t] ≈ 1 - is_terminal[t]
-    """
+    Intuition:
+        Skill learning tries to discover *latent options* or *behaviors*.
+        A simple supervised proxy is to treat the one-hot action as the skill:
+            skill[t] = one_hot(action[t])
 
-    def loss_from_logits(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # Binary classification with BCE.
-        if logits.dim() == 3:
-            B, L, D = logits.shape
-            logits = logits.view(B * L, D)
-            target = target.view(B * L, D)
+        Why this helps:
+        • Encourages the RSSM latent to cluster states by behavior.
+        • Helps the SkillHead learn which “skill” is active.
+        • Enables adaptive skill learning when combined with latent clustering.
+        • Provides a stable supervised signal even before clustering is enabled.
 
-        return F.binary_cross_entropy_with_logits(logits, target)
-
-
-# ---------------------------------------------------------------------
-# Affordance head: predicts action affordances (vector over actions)
-# ---------------------------------------------------------------------
-class AffordanceHead(BaseAuxHead):
-    """
-    Predicts which actions are possible / useful:
-        affordance[t] ∈ R^{action_dim}
-    """
-
-    def loss_from_logits(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # Multi‑label affordance: BCE per action dimension.
-        if logits.dim() == 3:
-            B, L, D = logits.shape
-            logits = logits.view(B * L, D)
-            target = target.view(B * L, D)
-
-        return F.binary_cross_entropy_with_logits(logits, target)
-
-
-# ---------------------------------------------------------------------
-# Skill head: predicts skill / option activation (vector)
-# ---------------------------------------------------------------------
-class SkillHead(BaseAuxHead):
-    """
-    Predicts which latent skill/option is active:
-        skill[t] ∈ R^{num_skills}
+        Implementation details:
+        • batch["action"] is already one-hot: (B, L, action_dim)
+        • SkillHead expects a vector target → perfect match.
     """
 
-    def loss_from_logits(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # Multi‑label or soft assignment over skills.
-        if logits.dim() == 3:
-            B, L, D = logits.shape
-            logits = logits.view(B * L, D)
-            target = target.view(B * L, D)
-
-        return F.mse_loss(logits, target)
+    return batch["action"]  # (B, L, action_dim)
 
 
-# ---------------------------------------------------------------------
-# Resource head: predicts scalar resource change (reward‑like)
-# ---------------------------------------------------------------------
-class ResourceHead(BaseAuxHead):
+# -------------------------------------------------------------------------
+# Latent-Cluster Skill Target
+# -------------------------------------------------------------------------
+def latent_cluster_skill_target(batch, gamma, z_t, num_skills, temperature=1.0):
     """
-    Predicts resource dynamics:
-        resource[t] ≈ Δresources or reward[t]
+    Intuition:
+        Skills should represent *latent behaviors*, not raw actions.
+        The cleanest formulation is to cluster the RSSM latent z_t and use the
+        cluster assignment as the skill target.
+
+        Why this works:
+        • RSSM latents encode environment dynamics.
+        • Clustering z_t groups states by behavior (options).
+        • SkillHead learns to predict which behavior/option is active.
+        • Actor can condition on skill to produce temporally coherent behavior.
+        • This is the DreamerV3-style "latent option discovery".
+
+        Implementation:
+        • z_t is (B, L, num_classes, stoch_size)
+        • Flatten to (B*L, D)
+        • Compute cluster logits via a small linear projection
+        • Softmax → soft cluster assignment (differentiable)
+        • Reshape back to (B, L, num_skills)
+
+        Notes:
+        • This target is *independent* of actions.
+        • This target is *fully differentiable*.
+        • This target is *stable* across seeds.
+        • This target is *compatible* with your SkillHead MSE loss.
     """
 
-    # Uses BaseAuxHead MSE loss (scalar regression).
+    B, L, K, S = z_t.shape
+    D = K * S
+
+    # Flatten z_t → (B*L, D)
+    z_flat = z_t.view(B * L, D)
+
+    # Learnable cluster projection
+    # (You can move this into RSSM or WorldModel if you prefer)
+    cluster_proj = torch.nn.Linear(D, num_skills, bias=False).to(z_t.device)
+
+    # Compute cluster logits
+    logits = cluster_proj(z_flat) / temperature  # (B*L, num_skills)
+
+    # Soft cluster assignment
+    soft_clusters = torch.softmax(logits, dim=-1)  # (B*L, num_skills)
+
+    # Reshape back to (B, L, num_skills)
+    return soft_clusters.view(B, L, num_skills)
 
 
-# ---------------------------------------------------------------------
-# Factory to build heads given latent + network config
-# ---------------------------------------------------------------------
-def make_aux_heads(
-    deter_size: int,
-    z_dim: int,
-    action_dim: int,
-    num_skills: int,
-    hidden: int = 256,
-):
+# -------------------------------------------------------------------------
+# Reachability Target
+# -------------------------------------------------------------------------
+def reachability_target(batch, gamma):
     """
-    Returns a dict of auxiliary heads:
-        novelty, reachability, affordance, skill, resource
+    Intuition:
+        Reachability measures whether the episode continues:
+            reachability[t] = 1 - is_terminal[t]
+
+        Why this helps:
+        • Teaches the model which states lead to termination.
+        • Helps RSSM encode “safe” vs “terminal” states.
+        • Useful for environments with episodic resets (PopGym, Crafter).
+
+        Implementation details:
+        • is_terminal is (B, L)
+        • We output (B, L, 1) for BCE loss in ReachabilityHead.
     """
-    in_dim = deter_size + z_dim
 
-    heads = {
-        "novelty": NoveltyHead(AuxHeadConfig(in_dim=in_dim, hidden=hidden, out_dim=1)),
-        "reachability": ReachabilityHead(AuxHeadConfig(in_dim=in_dim, hidden=hidden, out_dim=1)),
-        "affordance": AffordanceHead(AuxHeadConfig(in_dim=in_dim, hidden=hidden, out_dim=action_dim)),
-        "skill": SkillHead(AuxHeadConfig(in_dim=in_dim, hidden=hidden, out_dim=num_skills)),
-        "resource": ResourceHead(AuxHeadConfig(in_dim=in_dim, hidden=hidden, out_dim=1)),
-    }
+    return (1.0 - batch["is_terminal"]).unsqueeze(-1)
 
-    return heads
+
+# -------------------------------------------------------------------------
+# Affordance Target
+# -------------------------------------------------------------------------
+def affordance_target(batch, gamma):
+    """
+    Intuition:
+        Affordances describe which actions are *possible* in the current state.
+        A simple proxy is: affordance[t] = action_mask[t]
+        If you don't have an action mask, use a soft version of the actor logits.
+
+        Why:
+        • Teaches the RSSM latent which actions are available.
+        • Helps the affordance head learn state-conditioned action semantics.
+        • Distinct from skill, which is behavior/option identity.
+    """
+
+    # If your environment has an action mask, use it:
+    if "action_mask" in batch:
+        return batch["action_mask"]  # (B, L, action_dim)
+
+    # Otherwise use a soft proxy: the one-hot action + small smoothing
+    action = batch["action"].float()
+    affordance = action * 0.9 + 0.1 / action.size(-1)
+    return affordance
+
+
+# -------------------------------------------------------------------------
+# Resource Target
+# -------------------------------------------------------------------------
+def resource_target(batch, gamma):
+    """
+    Intuition:
+        Resource dynamics capture reward-like signals:
+            resource[t] = reward[t]
+
+        Why this helps:
+        • Gives the RSSM latent a sense of “value change”.
+        • Helps the model encode reward-relevant features.
+        • Useful for environments with sparse or shaped rewards.
+
+        Implementation details:
+        • reward is (B, L)
+        • ResourceHead expects (B, L, 1).
+    """
+
+    return batch["reward"].unsqueeze(-1)
+
+
+AUX_OBJECTIVES = {
+    "novelty": AuxObjectiveConfig(name="novelty", fn=novelty_target),
+    "skill": AuxObjectiveConfig(name="skill", fn=skill_target),
+    "reachability": AuxObjectiveConfig(name="reachability", fn=reachability_target),
+    "affordance": AuxObjectiveConfig(name="affordance", fn=affordance_target),
+    "resource": AuxObjectiveConfig(name="resource", fn=resource_target),
+}

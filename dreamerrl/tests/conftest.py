@@ -4,6 +4,7 @@ import pytest
 import torch
 from gymnasium.spaces import Box
 
+from dreamerrl.models.aux_objectives import AUX_OBJECTIVES
 from dreamerrl.models.world_model import WorldModel
 from dreamerrl.models.world_model_core import RSSMCore as RSSM
 from dreamerrl.utils.types import LatentConfig, NetworkConfig
@@ -308,7 +309,10 @@ def aux_world_model():
         obs_space=obs_space,
         latent=latent,
         net=net,
-        aux_objectives=["novelty", "skill"],
+        aux_objectives=[
+            AUX_OBJECTIVES["novelty"],
+            AUX_OBJECTIVES["skill"],
+        ],
         device=torch.device("cpu"),
     )
 
@@ -339,7 +343,10 @@ def world_model_aux_losses_disabled():
         obs_space=obs_space,
         latent=latent,
         net=net,
-        aux_objectives=["novelty", "skill"],
+        aux_objectives=[
+            AUX_OBJECTIVES["novelty"],
+            AUX_OBJECTIVES["skill"],
+        ],
         device=torch.device("cpu"),
     )
 
