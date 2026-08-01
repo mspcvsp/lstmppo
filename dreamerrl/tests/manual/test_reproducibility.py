@@ -86,6 +86,9 @@ def run_training(seed, steps, freeze_actor_critic_steps):
     cfg.env.max_episode_steps = cfg.train.collect_steps
     cfg.train.seq_len = cfg.train.collect_steps
 
+    assert cfg.train.freeze_actor_critic_steps >= steps, "Actor/Critic must remain frozen for reproducibility tests"
+    assert cfg.train.deterministic_imagination, "Deterministic imagination must be enabled for reproducibility tests"
+
     set_global_seeds(seed)
     trainer = DreamerTrainer(cfg)
 
