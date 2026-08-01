@@ -129,20 +129,24 @@ class WorldModel(nn.Module):
         # -------------------------------------------------------------
         # Auxiliary heads (novelty, reachability, affordance, skill, resource)
         # -------------------------------------------------------------
-        all_aux_heads = make_aux_heads(
-            deter_size=latent.deter_size,
-            z_dim=latent.z_dim,
-            action_dim=net.action_dim or 0,
-            num_skills=net.action_dim or 0,
-            hidden=net.hidden_size,
-        )
+        if self.net_cfg.disable_aux_losses:
+            # Disable auxiliary losses entirely
+            self.aux_heads = nn.ModuleDict({}).to(self.device)
+            self.aux_objectives = []
+        else:
+            all_aux_heads = make_aux_heads(
+                deter_size=latent.deter_size,
+                z_dim=latent.z_dim,
+                action_dim=net.action_dim or 0,
+                num_skills=net.action_dim or 0,
+                hidden=net.hidden_size,
+            )
 
-        # Filter by config
-        self.aux_heads = nn.ModuleDict({cfg.name: all_aux_heads[cfg.name] for cfg in (aux_objectives or [])}).to(
-            self.device
-        )
+            self.aux_heads = nn.ModuleDict({cfg.name: all_aux_heads[cfg.name] for cfg in (aux_objectives or [])}).to(
+                self.device
+            )
 
-        self.aux_objectives = aux_objectives or []
+            self.aux_objectives = aux_objectives or []
 
         # Backward‑compatibility alias for invariants + actor/critic tests
         self.reward_head = self.reward_heads.main
