@@ -24,7 +24,7 @@ def test_aux_logits_present(aux_world_model):
 
     prev = wm.init_state(batch_size=4)
     obs = torch.randn(4, wm.flat_obs_dim)
-    action = torch.zeros(4, wm.action_dim)
+    action = torch.zeros(4, wm.net_cfg.action_dim)
 
     out = wm.observe_step(prev_state=prev, obs=obs, action=action)
 
@@ -40,7 +40,7 @@ def test_aux_logits_disabled(world_model_aux_losses_disabled):
 
     prev = wm.init_state(batch_size=4)
     obs = torch.randn(4, wm.flat_obs_dim)
-    action = torch.zeros(4, wm.action_dim)
+    action = torch.zeros(4, wm.net_cfg.action_dim)
 
     out = wm.observe_step(prev_state=prev, obs=obs, action=action)
 

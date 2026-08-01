@@ -354,14 +354,20 @@ def world_model_aux_losses_disabled():
 
 
 @pytest.fixture
-def latent_cluster():
+def latent_cluster(latent):
     """
-    Synthetic latent cluster generator for skill-learning tests.
+    Synthetic latent cluster generator for aux-loss tests.
+    Produces latents shaped exactly like RSSM stochastic state:
+        (B, L, num_classes, stoch_size)
     """
 
-    def _make(cluster_id, batch=8, num_classes=32):
-        z = torch.zeros(batch, num_classes)
-        z[:, cluster_id] = 1.0
-        return z
+    def _make(cluster_id, batch=4, L=1):
+        # Create zeros
+        z = torch.zeros(batch, L, latent.num_classes, latent.stoch_size)
+
+        # Activate one cluster
+        z[:, :, cluster_id, :] = 1.0
+
+        return z.view(batch * L, latent.num_classes * latent.stoch_size)
 
     return _make

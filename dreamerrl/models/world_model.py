@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from dreamerrl.models.actor import act_in_imagination
 from dreamerrl.utils.types import KLConfig, LatentConfig, NetworkConfig
 
-from .aux_objectives import make_aux_heads
+from .aux_heads import make_aux_heads
 from .categorical_kl import structured_kl
 from .continue_head import ContinueHead
 from .decoder import ObsDecoder
