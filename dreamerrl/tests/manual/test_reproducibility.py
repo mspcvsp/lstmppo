@@ -6,6 +6,7 @@ import pytest
 import torch
 from scipy.stats import entropy
 
+from dreamerrl.tests.manual.utils import summarize_curve
 from dreamerrl.training.trainer import DreamerTrainer
 from dreamerrl.utils.seed import set_global_seeds
 from dreamerrl.utils.types import make_default_config
@@ -175,19 +176,6 @@ def kl_between_seeds(logits_a, logits_b):
     return float(entropy(pa_np, pb_np))
 
 
-def summarize(metric_list):
-    arr = np.stack(metric_list)
-    mean = arr.mean(axis=0)
-    std = arr.std(axis=0)
-
-    if np.allclose(mean, 0):
-        cv = 0.0
-    else:
-        cv = std.mean() / abs(mean.mean())
-
-    return mean, std, cv
-
-
 @pytest.mark.manual
 @pytest.mark.reproducibility
 def test_reproducibility():
@@ -197,9 +185,9 @@ def test_reproducibility():
 
     results = [run_training(seed, steps=steps, freeze_actor_critic_steps=freeze) for seed in seeds]
 
-    wm_mean, wm_std, wm_cv = summarize([r["wm_loss"] for r in results])
-    actor_mean, actor_std, actor_cv = summarize([r["actor_loss"] for r in results])
-    critic_mean, critic_std, critic_cv = summarize([r["critic_loss"] for r in results])
+    wm_mean, wm_std, wm_cv = summarize_curve([r["wm_loss"] for r in results])
+    actor_mean, actor_std, actor_cv = summarize_curve([r["actor_loss"] for r in results])
+    critic_mean, critic_std, critic_cv = summarize_curve([r["critic_loss"] for r in results])
 
     print("World Model CV:", wm_cv)
     print("Actor CV:", actor_cv)
