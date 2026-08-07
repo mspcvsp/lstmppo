@@ -15,21 +15,26 @@ def summarize_curve(curve_list):
     return mean, std, cv
 
 
-def summarize_metrics(metrics_list):
-    curves = {
-        "total_loss": np.stack([m.total_loss.item() for m in metrics_list]),
-        "recon_loss": np.stack([m.recon_loss.item() for m in metrics_list]),
-        "reward_loss": np.stack([m.reward_loss.item() for m in metrics_list]),
-        "cont_loss": np.stack([m.cont_loss.item() for m in metrics_list]),
-        "kl_dyn": np.stack([m.kl_dyn.item() for m in metrics_list]),
-        "kl_rep": np.stack([m.kl_rep.item() for m in metrics_list]),
-    }
-
+def summarize_metrics(results_per_seed):
     summary = {}
-    for key, arr in curves.items():
-        mean = arr.mean()
-        std = arr.std()
-        cv = safe_cv(mean, std)
+
+    keys = ["total_loss", "recon_loss", "reward_loss", "cont_loss", "kl_dyn", "kl_rep"]
+
+    for key in keys:
+        # Extract per-seed curves
+        curves = []
+        for seed_metrics in results_per_seed:
+            curve = np.array([getattr(m, key).item() for m in seed_metrics])
+            curves.append(curve)
+
+        curves = np.stack(curves)  # shape: (num_seeds, steps)
+
+        mean = curves.mean(axis=0)
+        std = curves.std(axis=0)
+
+        # CV across seeds
+        cv = std.mean() / abs(mean.mean()) if not np.allclose(mean, 0) else 0.0
+
         summary[key] = (mean, std, cv)
 
     return summary
