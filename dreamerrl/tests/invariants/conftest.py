@@ -9,7 +9,7 @@ def crafter_cfg():
         "Cfg",
         (),
         {
-            "env_id": "crafter-v1",
+            "env_id": "Crafter-v1",
             "seed": 0,
             "max_episode_steps": 10000,
         },
@@ -27,7 +27,7 @@ def crafter_cfg_short():
         "Cfg",
         (),
         {
-            "env_id": "crafter-v1",
+            "env_id": "Crafter-v1",
             "seed": 0,
             "max_episode_steps": 5,
         },

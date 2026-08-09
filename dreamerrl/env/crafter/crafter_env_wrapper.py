@@ -1,7 +1,10 @@
-import gymnasium as gym
+import crafter  # noqa: F401
+import gym
 import numpy as np
 import torch
 from gymnasium.spaces import Discrete
+
+import dreamerrl.env.crafter.register_crafter  # noqa: F401
 
 
 class CrafterEnvWrapper:
