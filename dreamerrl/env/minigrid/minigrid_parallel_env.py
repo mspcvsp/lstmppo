@@ -5,7 +5,7 @@ import minigrid  # noqa: F401  # ensures Minigrid registers its environments
 import numpy as np
 import torch
 from gymnasium.spaces import Discrete
-from gymnasium.vector import AsyncVectorEnv
+from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 
 from dreamerrl.utils.types import EnvironmentConfig
@@ -48,7 +48,7 @@ class MinigridParallelEnv:
         self.base_seed = env_cfg.seed
 
         # Build subprocess envs
-        self.venv = AsyncVectorEnv([make_env(env_cfg, idx) for idx in range(self.num_envs)])
+        self.venv = SyncVectorEnv([make_env(env_cfg, idx) for idx in range(self.num_envs)])
 
         # Expose spaces
         self.single_observation_space = self.venv.single_observation_space
