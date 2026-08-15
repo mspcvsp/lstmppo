@@ -3,10 +3,10 @@ from __future__ import annotations
 import gymnasium as gym
 import numpy as np
 
+from dreamerrl.env.obs_utils import get_flat_obs_dim
 from dreamerrl.models.base_obs_encoder import BaseEncoder
 from dreamerrl.models.cnn_obs_encoder import CNNObsEncoder
 from dreamerrl.models.mlp_obs_encoder import MLPObsEncoder
-from dreamerrl.env.obs_utils import get_flat_obs_dim
 
 
 # ============================================================
