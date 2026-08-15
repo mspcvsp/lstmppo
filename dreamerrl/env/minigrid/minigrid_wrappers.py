@@ -20,7 +20,7 @@ This wrapper:
     • Handles per-environment resets to preserve correct episode boundaries.
 """
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 import gymnasium as gym
 import minigrid  # noqa: F401
@@ -29,19 +29,60 @@ import torch
 from gymnasium.spaces import Discrete
 from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
+from minigrid.wrappers import ImgObsWrapper
 
 from dreamerrl.env.env import EnvInterface
 from dreamerrl.utils.types import EnvironmentConfig
 
-from .minigrid_preprocessing import flatten_obs
 
+def make_env(env_cfg, idx):
+    """
+    Minigrid environment construction (design intent for CAGE‑2 warmup)
 
-def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
+    We use MiniGrid as a lightweight POMDP to warm up DreamerV3 before training on TTCP CAGE‑2. The design choices here
+    are intentional:
+
+    1. Preserve partial observability (POMDP)
+         - MiniGrid’s default agent view is a 7×7 egocentric window.
+         - This matches CAGE‑2’s partial observability and forces the RSSM to perform latent-state inference.
+         - Therefore we DO NOT use FullyObsWrapper (it would break the POMDP).
+
+    2. Remove mission text
+         - The default observation Dict includes a "mission" string backed by MissionSpace, which is not a Gymnasium
+         space.
+         - This breaks AsyncVectorEnv shared-memory and cannot be flattened.
+         - Mission text is irrelevant for CAGE‑2, so we strip it entirely.
+
+    3. Convert symbolic grid → RGB image
+         - ImgObsWrapper converts the agent’s local symbolic grid into a Box(H,W,3) image, which is easy to encode with
+         Dreamer’s CNN encoder.
+         - This keeps the POMDP intact while removing Dict/MissionSpace.
+
+    4. Use SyncVectorEnv instead of AsyncVectorEnv
+         - MiniGrid’s Dict observation (with MissionSpace) is incompatible with Gymnasium’s shared-memory
+         multiprocessing.
+        - SyncVectorEnv avoids shared memory and works reliably for MiniGrid.
+        - MiniGrid is lightweight, so SyncVectorEnv is fast enough.
+
+    Summary:
+        - POMDP preserved
+        - Mission removed
+        - Pure image observations
+        - Dreamer-friendly encoder input
+        - Deterministic, vectorized, stable
+
+    This wrapper produces a clean, Dreamer-compatible MiniGrid environment that structurally resembles CAGE‑2 (partial
+    observability, discrete actions, event-driven transitions) without the complexity of cyber autonomy.
+    """
+
     def thunk():
-        if env_cfg.deterministic:
-            np.random.seed(env_cfg.seed + idx)
-
         env = gym.make(env_cfg.env_id)
+
+        """
+        MissionSpace breaks Dreamer even with an image encoder. ImgObsWrapper removes MissionSpace while preserving the
+        POMDP.
+        """
+        env = ImgObsWrapper(env)
         env = TimeLimit(env, max_episode_steps=env_cfg.max_episode_steps)
 
         if env_cfg.deterministic:
@@ -96,9 +137,7 @@ class MinigridVecEnv(EnvInterface):
 
     def reset(self, seed: Optional[int] = None) -> Dict[str, Any]:
         obs, info = self.venv.reset(seed=seed)
-
-        obs_flat = flatten_obs(obs, self._obs_space)
-        state = torch.as_tensor(obs_flat, dtype=torch.float32, device=self.device)
+        state = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
 
         self._needs_first[:] = True
 
@@ -121,9 +160,7 @@ class MinigridVecEnv(EnvInterface):
             actions_np = actions.detach().cpu().numpy()
 
         obs, reward, terminated, truncated, info = self.venv.step(actions_np)
-
-        obs_flat = flatten_obs(obs, self._obs_space)
-        state = torch.as_tensor(obs_flat, dtype=torch.float32, device=self.device)
+        state = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
 
         reward_t = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
         terminated_t = torch.as_tensor(terminated, dtype=torch.bool, device=self.device)
@@ -143,8 +180,7 @@ class MinigridVecEnv(EnvInterface):
                     obs_i, _ = self.venv.envs[i].reset()
 
                 obs_i = np.expand_dims(obs_i, axis=0)  # (1, H, W, C)
-                state_i = flatten_obs(obs_i, self._obs_space)
-                state[i] = torch.as_tensor(state_i[0], dtype=torch.float32, device=self.device)
+                state[i] = torch.as_tensor(obs_i[0], dtype=torch.float32, device=self.device)
                 self._needs_first[i] = True
             else:
                 self._needs_first[i] = False

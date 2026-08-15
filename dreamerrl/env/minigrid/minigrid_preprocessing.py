@@ -28,6 +28,60 @@ or prev_action tracking in the wrapper. Observations are already geometric
 import gymnasium as gym
 import numpy as np
 import torch
+import torch.nn as nn
+
+
+def init_xavier(m):
+    if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+
+
+class MinigridEncoder(nn.Module):
+    """
+    Lightweight CNN encoder for MiniGrid image observations.
+    Designed for DreamerV3 warmup before CAGE #2.
+
+    • Preserves POMDP structure (ImgObsWrapper only)
+    • Uses GroupNorm for determinism
+    • Uses SiLU for stable gradients
+    • Uses Xavier init for stable KL dynamics
+    """
+
+    def __init__(self, latent_dim=128):
+        super().__init__()
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(8, 32),
+            nn.SiLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(8, 64),
+            nn.SiLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+            nn.GroupNorm(8, 64),
+            nn.SiLU(),
+        )
+
+        # Compute flattened size dynamically
+        dummy = torch.zeros(1, 3, 7, 7)
+        with torch.no_grad():
+            flat_dim = self.conv(dummy).view(1, -1).shape[1]
+
+        self.fc = nn.Linear(flat_dim, latent_dim)
+
+        self.apply(init_xavier)
+
+    def forward(self, obs):
+        """
+        obs: (B, H, W, C) from ImgObsWrapper
+        convert to (B, C, H, W)
+        """
+        x = obs.permute(0, 3, 1, 2).contiguous()
+        x = self.conv(x)
+        x = x.view(x.shape[0], -1)
+        return self.fc(x)
 
 
 def get_flat_obs_dim(space: gym.Space) -> int:
@@ -50,48 +104,3 @@ def get_flat_obs_dim(space: gym.Space) -> int:
 
     else:
         raise NotImplementedError(f"Unsupported observation space: {space}")
-
-
-def flatten_obs(obs, space: gym.Space) -> np.ndarray:
-    """
-    Flatten a Minigrid observation into a (B, flat_dim) numpy array.
-
-    For image observations (Box), this reshapes (B, H, W, C) → (B, H*W*C).
-    Dict/Tuple spaces are concatenated along the last dimension.
-    """
-    # Box space (images or vectors)
-    if isinstance(space, gym.spaces.Box):
-        return obs.reshape(obs.shape[0], -1)
-
-    # Dict space
-    elif isinstance(space, gym.spaces.Dict):
-        parts = []
-        for key, subspace in space.spaces.items():
-            parts.append(flatten_obs(obs[key], subspace))
-        return np.concatenate(parts, axis=-1)
-
-    # Tuple space
-    elif isinstance(space, gym.spaces.Tuple):
-        parts = []
-        for i, subspace in enumerate(space.spaces):
-            parts.append(flatten_obs(obs[i], subspace))
-        return np.concatenate(parts, axis=-1)
-
-    # Discrete space: vector env gives shape (B,), make it (B, 1)
-    elif isinstance(space, gym.spaces.Discrete):
-        obs_arr = np.asarray(obs, dtype=np.float32)
-        return obs_arr.reshape(obs_arr.shape[0], 1)
-
-    # FINAL FALLBACK: already a flat numpy array
-    elif isinstance(obs, np.ndarray):
-        return obs.reshape(obs.shape[0], -1)
-
-    else:
-        raise NotImplementedError(f"Unsupported observation type: {type(obs)}")
-
-
-def to_tensor(obs, device):
-    """
-    Convert flattened numpy obs → torch tensor.
-    """
-    return torch.tensor(obs, dtype=torch.float32, device=device)

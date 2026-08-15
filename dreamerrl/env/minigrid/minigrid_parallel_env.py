@@ -7,10 +7,9 @@ import torch
 from gymnasium.spaces import Discrete
 from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
+from minigrid.wrappers import ImgObsWrapper
 
 from dreamerrl.utils.types import EnvironmentConfig
-
-from .minigrid_preprocessing import flatten_obs
 
 
 def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
@@ -20,6 +19,12 @@ def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
             np.random.seed(env_cfg.seed + idx)
 
         env = gym.make(env_cfg.env_id)
+
+        """
+        MissionSpace breaks Dreamer even with an image encoder. ImgObsWrapper removes MissionSpace while preserving the
+        POMDP.
+        """
+        env = ImgObsWrapper(env)
         env = TimeLimit(env, max_episode_steps=env_cfg.max_episode_steps)
 
         if env_cfg.deterministic:
@@ -65,7 +70,8 @@ class MinigridParallelEnv:
     def reset(self, seed=None):
         obs, info = self.venv.reset(seed=seed)
 
-        obs = flatten_obs(obs, self.single_observation_space)
+        # ImgObsWrapper already gives (B, H, W, C) float32
+        obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
         state = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
 
         self._needs_first[:] = True
@@ -88,7 +94,9 @@ class MinigridParallelEnv:
 
         obs, reward, terminated, truncated, info = self.venv.step(actions_np)
 
-        obs = flatten_obs(obs, self.single_observation_space)
+        # ImgObsWrapper already gives (B, H, W, C) float32
+        obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
+
         state = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
         reward_t = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
@@ -107,7 +115,8 @@ class MinigridParallelEnv:
             else:
                 reset_obs, _ = self.venv.reset()
 
-            reset_obs = flatten_obs(reset_obs, self.single_observation_space)
+            # ImgObsWrapper already gives (B, H, W, C) float32
+            reset_obs = torch.tensor(reset_obs, dtype=torch.float32, device=self.device)
             reset_state = torch.as_tensor(reset_obs, dtype=torch.float32, device=self.device)
 
             state = torch.where(is_last[:, None], reset_state, state)
