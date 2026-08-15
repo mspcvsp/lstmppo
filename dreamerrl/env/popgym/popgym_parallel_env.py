@@ -8,9 +8,8 @@ from gymnasium.vector import AsyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 
 import popgym  # noqa: F401  # ensures PopGym registers its environments
+from dreamerrl.env.obs_utils import flatten_obs
 from dreamerrl.utils.types import EnvironmentConfig
-
-from .popgym_preprocessing import flatten_obs
 
 
 def make_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
