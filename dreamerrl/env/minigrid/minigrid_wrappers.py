@@ -169,7 +169,6 @@ class MinigridVecEnv(EnvInterface):
         # Separate episode end vs true terminal if needed
         is_terminal = terminated_t | truncated_t
         is_last = is_terminal
-        is_first = self._needs_first.clone()
 
         # Per-environment reset
         for i in range(self._batch_size):
@@ -184,6 +183,8 @@ class MinigridVecEnv(EnvInterface):
                 self._needs_first[i] = True
             else:
                 self._needs_first[i] = False
+
+        is_first = self._needs_first.clone()
 
         if self.probe:
             self.probe.env_step(
