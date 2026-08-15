@@ -16,8 +16,8 @@ class CNNObsEncoder(BaseEncoder):
         super().__init__()
         assert isinstance(obs_space, gym.spaces.Box)
         assert len(obs_space.shape) == 3
-        c, h, w = obs_space.shape[2], obs_space.shape[0], obs_space.shape[1]
-        assert (h, w, c) == (64, 64, 3)
+        c = obs_space.shape[2]
+        assert c == 3, "CNNObsEncoder expects RGB images"
 
         self.conv1 = nn.Conv2d(3, 32, kernel_size=4, stride=2, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)

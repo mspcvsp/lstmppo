@@ -27,61 +27,6 @@ or prev_action tracking in the wrapper. Observations are already geometric
 
 import gymnasium as gym
 import numpy as np
-import torch
-import torch.nn as nn
-
-
-def init_xavier(m):
-    if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-        nn.init.xavier_uniform_(m.weight)
-        if m.bias is not None:
-            nn.init.zeros_(m.bias)
-
-
-class MinigridEncoder(nn.Module):
-    """
-    Lightweight CNN encoder for MiniGrid image observations.
-    Designed for DreamerV3 warmup before CAGE #2.
-
-    • Preserves POMDP structure (ImgObsWrapper only)
-    • Uses GroupNorm for determinism
-    • Uses SiLU for stable gradients
-    • Uses Xavier init for stable KL dynamics
-    """
-
-    def __init__(self, latent_dim=128):
-        super().__init__()
-
-        self.conv = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
-            nn.GroupNorm(8, 32),
-            nn.SiLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.GroupNorm(8, 64),
-            nn.SiLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
-            nn.GroupNorm(8, 64),
-            nn.SiLU(),
-        )
-
-        # Compute flattened size dynamically
-        dummy = torch.zeros(1, 3, 7, 7)
-        with torch.no_grad():
-            flat_dim = self.conv(dummy).view(1, -1).shape[1]
-
-        self.fc = nn.Linear(flat_dim, latent_dim)
-
-        self.apply(init_xavier)
-
-    def forward(self, obs):
-        """
-        obs: (B, H, W, C) from ImgObsWrapper
-        convert to (B, C, H, W)
-        """
-        x = obs.permute(0, 3, 1, 2).contiguous()
-        x = self.conv(x)
-        x = x.view(x.shape[0], -1)
-        return self.fc(x)
 
 
 def get_flat_obs_dim(space: gym.Space) -> int:
