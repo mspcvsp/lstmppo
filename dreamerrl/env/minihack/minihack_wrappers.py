@@ -7,19 +7,16 @@ from gymnasium.spaces import Discrete
 from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 
+import minihack  # noqa: F401
 from dreamerrl.env.env import EnvInterface
 from dreamerrl.utils.types import EnvironmentConfig
 
 
 def make_mhack_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env]:
     def thunk():
-        # Deterministic seeding
         seed = env_cfg.seed + idx if env_cfg.deterministic else None
-
         env = gym.make(env_cfg.env_id)
         env = TimeLimit(env, max_episode_steps=env_cfg.max_episode_steps)
-
-        # MiniHack supports deterministic RNG
         env.reset(seed=seed)
         return env
 
@@ -29,11 +26,10 @@ def make_mhack_env(env_cfg: EnvironmentConfig, idx: int) -> Callable[[], gym.Env
 class MiniHackVecEnv(EnvInterface):
     """
     Dreamer‑V3 vector environment wrapper for MiniHack.
-    Mirrors PopGymVecEnv design:
-      • vector observations (flattened symbolic grid)
-      • per‑environment resets
-      • prev_action tracking
-      • Dreamer‑native return dict
+    - Extracts glyphs from dict observations
+    - Flattens symbolic grid
+    - Per‑environment resets
+    - Dreamer‑native return dict
     """
 
     def __init__(self, env_cfg: EnvironmentConfig, device: torch.device, probe=None):
@@ -46,9 +42,13 @@ class MiniHackVecEnv(EnvInterface):
         # Vectorized MiniHack
         self.venv = SyncVectorEnv([make_mhack_env(env_cfg, i) for i in range(self._batch_size)])
 
-        # Observation space: MiniHack symbolic grid → flatten
-        # Infer shape from a real observation
+        # Infer observation shape from real reset
         obs, _ = self.venv.reset()
+
+        # Vectorized MiniHack returns array of dicts → extract glyphs
+        if isinstance(obs, dict):
+            obs = obs["glyphs"]
+
         self._obs_shape = obs[0].shape
         self._obs_dim = int(np.prod(self._obs_shape))
 
@@ -59,16 +59,14 @@ class MiniHackVecEnv(EnvInterface):
 
         # Track previous action (one-hot)
         self._prev_action = torch.zeros(
-            (self._batch_size, self._action_dim),
+            self._batch_size,
+            self._action_dim,
             dtype=torch.float32,
             device=self.device,
         )
 
         self._needs_first = torch.ones(self._batch_size, dtype=torch.bool, device=self.device)
 
-    # -------------------------------------------------------------------------
-    # Properties
-    # -------------------------------------------------------------------------
     @property
     def batch_size(self) -> int:
         return self._batch_size
@@ -85,10 +83,6 @@ class MiniHackVecEnv(EnvInterface):
     # Helpers
     # -------------------------------------------------------------------------
     def _flatten_obs(self, obs: np.ndarray) -> torch.Tensor:
-        """
-        MiniHack returns symbolic grid observations (H×W or H×W×C).
-        Flatten to Dreamer‑compatible vector.
-        """
         flat = obs.reshape(self._batch_size, -1)
         return torch.tensor(flat, dtype=torch.float32, device=self.device)
 
@@ -101,6 +95,10 @@ class MiniHackVecEnv(EnvInterface):
     # -------------------------------------------------------------------------
     def reset(self, seed: Optional[int] = None) -> Dict[str, Any]:
         obs, info = self.venv.reset(seed=seed)
+
+        if isinstance(obs, dict):
+            obs = obs["glyphs"]
+
         state = self._flatten_obs(obs)
 
         self._prev_action.zero_()
@@ -130,6 +128,9 @@ class MiniHackVecEnv(EnvInterface):
 
         obs, reward, terminated, truncated, info = self.venv.step(actions_np)
 
+        if isinstance(obs, dict):
+            obs = obs["glyphs"]
+
         state = self._flatten_obs(obs)
 
         reward_t = torch.tensor(reward, dtype=torch.float32, device=self.device)
@@ -142,7 +143,7 @@ class MiniHackVecEnv(EnvInterface):
 
         # One-hot prev action
         actions_t = actions.long().to(self.device)
-        prev = torch.zeros((self._batch_size, self._action_dim), dtype=torch.float32, device=self.device)
+        prev = torch.zeros(self._batch_size, self._action_dim, dtype=torch.float32, device=self.device)
         prev[torch.arange(self._batch_size), actions_t] = 1.0
         self._prev_action = prev
 
@@ -150,7 +151,11 @@ class MiniHackVecEnv(EnvInterface):
         for i in range(self._batch_size):
             if is_last[i]:
                 seed = self.base_seed + i if self.deterministic else None
-                obs_i, _ = self.venv.envs[i].reset(seed=seed)
+                obs_i, _ = self.venv.envs[i].reset(seed=seed)  # type: ignore[attr-defined]
+
+                if isinstance(obs_i, dict):
+                    obs_i = obs_i["glyphs"]
+
                 state[i] = self._flatten_single(obs_i)[0]
                 self._prev_action[i] = torch.zeros(self._action_dim, device=self.device)
                 self._needs_first[i] = True
