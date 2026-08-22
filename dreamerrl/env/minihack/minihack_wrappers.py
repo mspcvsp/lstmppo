@@ -141,26 +141,29 @@ class MiniHackVecEnv(EnvInterface):
         is_last = is_terminal
         is_first = self._needs_first.clone()
 
-        # One-hot prev action
+        # One-hot prev action for this step
         actions_t = actions.long().to(self.device)
-        prev = torch.zeros(self._batch_size, self._action_dim, dtype=torch.float32, device=self.device)
+        prev = torch.zeros((self._batch_size, self._action_dim), dtype=torch.float32, device=self.device)
         prev[torch.arange(self._batch_size), actions_t] = 1.0
-        self._prev_action = prev
 
         # Per-environment reset
         for i in range(self._batch_size):
             if is_last[i]:
                 seed = self.base_seed + i if self.deterministic else None
-                obs_i, _ = self.venv.envs[i].reset(seed=seed)  # type: ignore[attr-defined]
+                obs_i, _ = self.venv.envs[i].reset(seed=seed)
 
                 if isinstance(obs_i, dict):
                     obs_i = obs_i["glyphs"]
 
                 state[i] = self._flatten_single(obs_i)[0]
-                self._prev_action[i] = torch.zeros(self._action_dim, device=self.device)
+
+                # Reset prev-action for terminated env
+                prev[i] = torch.zeros(self._action_dim, device=self.device)
                 self._needs_first[i] = True
             else:
                 self._needs_first[i] = False
+
+        self._prev_action = prev
 
         if self.probe:
             self.probe.env_step(

@@ -1,38 +1,32 @@
 import pytest
 import torch
 
-from dreamerrl.env.minihack.minihack_wrappers import MiniHackVecEnv
-from dreamerrl.utils.types import EnvironmentConfig
 
-
-@pytest.fixture
-def env_cfg():
-    return EnvironmentConfig(
-        env_id="MiniHack-Room-RedDoor-v0",
-        num_envs=4,
-        seed=123,
-        deterministic=True,
-        max_episode_steps=50,
-    )
-
-
-@pytest.fixture
-def env(env_cfg):
-    return MiniHackVecEnv(env_cfg, device=torch.device("cpu"))
-
-
-def test_contract(minihack_env):
+@pytest.mark.invariants
+@pytest.mark.minihack_invariants
+def test_minihack_contract(minihack_env):
     out = minihack_env.reset()
 
+    # Core keys
     assert "state" in out
+    assert "prev_action" in out
     assert "reward" in out
     assert "is_first" in out
     assert "is_last" in out
     assert "is_terminal" in out
+    assert "info" in out
 
     state = out["state"]
+    prev_action = out["prev_action"]
+
+    # State shape + dtype
     assert state.shape == (minihack_env.batch_size, minihack_env.obs_dim)
     assert state.dtype == torch.float32
 
+    # Prev action shape + dtype
+    assert prev_action.shape == (minihack_env.batch_size, minihack_env.action_dim)
+    assert prev_action.dtype == torch.float32
+
+    # Action/obs dims positive
     assert minihack_env.action_dim > 0
     assert minihack_env.obs_dim > 0
