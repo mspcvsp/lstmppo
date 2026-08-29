@@ -26,7 +26,7 @@ import gymnasium as gym
 import minigrid  # noqa: F401
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
+from gymnasium.spaces import Box, Discrete
 from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 from minigrid.wrappers import ImgObsWrapper
@@ -109,18 +109,84 @@ class MinigridVecEnv(EnvInterface):
 
         self.venv = SyncVectorEnv([make_env(env_cfg, idx) for idx in range(self._batch_size)])
 
-        self._obs_space = self.venv.single_observation_space
+        # Extract glyphs from the first reset
+        obs, _ = self.venv.reset()
+
+        """
+        MiniHack / NetHack glyphs:
+        --------------------------
+        A *glyph* is an integer code representing what NetHack chooses to render on a tile of the dungeon. Glyphs are
+        produced by NetHack’s rendering pipeline, not by the game logic itself. Each glyph encodes:
+            • terrain (floor, wall, door, corridor)
+            • items (keys, potions, scrolls)
+            • monsters (kobolds, orcs, etc.)
+            • traps, special features, UI overlays
+
+        Important properties:
+        --------------------
+            • Glyphs are *symbolic*, not images — they are integer IDs.
+            • Glyphs are *not stable*: NetHack rebuilds the glyph→meaning table on every reset, so the same tile type
+            may receive different integer codes across episodes.
+            • Glyphs are *deterministic within a single episode* but not across resets.
+
+        Why Dreamer-V3 uses glyphs:
+        --------------------
+            • They provide a compact symbolic representation of the dungeon.
+            • They avoid expensive pixel rendering.
+            • They work well with MLP encoders (flattened grid → vector).
+            • They capture all event-relevant information (doors opening, monsters moving, items appearing).
+
+        In this wrapper:
+        ---------------
+            • We extract obs["glyphs"] from the MiniHack dict observation.
+            • We flatten the (H, W) glyph grid into a 1D vector.
+            • We expose this flattened vector as the Dreamer observation space.
+
+        This ensures Dreamer-V3 receives a stable, symbolic input suitable for RSSM training, imagination rollouts, and
+        auxiliary objectives.
+        """
+        if isinstance(obs, dict):
+            obs = obs["glyphs"]
+
+        # Flattened glyph shape
+        self._obs_shape = obs[0].shape
+        self._obs_dim = int(np.prod(self._obs_shape))
+
+        # Override observation space to match flattened glyphs
+        self._obs_space = Box(
+            low=0,
+            high=255,
+            shape=(self._obs_dim,),
+            dtype=np.float32,
+        )
+
+        # Action space (MiniHack is always Discrete)
         self._action_space = self.venv.single_action_space
-
         if not isinstance(self._action_space, Discrete):
-            raise RuntimeError(f"MinigridVecEnv only supports Discrete action spaces, got {type(self._action_space)}")
+            raise RuntimeError(f"MiniHackVecEnv only supports Discrete action spaces, got {type(self._action_space)}")
 
-        if self._obs_space.shape is None:
-            raise RuntimeError("MiniGrid observation space has no shape")
-
-        self._obs_dim = int(np.prod(self._obs_space.shape))
         self._action_dim = int(self._action_space.n)
 
+        """
+        `needs_first` tracks whether each environment is at the *first* step of a new episode. Dreamer-V3 uses
+        `is_first` to:
+
+            • reset recurrent state in the RSSM (h_t, z_t)
+            • ensure KL, reward, and continuation heads treat the step as a boundary
+            • avoid leaking information across episode resets
+
+        Workflow:
+        --------
+        • On reset(): needs_first[i] = True for all envs
+        • On step():
+            - If the env continues: needs_first[i] = False
+            - If the env terminates (terminated or truncated):
+                • we immediately reset that env
+                • needs_first[i] = True again for that env
+
+        This allows Dreamer to run multiple envs in parallel while still providing correct per-env episode boundary
+        signals to the world model.
+        """
         self._needs_first = torch.ones(self._batch_size, dtype=torch.bool, device=self.device)
 
     @property
