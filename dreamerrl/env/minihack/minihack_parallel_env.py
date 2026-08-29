@@ -1,5 +1,5 @@
 from typing import Any, Callable, Dict, Optional
-
+from gymnasium.spaces import Box
 import gymnasium as gym
 import numpy as np
 import torch
@@ -45,8 +45,25 @@ class MiniHackParallelEnv(EnvInterface):
 
         # Infer observation shape from real reset
         obs, _ = self.venv.reset()
+
+        # AsyncVectorEnv returns array of dicts → extract glyphs
+        if isinstance(obs, dict):
+            obs = obs["glyphs"]
+        else:
+            # obs is e.g. array of dicts; take first and extract glyphs
+            first = obs[0]
+            if isinstance(first, dict):
+                obs = np.stack([o["glyphs"] for o in obs], axis=0)
+
         self._obs_shape = obs[0].shape
         self._obs_dim = int(np.prod(self._obs_shape))
+
+        self._obs_space = Box(
+            low=0,
+            high=255,
+            shape=(self._obs_dim,),
+            dtype=np.float32,
+        )
 
         # Action space
         act_space = self.venv.single_action_space
@@ -73,6 +90,10 @@ class MiniHackParallelEnv(EnvInterface):
     @property
     def obs_dim(self) -> int:
         return self._obs_dim
+
+    @property
+    def obs_space(self):
+        return self._obs_space
 
     @property
     def action_dim(self) -> int:

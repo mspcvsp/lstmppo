@@ -3,7 +3,7 @@ from typing import Callable
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
+from gymnasium.spaces import Box, Discrete
 from gymnasium.vector import AsyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 
@@ -55,6 +55,13 @@ class PopGymParallelEnv:
         # Expose spaces
         self.single_observation_space = self.venv.single_observation_space
         self.single_action_space = self.venv.single_action_space
+
+        self._obs_space = Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=self.single_observation_space.shape,
+            dtype=np.float32,
+        )
 
         # Track "first step" markers for Dreamer-style streaming
         self._needs_first = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -124,6 +131,10 @@ class PopGymParallelEnv:
     @property
     def batch_size(self) -> int:
         return self.num_envs
+
+    @property
+    def obs_space(self):
+        return self._obs_space
 
     @property
     def obs_dim(self) -> int:

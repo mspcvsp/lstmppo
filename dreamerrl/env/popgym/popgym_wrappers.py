@@ -49,7 +49,7 @@ from typing import Any, Callable, Dict, Optional
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
+from gymnasium.spaces import Box, Discrete
 from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 
@@ -97,6 +97,13 @@ class PopGymVecEnv(EnvInterface):
 
         self._obs_dim = self._num_categories
 
+        self._obs_space = Box(
+            low=0,
+            high=1,
+            shape=(self._obs_dim,),
+            dtype=np.float32,
+        )
+
         assert isinstance(self.venv.single_action_space, Discrete)
         self._action_dim = int(self.venv.single_action_space.n)
 
@@ -107,6 +114,10 @@ class PopGymVecEnv(EnvInterface):
         )
 
         self._needs_first = torch.ones(self._batch_size, dtype=torch.bool, device=self.device)
+
+    @property
+    def obs_space(self):
+        return self._obs_space
 
     @property
     def batch_size(self) -> int:

@@ -125,7 +125,7 @@ class DreamerTrainer:
         # Environment
         # -----------------------------------------------------
         self.env = make_env(cfg.env, device=self.device)
-        obs_space = self.env.venv.single_observation_space
+        obs_space = self.env.obs_space
         self.action_dim = self.env.action_dim
 
         # -----------------------------------------------------

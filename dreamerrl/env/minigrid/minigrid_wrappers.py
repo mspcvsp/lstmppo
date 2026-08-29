@@ -198,6 +198,10 @@ class MinigridVecEnv(EnvInterface):
         return self._obs_dim
 
     @property
+    def obs_space(self):
+        return self._obs_space
+
+    @property
     def action_dim(self) -> int:
         return self._action_dim
 

@@ -60,6 +60,11 @@ class EnvInterface(ABC):
 
     @property
     @abstractmethod
+    def obs_space(self):
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
     def obs_dim(self) -> int:
         raise NotImplementedError
 
@@ -94,11 +99,15 @@ class DreamerVecWrapper(EnvInterface):
         self._batch_size = venv.num_envs
 
         # Infer dimensions
-        obs_space = venv.single_observation_space
+        self._obs_space = venv.single_observation_space
         act_space = venv.single_action_space
 
-        self._obs_dim = obs_space.n if hasattr(obs_space, "n") else obs_space.shape[0]
+        self._obs_dim = self._obs_space.n if hasattr(self._obs_space, "n") else self._obs_space.shape[0]
         self._action_dim = act_space.n
+
+    @property
+    def obs_space(self):
+        return self._obs_space
 
     @property
     def obs_dim(self) -> int:

@@ -4,7 +4,7 @@ import gymnasium as gym
 import minigrid  # noqa: F401  # ensures Minigrid registers its environments
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
+from gymnasium.spaces import Box, Discrete
 from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 from minigrid.wrappers import ImgObsWrapper
@@ -58,6 +58,14 @@ class MinigridParallelEnv:
         # Expose spaces
         self.single_observation_space = self.venv.single_observation_space
         self.single_action_space = self.venv.single_action_space
+
+        shape = self.single_observation_space.shape
+        self._obs_space = Box(
+            low=0,
+            high=255,
+            shape=shape,
+            dtype=np.float32,
+        )
 
         if not isinstance(self.single_action_space, Discrete):
             raise RuntimeError(
@@ -143,6 +151,10 @@ class MinigridParallelEnv:
         if shape is None:
             raise RuntimeError("single_observation_space.shape is None")
         return int(np.prod(shape))
+
+    @property
+    def obs_space(self):
+        return self._obs_space
 
     @property
     def action_dim(self) -> int:

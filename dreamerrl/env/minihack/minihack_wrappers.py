@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, Optional
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.spaces import Discrete
+from gymnasium.spaces import Box, Discrete
 from gymnasium.vector import SyncVectorEnv
 from gymnasium.wrappers import TimeLimit
 
@@ -52,6 +52,14 @@ class MiniHackVecEnv(EnvInterface):
         self._obs_shape = obs[0].shape
         self._obs_dim = int(np.prod(self._obs_shape))
 
+        # Flattened glyph observation space for Dreamer
+        self._obs_space = Box(
+            low=0,
+            high=255,
+            shape=(self._obs_dim,),
+            dtype=np.float32,
+        )
+
         # Discrete action space
         act_space = self.venv.single_action_space
         assert isinstance(act_space, Discrete)
@@ -74,6 +82,10 @@ class MiniHackVecEnv(EnvInterface):
     @property
     def obs_dim(self) -> int:
         return self._obs_dim
+
+    @property
+    def obs_space(self):
+        return self._obs_space
 
     @property
     def action_dim(self) -> int:
