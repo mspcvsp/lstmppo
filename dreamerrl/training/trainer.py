@@ -15,8 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import wandb
 from dreamerrl.debug.probe import DeterminismProbe
-from dreamerrl.env.popgym.popgym_parallel_env import PopGymParallelEnv
-from dreamerrl.env.popgym.popgym_wrappers import PopGymVecEnv
+from dreamerrl.env.env_factory import make_env
 from dreamerrl.logging.repo_logger import create_repro_logger
 from dreamerrl.models.actor import Actor
 from dreamerrl.models.value_head import ValueHead
@@ -125,11 +124,7 @@ class DreamerTrainer:
         # -----------------------------------------------------
         # Environment
         # -----------------------------------------------------
-        if cfg.env.parallel:
-            self.env = PopGymParallelEnv(cfg.env, device=self.device)
-        else:
-            self.env = PopGymVecEnv(cfg.env, device=self.device, probe=self.probe)
-
+        self.env = make_env(cfg.env, device=self.device)
         obs_space = self.env.venv.single_observation_space
         self.action_dim = self.env.action_dim
 
